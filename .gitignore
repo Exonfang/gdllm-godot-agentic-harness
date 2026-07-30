@@ -1,0 +1,7 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Worktrees created by the agent harness live here; they are checkouts, never content.
+# A worktree committed by accident lands as a stray gitlink (mode 160000) that no .gitmodules explains.
+.claude/worktrees/
