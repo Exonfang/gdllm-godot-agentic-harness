@@ -66,6 +66,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 `run_subagent`
 
 ## First-time Setup
+- Download and extract the release zip of your choice (GDLLM + MarkdownLabel recommended) directly into your Godot project directory.
 - Using the **Connections** button in the session panel, link up your inference providers, set their adapter type (OpenAI, Anthropic, or Ollama), and add your API keys.
 - After the model list refreshes, use the **Effort Configuration** to specify the available thinking levels, cache TTL, and context windows. No provider has an API to retrieve model effort/thinking levels, so they need to be manually identified and added, or the default effort level for the model will be used.
   - Context window size and cache TTL are used to inform context compaction.
