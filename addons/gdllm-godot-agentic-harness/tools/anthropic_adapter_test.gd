@@ -31,6 +31,7 @@ func _init() -> void:
 	_test_ollama_strips_foreign_fields()
 	_test_output_caps()
 	_test_context_probe()
+	_test_normalize_base()
 	print("%s: %d checks, %d failures" % ["FAIL" if _failures > 0 else "OK", _checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -379,3 +380,25 @@ func _test_context_probe() -> void:
 	_check(openai.parse_context_window({"data": [{"id": "groq-model", "context_window": 32768.0}]}, "groq-model") == 32768, "Groq's context_window is recognized")
 	_check(openai.parse_context_window(models_body, "absent-model") == 0, "a model not in the list stays unknown")
 	_check(openai.parse_context_window({"data": [{"id": "plain-model"}]}, "plain-model") == 0, "an entry with no window field stays unknown")
+
+
+func _test_normalize_base() -> void:
+	var ollama := LLMAdapters.OllamaAdapter.new()
+	_check(ollama.normalize_base("http://localhost:11434") == "http://localhost:11434", "an ollama bare host:port passes through")
+	_check(ollama.normalize_base(" http://localhost:11434/ ") == "http://localhost:11434", "whitespace and trailing slashes are trimmed")
+	_check(ollama.normalize_base("http://localhost:11434/api/chat") == "http://localhost:11434", "a pasted ollama chat endpoint reduces to its root")
+	_check(ollama.normalize_base("http://localhost:11434/api/tags") == "http://localhost:11434", "a pasted ollama tags endpoint reduces to its root")
+	_check(ollama.normalize_base("http://localhost:11434/api") == "http://localhost:11434", "a pasted bare /api reduces to its root")
+	_check(ollama.normalize_base("https://gw.example/ollama") == "https://gw.example/ollama", "an unrecognized path is kept as a proxy prefix")
+	var openai := LLMAdapters.OpenAIAdapter.new()
+	_check(openai.normalize_base("http://localhost:1234") == "http://localhost:1234/v1", "an openai pathless base gets /v1 appended")
+	_check(openai.normalize_base("http://localhost:1234/v1") == "http://localhost:1234/v1", "an openai /v1 base is respected as-is")
+	_check(openai.normalize_base("http://localhost:1234/v1/chat/completions") == "http://localhost:1234/v1", "a pasted openai chat endpoint reduces to its /v1 base")
+	_check(openai.normalize_base("http://localhost:1234/v1/models") == "http://localhost:1234/v1", "a pasted openai models endpoint reduces to its /v1 base")
+	_check(openai.normalize_base("http://localhost:1234/chat/completions") == "http://localhost:1234/v1", "a v1-less pasted chat endpoint reduces to the root and regains /v1")
+	_check(openai.normalize_base("https://gw.example/llm/v1") == "https://gw.example/llm/v1", "an openai gateway prefix is respected as-is")
+	var anthropic := LLMAdapters.AnthropicAdapter.new()
+	_check(anthropic.normalize_base("https://api.anthropic.com") == "https://api.anthropic.com", "an anthropic bare base passes through")
+	_check(anthropic.normalize_base("https://api.anthropic.com/v1/messages") == "https://api.anthropic.com", "a pasted anthropic messages endpoint reduces to its root")
+	_check(anthropic.normalize_base("https://api.anthropic.com/v1") == "https://api.anthropic.com", "a pasted /v1 base reduces to the root the /v1/… paths rejoin")
+	_check(anthropic.normalize_base("https://gw.example/anthropic/v1/messages") == "https://gw.example/anthropic", "a gateway-prefixed endpoint keeps its prefix as the root")

@@ -7,6 +7,21 @@ const MANAGE_COL_DELETE := 11 ## Column in the manage table holding each row's t
 const MANAGE_RESIZE_MARGIN := 5.0 ## Half-width in px of the grab zone around a column boundary in the manage table's title strip.
 const MANAGE_COL_MIN_WIDTH := 40 ## Narrowest a manage-table column can be drag-resized down to.
 const CONNECTION_TOGGLE_WIDTH := 34 ## Fixed width of the Connections dialog's per-source enabled column; the header label and each row's checkbox share it so columns line up (mirrors the delete button's 34px).
+## Per-kind guidance for the Connections dialog's URL field — placeholder for a blank field, tooltip for a filled one. The field takes the URL the provider's own UI hands out, full endpoint or bare base alike (each adapter derives its routes from the server root; see LLMAdapter._root_from_endpoint), so the guidance shows the form users actually copy.
+const CONNECTION_BASE_URL_HINTS := {
+	GDLLMSources.KIND_OLLAMA: {
+		"placeholder": "http://localhost:11434",
+		"tooltip": "Paste the server's address. A bare host and port like http://localhost:11434, or a full endpoint like .../api/chat; every route is derived from the server root either way.",
+	},
+	GDLLMSources.KIND_OPENAI: {
+		"placeholder": "http://localhost:1234/v1/chat/completions",
+		"tooltip": "Paste the URL your server hands out, a full endpoint like http://localhost:1234/v1/chat/completions, a base ending in /v1, or a bare host and port (/v1 is then added automatically) all work.",
+	},
+	GDLLMSources.KIND_ANTHROPIC: {
+		"placeholder": "https://api.anthropic.com",
+		"tooltip": "Anthropic's endpoint is the same for everyone: https://api.anthropic.com — pasting the full …/v1/messages endpoint works too.",
+	},
+}
 const EFFORT_LEVEL_COL_WIDTH := 62 ## Fixed width of each level column in the Effort Configuration table; the header label and each row's checkbox share it so columns line up, wide enough for "minimal".
 const EFFORT_CACHE_COL_WIDTH := 84 ## Fixed width of the Effort Configuration table's cache-TTL column; the header label and each row's spinbox share it so the column lines up.
 const EFFORT_CONTEXT_COL_WIDTH := 140 ## Fixed width of the Effort Configuration table's declared-context-window column; sized for an eight-digit token figure beside the spin arrows, so a millions-scale window never clips.
@@ -591,7 +606,7 @@ func _ensure_connections_dialog() -> void:
 	content.add_theme_constant_override("separation", 8)
 
 	var hint := Label.new()
-	hint.text = "Each source is a place models come from. Kind sets the wire format: Ollama (local or cloud), OpenAI-compatible (vLLM, Poolside, …), or Anthropic (Claude models). Paste an API key for sources that need one — keys are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
+	hint.text = "Each source is a place models come from. Kind sets the wire format: Ollama (local or cloud), OpenAI-compatible (LM Studio, llama.cpp, vLLM, Poolside, most others...), or Anthropic (Claude models). For the URL, paste what your provider hands you — the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one — keys are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(hint)
 
@@ -602,7 +617,7 @@ func _ensure_connections_dialog() -> void:
 	on_head.text = "On"
 	on_head.custom_minimum_size = Vector2(CONNECTION_TOGGLE_WIDTH, 0)
 	head.add_child(on_head)
-	for spec in [["Name", 2.0], ["Kind", 1.0], ["Base URL", 3.0], ["API key", 2.0]]:
+	for spec in [["Name", 2.0], ["Kind", 1.0], ["URL", 3.0], ["API key", 2.0]]:
 		var col := Label.new()
 		col.text = String(spec[0])
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -674,13 +689,15 @@ func _add_connection_row(source: Dictionary) -> void:
 
 	var base_edit := LineEdit.new()
 	base_edit.text = String(source.get("base_url", ""))
-	base_edit.placeholder_text = "http://host:port  or  https://…/v1"
+	_apply_base_url_hint(base_edit, current_kind)
 	base_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	base_edit.size_flags_stretch_ratio = 3.0
 	row.add_child(base_edit)
-	# Anthropic's endpoint is the same for everyone, so switching a still-blank row to that kind fills it in — one less thing to look up when adding the source by hand.
 	kind_select.item_selected.connect(func(index: int) -> void:
-		if base_edit.text.strip_edges() == "" and String(kind_select.get_item_metadata(index)) == GDLLMSources.KIND_ANTHROPIC:
+		var kind := String(kind_select.get_item_metadata(index))
+		_apply_base_url_hint(base_edit, kind)
+		# Anthropic's endpoint is the same for everyone, so switching a still-blank row to that kind fills it in — one less thing to look up when adding the source by hand.
+		if base_edit.text.strip_edges() == "" and kind == GDLLMSources.KIND_ANTHROPIC:
 			base_edit.text = GDLLMSources.DEFAULT_ANTHROPIC_BASE)
 
 	var key_edit := LineEdit.new()
@@ -709,6 +726,13 @@ func _add_connection_row(source: Dictionary) -> void:
 	}
 	_connection_rows.append(entry)
 	del.pressed.connect(func() -> void: _remove_connection_row(entry))
+
+
+## Stamp `base_edit` with `kind`'s URL guidance (see CONNECTION_BASE_URL_HINTS) — the placeholder shows on a blank field, the tooltip on hover either way. Re-applied whenever the row's kind changes, so the guidance always describes the selected wire format.
+func _apply_base_url_hint(base_edit: LineEdit, kind: String) -> void:
+	var hint: Dictionary = CONNECTION_BASE_URL_HINTS.get(kind, {})
+	base_edit.placeholder_text = String(hint.get("placeholder", "http://host:port"))
+	base_edit.tooltip_text = String(hint.get("tooltip", ""))
 
 
 func _remove_connection_row(entry: Dictionary) -> void:
@@ -764,7 +788,8 @@ func _on_connections_confirmed() -> void:
 
 func _on_connections_custom_action(action: StringName) -> void:
 	if action == "add_source":
-		_add_connection_row({"kind": GDLLMSources.KIND_OLLAMA})
+		# Fresh rows default to the OpenAI kind
+		_add_connection_row({"kind": GDLLMSources.KIND_OPENAI})
 	elif action == "refresh_models":
 		_save_connections() # persist edits first so the sweep hits the current URLs and keys
 		refresh_all_models()
