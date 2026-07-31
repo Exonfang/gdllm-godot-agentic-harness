@@ -70,12 +70,20 @@ func parse_completion_stats(_data: Variant) -> Dictionary:
 	return {}
 
 
-## The base URL as actually dialed: trimmed, trailing slashes dropped so joining an adapter path can't double the separator. Subclasses may add provider-specific repair (see OpenAIAdapter).
+## The base URL as actually dialed: trimmed, trailing slashes dropped so joining an adapter path can't double the separator. Each subclass further reduces a pasted full endpoint to its server root (see _root_from_endpoint), so the URL a provider's UI hands out works as-is.
 func normalize_base(base: String) -> String:
 	var out := base.strip_edges()
 	while out.ends_with("/"):
 		out = out.trim_suffix("/")
 	return out
+
+
+## The server root behind a stored URL that may be a full endpoint rather than a base: the first matching known endpoint suffix is stripped, so the URL a provider's UI hands out (LM Studio's …/v1/chat/completions, Ollama's …/api/chat) works pasted as-is, while a URL carrying no known suffix — a bare host:port or one with a proxy prefix — passes through untouched for the adapter's own paths to join. `suffixes` must be ordered most-specific first; only the first match is stripped.
+static func _root_from_endpoint(base: String, suffixes: Array) -> String:
+	for suffix in suffixes:
+		if base.ends_with(String(suffix)):
+			return base.left(base.length() - String(suffix).length())
+	return base
 
 
 ## The auth headers for a source's `api_key` — a Bearer token when set, none when empty. Shared by both wire formats (Ollama Cloud and the OpenAI-compatible providers all take `Authorization: Bearer`).
@@ -164,6 +172,10 @@ class OllamaAdapter extends LLMAdapter:
 
 	func models_path() -> String:
 		return "/api/tags"
+
+	## A pasted full endpoint (Ollama's docs hand out …/api/chat and friends) reduces to its server root; anything else — a bare host:port, or a reverse-proxy prefix — passes through and the /api/… paths join after it.
+	func normalize_base(base: String) -> String:
+		return _root_from_endpoint(super.normalize_base(base), ["/api/chat", "/api/generate", "/api/tags", "/api/show", "/api"])
 
 	func parse_models(data: Variant) -> PackedStringArray:
 		var names := PackedStringArray()
@@ -254,9 +266,9 @@ class OpenAIAdapter extends LLMAdapter:
 	func models_path() -> String:
 		return "/models"
 
-	## A pathless base (e.g. "http://localhost:8000" for a local vLLM) gets "/v1" appended, since every OpenAI-compatible server serves under it; a base that already carries a path (Poolside's "/v1", a gateway's custom prefix) is respected as-is.
+	## A pasted full endpoint (the URL an OpenAI-compatible server's UI hands out, e.g. LM Studio's …/v1/chat/completions) reduces to its serving base first. Then a pathless base (e.g. "http://localhost:8000" for a local vLLM) gets "/v1" appended, since every OpenAI-compatible server serves under it; a base that still carries a path (Poolside's "/v1", a gateway's custom prefix) is respected as-is.
 	func normalize_base(base: String) -> String:
-		var out := super.normalize_base(base)
+		var out := _root_from_endpoint(super.normalize_base(base), ["/chat/completions", "/completions", "/models", "/embeddings"])
 		var scheme_end := out.find("://")
 		var host_start := scheme_end + 3 if scheme_end != -1 else 0
 		if out.find("/", host_start) == -1 and out != "":
@@ -506,6 +518,10 @@ class AnthropicAdapter extends LLMAdapter:
 	func models_path() -> String:
 		# The default page is 20 entries; raise the limit so one fetch covers the whole catalog.
 		return "/v1/models?limit=100"
+
+	## A pasted full endpoint (…/v1/messages, or a base ending in /v1) reduces to the server root the /v1/… paths join to, so the URL Anthropic's docs hand out works as-is; a gateway prefix passes through untouched.
+	func normalize_base(base: String) -> String:
+		return _root_from_endpoint(super.normalize_base(base), ["/v1/messages", "/v1/models", "/v1"])
 
 	func parse_models(data: Variant) -> PackedStringArray:
 		var names := PackedStringArray()

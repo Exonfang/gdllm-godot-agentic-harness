@@ -11,7 +11,7 @@ const KIND_OLLAMA := "ollama" ## Native Ollama wire format (/api/chat NDJSON), u
 const KIND_OPENAI := "openai" ## OpenAI-compatible wire format (/v1/chat/completions SSE), used by vLLM, Poolside, etc.
 const KIND_ANTHROPIC := "anthropic" ## Anthropic Messages API wire format (/v1/messages SSE), used by the Claude models.
 
-const DEFAULT_OLLAMA_LOCAL_BASE := "http://192.168.1.104:11434" ## Seed endpoint for the first-run local source; the pre-multi-source default.
+const DEFAULT_OLLAMA_LOCAL_BASE := "http://localhost:11434" ## Seed endpoint for the first-run local source; the pre-multi-source default.
 const DEFAULT_ANTHROPIC_BASE := "https://api.anthropic.com" ## Anthropic's API host; the same for every account, so the Connections dialog prefills it when a row switches to the Anthropic kind.
 
 

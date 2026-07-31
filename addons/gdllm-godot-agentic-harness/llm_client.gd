@@ -14,7 +14,7 @@ const STREAM_CONNECT_TIMEOUT := 15.0 ## Seconds to wait for the socket before gi
 const BODY_EXCERPT_CHARS := 180 ## How much of an unparseable response body an error message may quote — enough to recognize what answered, short enough that a whole HTML page never lands in the log.
 const TAGS_TIMEOUT := 12.0 ## Seconds a model-list fetch may run before it resolves as empty. Enforced with a SceneTreeTimer, not HTTPRequest.timeout — that internal timer fails to start for a node built in _init, leaving an unreachable host's fetch to hang forever and any sweep awaiting it stuck.
 
-@export var api_base: String = "http://192.168.1.104:11434" ## The API endpoint, local or remote.
+@export var api_base: String = "http://localhost:11434" ## The API endpoint, local or remote.
 @export var model: String = "nemotron-3-nano:30b"
 @export var api_key: String = "" ## Bearer token for sources that need one (Ollama Cloud, Poolside); empty for local/no-auth endpoints.
 @export var adapter_kind: String = "ollama" ## Which wire format this client speaks (see GDLLMSources.KIND_*); selects the LLMAdapter used to build and parse requests.
@@ -167,6 +167,9 @@ func _on_tags_completed(result: int, response_code: int, _headers: PackedStringA
 	if response_code != 200:
 		# The body rides along because it's what tells e.g. a bad API key (a 401 that says so) apart from a dead route.
 		last_models_error = "HTTP %d: %s" % [response_code, body.get_string_from_utf8().strip_edges().left(300)]
+		# A 404 on the models path almost always means the Base URL's shape doesn't match the kind, so the error names the fix instead of leaving only the provider's complaint.
+		if response_code == 404:
+			last_models_error += " — " + _kind_404_hint()
 		push_warning("LLMClient: model list fetch failed (%s)" % last_models_error)
 		_emit_models(PackedStringArray())
 		return
@@ -179,6 +182,15 @@ func _on_tags_completed(result: int, response_code: int, _headers: PackedStringA
 	var names := _make_adapter().parse_models(json.get_data())
 	names.sort()
 	_emit_models(names)
+
+
+## The likely fix for a 404 on this kind's model-list path — in practice a URL or Kind that doesn't match the server (see each adapter's normalize_base and the Connections dialog's per-kind hints) — appended to last_models_error so the failure guides to the solution instead of only quoting the provider.
+func _kind_404_hint() -> String:
+	if adapter_kind == GDLLMSources.KIND_OPENAI:
+		return "check the source's URL and Kind: a bare http://host:port, a base ending in /v1, or a full endpoint like …/v1/chat/completions all work for an OpenAI-compatible server — an Ollama server needs the Ollama kind instead"
+	if adapter_kind == GDLLMSources.KIND_ANTHROPIC:
+		return "check the source's URL: Anthropic wants https://api.anthropic.com (pasting the full …/v1/messages endpoint works too)"
+	return "check the source's URL and Kind: an Ollama server takes a bare http://host:port or a full endpoint like …/api/chat — an OpenAI-compatible server (LM Studio, llama.cpp, vLLM, most others...) needs the OpenAI kind instead"
 
 
 ## Emit the model list exactly once per fetch, so a late response and the timeout can't both fire models_received (which would double-count the source in a sweep).
