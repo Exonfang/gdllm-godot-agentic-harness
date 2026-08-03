@@ -133,7 +133,7 @@ func _test_agents_block() -> void:
 func _test_format_tokens() -> void:
 	_check(GDLLMInstructions.format_tokens(999) == "~250 tokens", "a small file renders as whole estimated tokens")
 	_check(GDLLMInstructions.format_tokens(8000) == "~2.0k tokens", "a large file renders in k units")
-	_check(GDLLMInstructions.format_tokens(1234) == "~309 tokens", "the estimate follows the plugin-wide chars/4 rule")
+	_check(GDLLMInstructions.format_tokens(1234) == "~309 tokens", "the estimate follows the plugin-wide chars-per-token (at the shipped 4.0 ratio) rule")
 
 
 func _test_parse_skill() -> void:
@@ -147,7 +147,7 @@ func _test_parse_skill() -> void:
 	_check(String(bare["description"]) == "Tile painting rules", "fallback description is the first body line, heading marks stripped")
 	var long_line := "x".repeat(200)
 	var truncated: Dictionary = GDLLMInstructions.parse_skill(long_line, "long")
-	_check(String(truncated["description"]).length() <= GDLLMInstructions.SKILL_FALLBACK_DESCRIPTION_CHARS and String(truncated["description"]).ends_with("…"), "over-long fallback description truncates with an ellipsis")
+	_check(String(truncated["description"]).length() <= GDLLMTunables.geti(GDLLMTunables.SKILL_FALLBACK_DESCRIPTION_CHARS) and String(truncated["description"]).ends_with("…"), "over-long fallback description truncates with an ellipsis")
 	var unclosed := "---\nname: never closed\nstill body"
 	var rule: Dictionary = GDLLMInstructions.parse_skill(unclosed, "rule")
 	_check(String(rule["name"]) == "rule" and String(rule["body"]).begins_with("---"), "an unclosed opening --- is body, not frontmatter")

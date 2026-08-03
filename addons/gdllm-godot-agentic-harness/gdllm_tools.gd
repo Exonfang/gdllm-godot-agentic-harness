@@ -4,8 +4,7 @@ class_name GDLLMTools extends RefCounted
 
 const TOOL_SEARCH := "tool_search"
 
-## User turns an attached tool may sit unused before a cache-bust boundary retires its schema from the request (see GDLLMChatSession._cross_cache_boundary); one tool_search re-attaches it.
-const SCHEMA_RETIRE_IDLE_TURNS := 4
+# How many idle user turns retire an attached tool's schema at a cache-bust boundary (see GDLLMChatSession._cross_cache_boundary; one tool_search re-attaches it) is user-configurable — see GDLLMTunables' gdllm/context section.
 
 ## Appended to tool_search's description only once this session has actually retired something: the model needs the detachment rule only when it's real, and the note first appears in the request whose tools block the retirement already rewrote, so it never costs a cache invalidation or tokens of its own before then.
 const TOOL_SEARCH_RETIREMENT_NOTE := "Note: attached tools left idle for several turns are detached again to keep requests small — if a tool you had is no longer marked attached, search its name again to re-attach it."
@@ -22,8 +21,7 @@ const DESCRIBE_SCENE := "describe_scene"
 ## Tools whose results the pruning passes never touch; tool_search stays out because schema retirement already reclaims idle tool_search attachments on its own cache-boundary schedule.
 const PRUNE_GUARDED_TOOLS: Array[String] = ["tool_search"]
 
-## Newest tool call/result pairs the pruning passes always leave intact — the model's working set for the turn in flight.
-const PRUNE_KEEP_RECENT_PAIRS: int = 3
+# How many newest tool call/result pairs the pruning passes always leave intact — the model's working set for the turn in flight — is user-configurable — see GDLLMTunables' gdllm/compaction section.
 
 ## tool_search's own definition, declared with the same fields as a REGISTRY entry. Its `description` here is only the preamble — the live catalog of registered tools is appended in tool_search_schema so the model always sees the full list.
 const TOOL_SEARCH_TOOL := {
@@ -42,14 +40,13 @@ const TOOL_SEARCH_TOOL := {
 	},
 }
 
-## The most tools one search returns; everything a search returns is also activated onto every later turn (see execute), so this cap bounds what a single vague query can permanently attach to the conversation.
-const MAX_SEARCH_RESULTS := 5
+# The most tools one search returns is user-configurable — see GDLLMTunables' gdllm/context section; everything a search returns is also activated onto every later turn (see execute), so that cap bounds what a single vague query can permanently attach to the conversation.
 
 ## The searchable tools, keyed by name, omitting `tool_search`. Each entry carries a one-line `summary` shown in the always-visible catalog (see _catalog), the fuller `description` returned when the tool is searched, the JSON-Schema `parameters` the model fills in to call it, `max_consecutive_uses` — its loop break point (see max_consecutive_uses) — and optionally a tailored `loop_break_message` shown when that guard trips (see loop_break_message; omit it to fall back to the generic default).
 const REGISTRY := {
 	"read_file": {
-		"summary": "Read a text file from the project; long files come back as a summarized function map and a .tscn as its saved node tree instead of full text (pass full=true to force the whole file).",
-		"description": "Read a UTF-8 text file (GDScript, scenes, config, JSON, docs, and so on) from the current Godot project. Short files are returned in full. A file beyond a length threshold is not dropped into the conversation whole — a fresh-context subagent maps it instead, returning an overview plus every function's name and parameters, so you can then use read_function to pull the actual code of a specific function when you need it. A .tscn scene likewise returns its saved node tree rather than the serialized text, at a fraction of the cost — describe_scene_file with node_path then zooms into one node's saved properties, connections, and groups. Set `full` to true to override either and get the entire file verbatim even when it is long — for the rare case you genuinely need every line rather than a map; expect it to consume much more of your context. Long packed-array data blobs in a .tres/.tscn (PackedByteArray image data, PackedVector3Array mesh vertices, and so on) are elided to markers like \"<N bytes elided>\" in every DEFAULT read, since raw serialized numbers carry no readable information; `full: true` is the one route to them — it returns the file verbatim, payloads included, which is what a wholesale rewrite of such a file needs (expect elided payloads to be large). Binary files are refused. Reading a .gd file or a .gdshader also compile-checks it with the engine automatically: any current parse/compile errors are appended to the result, and nothing is appended when the file is clean.",
+		"summary": "Read a text file from the project; a file past {tunable:read_file_summary_threshold_chars} chars comes back as a summarized function map (when that threshold is enabled) and a .tscn as its saved node tree instead of full text (pass full=true to force the whole file).",
+		"description": "Read a UTF-8 text file (GDScript, scenes, config, JSON, docs, and so on) from the current Godot project. Short files are returned in full. While the long-file threshold is enabled ({tunable:read_file_summary_threshold_chars} chars; 0 disables it), a file beyond it is not dropped into the conversation whole — a fresh-context subagent maps it instead, returning an overview plus every function's name and parameters, so you can then use read_function to pull the actual code of a specific function when you need it. A .tscn scene likewise returns its saved node tree rather than the serialized text, at a fraction of the cost — describe_scene_file with node_path then zooms into one node's saved properties, connections, and groups. Set `full` to true to override either and get the entire file verbatim even when it is long — for the rare case you genuinely need every line rather than a map; expect it to consume much more of your context. Long packed-array data blobs in a .tres/.tscn (PackedByteArray image data, PackedVector3Array mesh vertices, and so on) are elided to markers like \"<N bytes elided>\" in every DEFAULT read, since raw serialized numbers carry no readable information; `full: true` is the one route to them — it returns the file verbatim, payloads included, which is what a wholesale rewrite of such a file needs (expect elided payloads to be large). Binary files are refused. Reading a .gd file or a .gdshader also compile-checks it with the engine automatically: any current parse/compile errors are appended to the result, and nothing is appended when the file is clean.",
 		"max_consecutive_uses": -1,
 		"parameters": {
 			"type": "object",
@@ -60,7 +57,7 @@ const REGISTRY := {
 				},
 				"full": {
 					"type": "boolean",
-					"description": "Set true to return the whole file even if it is long, skipping the summarized function map and the .tscn saved-tree view. Omit (or false) to let long files and scenes be mapped — the default that keeps your context narrow. Only ask for the full text when a map genuinely won't do (editing a .tscn's serialized text is the usual reason).",
+					"description": "Set true to return the whole file even if it is long, skipping the summarized function map and the .tscn saved-tree view. Omit (or false) to let long files and scenes be mapped when the length threshold is enabled — the default that keeps your context narrow. Only ask for the full text when a map genuinely won't do (editing a .tscn's serialized text is the usual reason).",
 				},
 				"start_line": {
 					"type": "integer",
@@ -110,14 +107,14 @@ const REGISTRY := {
 	},
 	"read_output": {
 		"summary": "Read the editor's Output console — the log panel the user sees, including a running game's prints and errors; returns the newest lines, optionally filtered.",
-		"description": "Read the editor's Output console (the bottom Output panel) — the same log the user is looking at, which is where print output, warnings, and errors from both the editor and a running game land. Use it when the user refers to something \"in the console\", \"in the output\", or \"in the log\", or to see what a run just printed. Returns the newest lines (default 40, no cap on an explicit ask); pass `lines` for more or fewer, or `filter` to return only lines containing a substring (case-insensitive), still newest-last. The text is read from the panel itself, so what it currently shows is what you get: a console the user cleared reads as empty, and lines hidden by the panel's own search box or message-type filter buttons are not readable here — when such a control is actively hiding a message type (some users keep the panel's Errors filter off), the result names it, so trust that note over assuming the console holds everything. For the structured error history of game runs — stack traces included — use read_errors instead.",
+		"description": "Read the editor's Output console (the bottom Output panel) — the same log the user is looking at, which is where print output, warnings, and errors from both the editor and a running game land. Use it when the user refers to something \"in the console\", \"in the output\", or \"in the log\", or to see what a run just printed. Returns the newest lines (default {tunable:console_default_output_lines}, no cap on an explicit ask); pass `lines` for more or fewer, or `filter` to return only lines containing a substring (case-insensitive), still newest-last. The text is read from the panel itself, so what it currently shows is what you get: a console the user cleared reads as empty, and lines hidden by the panel's own search box or message-type filter buttons are not readable here — when such a control is actively hiding a message type (some users keep the panel's Errors filter off), the result names it, so trust that note over assuming the console holds everything. For the structured error history of game runs — stack traces included — use read_errors instead.",
 		"max_consecutive_uses": -1,
 		"parameters": {
 			"type": "object",
 			"properties": {
 				"lines": {
 					"type": "integer",
-					"description": "Newest lines to return. Defaults to 40 with no cap — raise it freely when you need more of the log.",
+					"description": "Newest lines to return. Defaults to {tunable:console_default_output_lines} with no cap — raise it freely when you need more of the log.",
 				},
 				"filter": {
 					"type": "string",
@@ -129,14 +126,14 @@ const REGISTRY := {
 	},
 	"read_errors": {
 		"summary": "Read the debugger's Errors tab — the error and warning history of game runs, stack traces included.",
-		"description": "Read the error history from the debugger's Errors tab: every error and warning recorded from running the project in this editor session, oldest first, each with its time, message, and detail rows — the engine-side error and source line, and the script stack trace when one was captured. A running game is a separate process whose errors arrive over the debugger and land ONLY here, so this is the tool for \"why did my game error?\". Returns the newest entries (default 10, no cap on an explicit ask); pass `limit` for more or fewer, or `filter` to return only entries whose text contains a substring (case-insensitive). The history is read from the panel itself, so a list the user cleared reads as empty. Errors raised inside the editor process (plugins, tool scripts, importers) do not appear here — they land in the Output console, which read_output shows. Any uid:// the entries mention is resolved against the engine's uid registry automatically.",
+		"description": "Read the error history from the debugger's Errors tab: every error and warning recorded from running the project in this editor session, oldest first, each with its time, message, and detail rows — the engine-side error and source line, and the script stack trace when one was captured. A running game is a separate process whose errors arrive over the debugger and land ONLY here, so this is the tool for \"why did my game error?\". Returns the newest entries (default {tunable:console_default_error_entries}, no cap on an explicit ask); pass `limit` for more or fewer, or `filter` to return only entries whose text contains a substring (case-insensitive). The history is read from the panel itself, so a list the user cleared reads as empty. Errors raised inside the editor process (plugins, tool scripts, importers) do not appear here — they land in the Output console, which read_output shows. Any uid:// the entries mention is resolved against the engine's uid registry automatically.",
 		"max_consecutive_uses": -1,
 		"parameters": {
 			"type": "object",
 			"properties": {
 				"limit": {
 					"type": "integer",
-					"description": "Newest error entries to return. Defaults to 10 with no cap — raise it freely when you need more of the history.",
+					"description": "Newest error entries to return. Defaults to {tunable:console_default_error_entries} with no cap — raise it freely when you need more of the history.",
 				},
 				"filter": {
 					"type": "string",
@@ -148,7 +145,7 @@ const REGISTRY := {
 	},
 	"run_game": {
 		"summary": "Run the game — the main scene, or one scene — through the editor's own Play machinery and capture what it prints and errors while it runs; stops it after wait_seconds unless keep_running is set.",
-		"description": "Launch the project the way the user's F5 does — the editor's own Play machinery, a separate game process whose prints and errors arrive over the debugger — then watch it for `wait_seconds` (default 6, capped at 30) and return what arrived during the run: the NEW Output-console lines and the NEW debugger error entries since launch, never the whole log. By default the run is then stopped, so one call is a self-contained smoke run: launch, capture, stop. Pass `scene` to play one scene instead of the main scene (the editor's Play Custom Scene), and `keep_running` true to leave the game up for the user to drive after the capture returns — stop_game ends that run later, and read_output/read_errors keep reading its console while it lives. A run the USER started is never touched: if a game is already playing, the call refuses rather than hijacking it. The game runs the project as saved on disk; the editor's save-before-running setting decides whether unsaved editors are saved first, and the result notes when that setting is off while unsaved scenes exist. The capture also carries a one-line performance digest (FPS, frame time, draw calls, memory, nodes) from the game's monitor stream, and `profile` true additionally runs the engine's function profiler for the window and reports the hottest functions (read_performance and profile_game do both against an already-running game). A run that PAUSES in the debugger — a runtime error, or a line set_breakpoint armed — ends the watch early and the result details the break (stack and variables); to then step or resume it with debug_game the game must still be up, so pass keep_running true when a pause is the point. For headless logic verification with no game window, use run_script instead.",
+		"description": "Launch the project the way the user's F5 does — the editor's own Play machinery, a separate game process whose prints and errors arrive over the debugger — then watch it for `wait_seconds` (default {tunable:run_game_default_wait_seconds}, capped at {tunable:run_game_max_wait_seconds}) and return what arrived during the run: the NEW Output-console lines and the NEW debugger error entries since launch, never the whole log. By default the run is then stopped, so one call is a self-contained smoke run: launch, capture, stop. Pass `scene` to play one scene instead of the main scene (the editor's Play Custom Scene), and `keep_running` true to leave the game up for the user to drive after the capture returns — stop_game ends that run later, and read_output/read_errors keep reading its console while it lives. A run the USER started is never touched: if a game is already playing, the call refuses rather than hijacking it. The game runs the project as saved on disk; the editor's save-before-running setting decides whether unsaved editors are saved first, and the result notes when that setting is off while unsaved scenes exist. The capture also carries a one-line performance digest (FPS, frame time, draw calls, memory, nodes) from the game's monitor stream, and `profile` true additionally runs the engine's function profiler for the window and reports the hottest functions (read_performance and profile_game do both against an already-running game). A run that PAUSES in the debugger — a runtime error, or a line set_breakpoint armed — ends the watch early and the result details the break (stack and variables); to then step or resume it with debug_game the game must still be up, so pass keep_running true when a pause is the point. For headless logic verification with no game window, use run_script instead.",
 		"max_consecutive_uses": 3,
 		"mutating": true,
 		"parameters": {
@@ -160,7 +157,7 @@ const REGISTRY := {
 				},
 				"wait_seconds": {
 					"type": "integer",
-					"description": "How long to let the run play before its output is captured, in seconds. Defaults to 6, capped at 30.",
+					"description": "How long to let the run play before its output is captured, in seconds. Defaults to {tunable:run_game_default_wait_seconds}, capped at {tunable:run_game_max_wait_seconds}.",
 				},
 				"keep_running": {
 					"type": "boolean",
@@ -193,7 +190,7 @@ const REGISTRY := {
 				},
 				"frames": {
 					"type": "integer",
-					"description": "How many frames \"frame\" advances, 1 to 30 (default 1). Each frame is one full iteration: input, _process, physics, and a draw.",
+					"description": "How many frames \"frame\" advances, 1 to {tunable:suspend_max_frames} (default 1). Each frame is one full iteration: input, _process, physics, and a draw.",
 				},
 			},
 			"required": ["action"],
@@ -252,7 +249,7 @@ const REGISTRY := {
 	},
 	"run_script": {
 		"summary": "Execute one .gd script headlessly with the engine and return its exit code and output — actual execution, where check_script only compiles.",
-		"description": "Run one GDScript file for real in a fresh headless engine subprocess against this project (godot --headless --script) and return its exit code plus everything it printed — the execution counterpart to check_script's compile-only check, for verifying logic without popping a game window. The script must extend SceneTree (or MainLoop): the engine calls its _init, iterates frames, and the run ends when the script calls quit(exit_code) — the shape this project's tools/ suites use, with a nonzero exit signalling failure. The project's autoloads register as script globals after _init and before the first process frame, so code touching them should run from a first-frame step (e.g. process_frame.connect(..., CONNECT_ONE_SHOT)), not _init. Pass `args` (an array of strings) to hand the script arguments, readable via OS.get_cmdline_user_args(); pass `timeout_seconds` (default 30, capped at 120) when a run legitimately needs longer — a script still running at the timeout is killed and reported as killed, so a script that never quits can't park the loop. To run the actual game or a scene, use run_game.",
+		"description": "Run one GDScript file for real in a fresh headless engine subprocess against this project (godot --headless --script) and return its exit code plus everything it printed — the execution counterpart to check_script's compile-only check, for verifying logic without popping a game window. The script must extend SceneTree (or MainLoop): the engine calls its _init, iterates frames, and the run ends when the script calls quit(exit_code) — the shape this project's tools/ suites use, with a nonzero exit signalling failure. The project's autoloads register as script globals after _init and before the first process frame, so code touching them should run from a first-frame step (e.g. process_frame.connect(..., CONNECT_ONE_SHOT)), not _init. Pass `args` (an array of strings) to hand the script arguments, readable via OS.get_cmdline_user_args(); pass `timeout_seconds` (default {tunable:run_script_default_timeout_seconds}, capped at {tunable:run_script_max_timeout_seconds}) when a run legitimately needs longer — a script still running at the timeout is killed and reported as killed, so a script that never quits can't park the loop. To run the actual game or a scene, use run_game.",
 		"max_consecutive_uses": -1,
 		"mutating": true,
 		"parameters": {
@@ -269,7 +266,7 @@ const REGISTRY := {
 				},
 				"timeout_seconds": {
 					"type": "integer",
-					"description": "Wall-clock cap on the run, in seconds; a script still running at the cap is killed. Defaults to 30, capped at 120.",
+					"description": "Wall-clock cap on the run, in seconds; a script still running at the cap is killed. Defaults to {tunable:run_script_default_timeout_seconds}, capped at {tunable:run_script_max_timeout_seconds}.",
 				},
 			},
 			"required": ["path"],
@@ -277,14 +274,14 @@ const REGISTRY := {
 	},
 	"read_performance": {
 		"summary": "Read the running game's Performance monitors — FPS, frame time, memory, draw calls, nodes, physics, plus any custom monitors — as engine-truth numbers sampled about once per second.",
-		"description": "Read the real Performance monitors of the running game: FPS, frame and physics time, static and video memory, object/node/orphan counts, draw calls and primitives, physics bodies and collision pairs — the same numbers behind the editor's Debugger → Monitors tab, received as raw values over the debugger, not read off a widget. The game streams them about once per second whenever it runs — a run the USER started with F5 is sampled exactly the same, so you can watch their play session without touching it. Each monitor is reported as avg/min/max over a window (`seconds`, default 30, max 180), constants collapse to one figure, and numbers from a game that already stopped are labelled with their age rather than passed off as live. Pass `all` true for every built-in monitor instead of the curated set. Custom monitors the game registers with Performance.add_custom_monitor(\"category/name\", callable) appear here automatically about a second later — add one via the editing tools when a task needs to measure something specific (an entity count, a queue length, a system's cost), run the game, and read the real numbers back. For per-function cost use profile_game; for a launch-and-measure smoke run use run_game, whose capture includes a performance digest.",
+		"description": "Read the real Performance monitors of the running game: FPS, frame and physics time, static and video memory, object/node/orphan counts, draw calls and primitives, physics bodies and collision pairs — the same numbers behind the editor's Debugger → Monitors tab, received as raw values over the debugger, not read off a widget. The game streams them about once per second whenever it runs — a run the USER started with F5 is sampled exactly the same, so you can watch their play session without touching it. Each monitor is reported as avg/min/max over a window (`seconds`, default {tunable:performance_default_window_seconds}, max {tunable:performance_history_seconds}), constants collapse to one figure, and numbers from a game that already stopped are labelled with their age rather than passed off as live. Pass `all` true for every built-in monitor instead of the curated set. Custom monitors the game registers with Performance.add_custom_monitor(\"category/name\", callable) appear here automatically about a second later — add one via the editing tools when a task needs to measure something specific (an entity count, a queue length, a system's cost), run the game, and read the real numbers back. For per-function cost use profile_game; for a launch-and-measure smoke run use run_game, whose capture includes a performance digest.",
 		"max_consecutive_uses": -1,
 		"parameters": {
 			"type": "object",
 			"properties": {
 				"seconds": {
 					"type": "integer",
-					"description": "Window to summarize over, in seconds. Defaults to 30, capped at 180 (about how much history is kept).",
+					"description": "Window to summarize over, in seconds. Defaults to {tunable:performance_default_window_seconds}, capped at {tunable:performance_history_seconds} (about how much history is kept).",
 				},
 				"all": {
 					"type": "boolean",
@@ -296,14 +293,14 @@ const REGISTRY := {
 	},
 	"profile_game": {
 		"summary": "Run one of the engine's profilers on the live game for a few seconds — per-function CPU cost, per-pass GPU cost, or network RPC traffic — engine truth for \"what is actually slow?\".",
-		"description": "Sample the running game with the engine's own profilers — the same ones the Debugger tabs' Start buttons drive, so the user watches the capture fill that tab live — for `seconds` (default 6, max 30), then switch it off again and report what it recorded. `mode` picks which profiler: \"functions\" (the default; the Profiler tab's hottest rows — frame/physics/script categories with each function's time and call count), \"visual\" (the Visual Profiler tab: one frame's render passes, each with the CPU time the engine spent submitting it and the GPU time the card spent on it — the only measurement here that sees the GPU at all, where function cost cannot), or \"network\" (the Network Profiler tab: bandwidth in and out across the capture plus per-node RPC counts and MultiplayerSynchronizer traffic — empty by design in a single-player project). Works on any live session, including one the user started with F5 (the result says whose run was profiled; profiling adds some overhead while it samples and is always turned off afterward). The full capture stays in its tab for the user to explore. Needs a running game — run_game's `profile` launches, profiles, and stops in one step, and takes a mode name too; read_performance reads the frame-level monitors instead, and read_video_ram answers what is HOLDING video memory rather than what is spending frame time.",
+		"description": "Sample the running game with the engine's own profilers — the same ones the Debugger tabs' Start buttons drive, so the user watches the capture fill that tab live — for `seconds` (default {tunable:profile_game_default_seconds}, max {tunable:profile_game_max_seconds}), then switch it off again and report what it recorded. `mode` picks which profiler: \"functions\" (the default; the Profiler tab's hottest rows — frame/physics/script categories with each function's time and call count), \"visual\" (the Visual Profiler tab: one frame's render passes, each with the CPU time the engine spent submitting it and the GPU time the card spent on it — the only measurement here that sees the GPU at all, where function cost cannot), or \"network\" (the Network Profiler tab: bandwidth in and out across the capture plus per-node RPC counts and MultiplayerSynchronizer traffic — empty by design in a single-player project). Works on any live session, including one the user started with F5 (the result says whose run was profiled; profiling adds some overhead while it samples and is always turned off afterward). The full capture stays in its tab for the user to explore. Needs a running game — run_game's `profile` launches, profiles, and stops in one step, and takes a mode name too; read_performance reads the frame-level monitors instead, and read_video_ram answers what is HOLDING video memory rather than what is spending frame time.",
 		"max_consecutive_uses": 3,
 		"parameters": {
 			"type": "object",
 			"properties": {
 				"seconds": {
 					"type": "integer",
-					"description": "How long the profiler samples the game before reporting, in seconds. Defaults to 6, capped at 30.",
+					"description": "How long the profiler samples the game before reporting, in seconds. Defaults to {tunable:profile_game_default_seconds}, capped at {tunable:profile_game_max_seconds}.",
 				},
 				"mode": {
 					"type": "string",
@@ -311,7 +308,7 @@ const REGISTRY := {
 				},
 				"limit": {
 					"type": "integer",
-					"description": "How many report rows to show (default 20 for functions/network, 40 for visual). Raise it when the truncation note says rows were withheld — an explicit ask is honored in full.",
+					"description": "How many report rows to show (default {tunable:profile_function_rows} for functions, {tunable:profile_network_rows} for network, {tunable:profile_visual_rows} for visual). Raise it when the truncation note says rows were withheld — an explicit ask is honored in full.",
 				},
 				"filter": {
 					"type": "string",
@@ -323,14 +320,14 @@ const REGISTRY := {
 	},
 	"read_video_ram": {
 		"summary": "List what the running game holds in video memory, biggest first — the engine's own per-resource VRAM accounting, with the total.",
-		"description": "Ask the RUNNING game what it has in video memory and report the biggest consumers: each resource's path, type, format (a texture's dimensions and pixel format, a mesh's vertex count) and its usage, plus the total — the answer to \"why is this game using 2 GB of video memory\", which nothing else here can give (read_performance's video-memory monitor reports only the one total figure). The read presses the Debugger → Video RAM tab's own Refresh button and waits for the game's reply, so the user watches the same list fill in front of them, and rows come back in the engine's own biggest-first order: `limit` caps how many are listed (default 20, max 100) and `filter` keeps only rows whose path, type, or format contains it. Resources with no res:// path are the engine's own internal ones (render targets, default textures) and are named as such. Works on any live session, including one the user started with F5, and a game PAUSED at a breakpoint answers this too — so it reads what was in video memory at the moment of a failure, where profile_game needs a running game. Needs a running game — run_game with keep_running true starts one — and a frozen one that never answers is said to have never answered, rather than its previous list being passed off as current.",
+		"description": "Ask the RUNNING game what it has in video memory and report the biggest consumers: each resource's path, type, format (a texture's dimensions and pixel format, a mesh's vertex count) and its usage, plus the total — the answer to \"why is this game using 2 GB of video memory\", which nothing else here can give (read_performance's video-memory monitor reports only the one total figure). The read presses the Debugger → Video RAM tab's own Refresh button and waits for the game's reply, so the user watches the same list fill in front of them, and rows come back in the engine's own biggest-first order: `limit` caps how many are listed (default {tunable:video_ram_default_rows}, max {tunable:video_ram_max_rows}) and `filter` keeps only rows whose path, type, or format contains it. Resources with no res:// path are the engine's own internal ones (render targets, default textures) and are named as such. Works on any live session, including one the user started with F5, and a game PAUSED at a breakpoint answers this too — so it reads what was in video memory at the moment of a failure, where profile_game needs a running game. Needs a running game — run_game with keep_running true starts one — and a frozen one that never answers is said to have never answered, rather than its previous list being passed off as current.",
 		"max_consecutive_uses": 3,
 		"parameters": {
 			"type": "object",
 			"properties": {
 				"limit": {
 					"type": "integer",
-					"description": "How many of the largest resources to list. Defaults to 20, capped at 100.",
+					"description": "How many of the largest resources to list. Defaults to {tunable:video_ram_default_rows}, capped at {tunable:video_ram_max_rows}.",
 				},
 				"filter": {
 					"type": "string",
@@ -429,7 +426,7 @@ const REGISTRY := {
 	},
 	"debug_game": {
 		"summary": "Break into a running game, or resume and step one that is paused — break, continue, step into, step over, step out — and get back where it stopped, with that frame's variables.",
-		"description": "Drive execution through the debugger's own controls. On a RUNNING game, `action` \"break\" halts it at the next GDScript statement it executes, wherever that is — the way to catch a game in the act without knowing which line to suspect, where set_breakpoint needs a line chosen in advance; the result reports the stack and variables exactly as read_game_break does. On a PAUSED game, `action` is \"continue\" (resume until the next breakpoint or the end), \"step\" (into the next call), \"next\" (over the next line, staying in this function), or \"out\" (finish this function and stop in its caller). `times` repeats a step up to 10 times in one call, so watching a few lines evolve is one tool round and not one round per line; the result traces where each press landed and then reports the final break, plus anything the game printed or errored on the way. A runtime-error break cannot be stepped — the engine reports it as not steppable and only \"continue\" is offered, which resumes with the failed function abandoned. Resuming a game nobody is watching just runs it on: what stops it again is another breakpoint or another error, and if nothing does, the result says it is running rather than pretending it paused. A break stops the game INSIDE code, with a call stack and no other game tool able to reach it; suspend_game instead freezes it BETWEEN frames, where the whole game stays readable — reach for that one to look at live state, and this one to look at executing code.",
+		"description": "Drive execution through the debugger's own controls. On a RUNNING game, `action` \"break\" halts it at the next GDScript statement it executes, wherever that is — the way to catch a game in the act without knowing which line to suspect, where set_breakpoint needs a line chosen in advance; the result reports the stack and variables exactly as read_game_break does. On a PAUSED game, `action` is \"continue\" (resume until the next breakpoint or the end), \"step\" (into the next call), \"next\" (over the next line, staying in this function), or \"out\" (finish this function and stop in its caller). `times` repeats a step up to {tunable:debug_game_max_steps} times in one call, so watching a few lines evolve is one tool round and not one round per line; the result traces where each press landed and then reports the final break, plus anything the game printed or errored on the way. A runtime-error break cannot be stepped — the engine reports it as not steppable and only \"continue\" is offered, which resumes with the failed function abandoned. Resuming a game nobody is watching just runs it on: what stops it again is another breakpoint or another error, and if nothing does, the result says it is running rather than pretending it paused. A break stops the game INSIDE code, with a call stack and no other game tool able to reach it; suspend_game instead freezes it BETWEEN frames, where the whole game stays readable — reach for that one to look at live state, and this one to look at executing code.",
 		"max_consecutive_uses": 8,
 		"mutating": true,
 		"parameters": {
@@ -441,7 +438,7 @@ const REGISTRY := {
 				},
 				"times": {
 					"type": "integer",
-					"description": "How many times to repeat a step/next/out press, 1 to 10 (default 1). Ignored for \"continue\", which happens once.",
+					"description": "How many times to repeat a step/next/out press, 1 to {tunable:debug_game_max_steps} (default 1). Ignored for \"continue\", which happens once.",
 				},
 				"all": {
 					"type": "boolean",
@@ -515,7 +512,7 @@ const REGISTRY := {
 				},
 				"context_lines": {
 					"type": "integer",
-					"description": "Lines of context to show before and after a match when the enclosing function can't be used (non-GDScript files). Defaults to 3 with no cap — raise it when a match needs more surrounding code, though read_file is usually the better tool for most of a file.",
+					"description": "Lines of context to show before and after a match when the enclosing function can't be used (non-GDScript files). Defaults to {tunable:search_default_context_lines} with no cap — raise it when a match needs more surrounding code, though read_file is usually the better tool for most of a file.",
 				},
 				"full": {
 					"type": "boolean",
@@ -765,14 +762,14 @@ const REGISTRY := {
 	},
 	"read_undo_history": {
 		"summary": "Read the editor's undo history — the user's recent actions by name, newest first, with the current undo position — to see what the user just changed.",
-		"description": "Read the names of the user's recent editor actions from the editor's own undo system, newest first — the cheapest answer to \"what did the user just change\": every edit the user makes in a scene (moving a node, setting a property, adding a child) is one named action here. Two histories report: the active scene's, and the global history recording project settings and other non-scene changes. Each shows its newest `window` actions (default 15, capped at 100 — action names are the user's own work, so the whole history is never dumped). An action the user has undone is marked \"(undone)\" — redo would reapply it; everything unmarked is currently applied — and each history states whether undo and redo are available. Two honest limits: script TEXT edits never appear, because the script editor keeps its own per-file undo outside these histories, so an empty history does not mean the user changed nothing; and an action's name describes the operation (\"Move Node2D\"), not always which node it hit — describe_scene shows the resulting live state. This tool is READ-ONLY by design: it never performs an undo or redo, and no tool does — if something looks like it should be reverted, tell the user; the revert is theirs to make with Ctrl+Z.",
+		"description": "Read the names of the user's recent editor actions from the editor's own undo system, newest first — the cheapest answer to \"what did the user just change\": every edit the user makes in a scene (moving a node, setting a property, adding a child) is one named action here. Two histories report: the active scene's, and the global history recording project settings and other non-scene changes. Each shows its newest `window` actions (default {tunable:undo_history_default_window}, capped at {tunable:undo_history_max_window} — action names are the user's own work, so the whole history is never dumped). An action the user has undone is marked \"(undone)\" — redo would reapply it; everything unmarked is currently applied — and each history states whether undo and redo are available. Two honest limits: script TEXT edits never appear, because the script editor keeps its own per-file undo outside these histories, so an empty history does not mean the user changed nothing; and an action's name describes the operation (\"Move Node2D\"), not always which node it hit — describe_scene shows the resulting live state. This tool is READ-ONLY by design: it never performs an undo or redo, and no tool does — if something looks like it should be reverted, tell the user; the revert is theirs to make with Ctrl+Z.",
 		"max_consecutive_uses": 3,
 		"parameters": {
 			"type": "object",
 			"properties": {
 				"window": {
 					"type": "integer",
-					"description": "How many recent actions each history shows. Defaults to 15, capped at 100.",
+					"description": "How many recent actions each history shows. Defaults to {tunable:undo_history_default_window}, capped at {tunable:undo_history_max_window}.",
 				},
 			},
 			"required": [],
@@ -1209,13 +1206,12 @@ const EVENT_HOOKS := [
 	{"event": "tool_completed", "tools": ["*"], "action": "broken_reminder"},
 ]
 
-## Most dependent files the automatic cross-file check names before summarizing the rest, so a hub-class rename doesn't flood the context (see _check_dependents_hook).
-const MAX_DEPENDENT_MENTIONS := 12
+# Most dependent files the automatic cross-file check names before summarizing the rest (see _check_dependents_hook) is user-configurable — see GDLLMTunables' gdllm/tool_output section — so a hub-class rename doesn't flood the context.
 
 ## Fallback reflection instruction for a tool that trips its loop guard without declaring its own `loop_break_message`. Both `%s` are the tool's name (see loop_break_message).
 const DEFAULT_LOOP_BREAK_MESSAGE := "You've called %s several times in a row without making progress, so the tool loop has been stopped for you. Do not call %s again. In a few sentences addressed to the user, summarize what you were trying to accomplish and what you suspect went wrong. Be concise and honest about the uncertainty."
 
-## Reflection instruction when a run keeps re-running identical calls past the duplicate stubs and repeat notes — the escalation behind GDLLMLoopBrakes.WITHHELD_ESCALATION_THRESHOLD; `%d` is the repeat count. Same no-tools redirect flow as a streak guard trip, but asks for a progress account, since the repeats say the model has lost track of where it is.
+## Reflection instruction when a run keeps re-running identical calls past the duplicate stubs and repeat notes — the escalation behind GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD; `%d` is the repeat count. Same no-tools redirect flow as a streak guard trip, but asks for a progress account, since the repeats say the model has lost track of where it is.
 const DUPLICATE_ESCALATION_MESSAGE := "You have re-run identical tool calls (same tool, same arguments, same unchanged result) %d times this turn, so the tool loop has been stopped for you. Do not repeat any earlier call. In a few sentences addressed to the user, summarize what you have completed so far, what remains, and where you are stuck. Be concise and honest about the uncertainty. If a well-defined chunk of the task remains, you may tell the user you can hand it to a fresh-context helper via the run_subagent tool."
 
 ## Stand-in for a tool result whose identical call (same tool, same arguments) already ran this run and returned this same content — a repeat that provably added nothing, so the body is withheld rather than re-served (see GDLLMLoopBrakes.process_result; a mutating tool's repeat instead serves in full behind a repeat note there, since its re-run hit disk again). Gentler than the streak guard: the loop continues, but the repetition is named.
@@ -1228,24 +1224,14 @@ const TRANSIENT_RETRY_INVITATION := "This is a transient condition, so trying th
 ## Stand-in for a repeat of a call whose earlier result carried TRANSIENT_RETRY_INVITATION: the retry was the invited move, so the repetition is not the model's error — but the identical body proves the condition has not cleared, so the answer names that and hands back the two moves that remain instead of re-serving it.
 const TRANSIENT_REPEAT_NUDGE := "Result withheld: this exact call already ran earlier this turn and returned this same transient failure, so the condition it named has not cleared yet and the earlier result still stands. Retrying was the right move, but retrying again this turn will not clear it — carry on without what this call would have given you, and tell the user it is unavailable so they can check it themselves."
 
-## search_files defaults and caps, kept small so a single result stays a narrow-context excerpt rather than a file dump: the default lines of context around a match when no enclosing function applies (an explicit context_lines ask itself is uncapped — see _search_files), the most excerpt blocks (or overview lines) one result carries, the longest function shown whole at the default context before its excerpt falls back to a window, the matching-file count past which a multi-file result becomes a per-file overview, and caps on the function names per overview line and file-name suggestions on an empty result.
-const DEFAULT_SEARCH_CONTEXT := 3
-const MAX_SEARCH_BLOCKS := 40
-const MAX_FUNCTION_EXCERPT_LINES := 30
-const MAX_OVERVIEW_FILES := 10
+# search_files' defaults and caps — context lines around a match (an explicit context_lines ask itself is uncapped — see _search_files), excerpt blocks per result, whole-function excerpt length, the overview threshold, function names per overview line, and file-name suggestions on an empty result (the universal suggestion cap) — are user-configurable, kept small by default so a single result stays a narrow-context excerpt rather than a file dump; see GDLLMTunables' gdllm/tool_output section.
 ## Where installed addons live. A whole-project search sets matches under here aside (counted and disclosed, see _addon_scope_note) because vendored addon code is not the project's own — and this is a boundary about relevance, not about THIS addon: the uid lint's narrow `res://addons/gdllm-godot-agentic-harness/` skip answers a different question (what a match MEANS), and singling out our own directory would leave the other half of the noise in place.
 const ADDONS_ROOT := "res://addons/"
-const MAX_OVERVIEW_FUNCS := 6
-const MAX_FILENAME_SUGGESTIONS := 12
 
 ## The one-line usage reminder search_files errors carry, so a malformed call (misnamed key, missing query) comes back with the exact expected shape instead of a dead end.
 const SEARCH_USAGE := "Put the text to find in \"query\" ({\"query\": \"...\"}) — matched as a literal, case-insensitive substring — plus an optional \"path\" scoping to a file or directory."
 
-## Character count past which read_file stops returning a file whole and has a fresh-context subagent map it instead (overview + function signatures), so a large file never floods the main context (see _read_file). Characters, not lines, because context cost is characters: wild-measured, 43% of all whole-file read bytes came from files under the old 1000-line gate but ≥12 KB — dense scripts and property-list scenes the line count never caught. Measured after packed-array elision, so the gate sees what would actually be delivered. Tune to taste; -1 disables it, always reading files in full.
-const READ_FILE_SUMMARY_THRESHOLD_CHARS := 12000
-
-## Payload character count past which a packed-array literal in read_file output is elided to a count marker: serialized blobs (embedded images, mesh vertex data) run to kilobytes of base64 or comma-separated numbers on a single line — noise no model can interpret (see _elide_packed_arrays). Elision runs before the summary threshold above is measured, so a blob-heavy but otherwise-short file is read whole rather than pointlessly mapped. -1 disables elision.
-const PACKED_ARRAY_ELIDE_CHARS := 128
+# The character count past which read_file stops returning a file whole and has a fresh-context subagent map it instead (overview + function signatures — see _read_file), and the payload count past which a packed-array literal is elided to a count marker (serialized blobs run to kilobytes of base64 on one line, noise no model can interpret — see _elide_packed_arrays; elision runs first, so a blob-heavy but otherwise-short file is read whole rather than pointlessly mapped), are both user-configurable with 0 (or -1) disabling each — see GDLLMTunables' gdllm/tool_output section. Characters, not lines, because context cost is characters: wild-measured, 43% of all whole-file read bytes came from files under the old 1000-line gate but ≥12 KB.
 
 ## The packed-array constructors read_file elides, mapped to how many printed numbers make up one element (a Vector3 prints as three), so the marker can report true element counts. PackedStringArray is deliberately absent — its payload is readable text, not a data blob.
 const ELIDABLE_PACKED_ARRAYS := {
@@ -1336,8 +1322,7 @@ const SET_SETTING_CREATE_KEYS := ["create", "force", "new"]
 const IMPORT_SETTINGS_KEYS := ["settings", "setting", "params", "options", "values"]
 ## list_directory's opt-in for the sidecar files it otherwise folds away.
 const LIST_SIDECAR_KEYS := ["sidecars", "show_sidecars", "include_sidecars", "all"]
-## list_directory's row cap and the opt-out that waives it ("all" belongs to the sidecar list above, so it is not an alias here). The largest legitimate directory measured in a real project ran 163 rows; the wild overflow was res://.godot/imported at ~700 cache entries per call.
-const MAX_LIST_ROWS := 200
+# list_directory's row cap is user-configurable (see GDLLMTunables' gdllm/tool_output section; the largest legitimate directory measured in a real project ran 163 rows, and the wild overflow was res://.godot/imported at ~700 cache entries per call), and the opt-out below waives it ("all" belongs to the sidecar list above, so it is not an alias here).
 const LIST_FULL_KEYS := ["full", "full_list", "no_cap", "complete", "everything"]
 ## The console tools' argument synonyms: read_output's line tail, read_errors' entry limit, and the substring filter both share, tolerant of schema-blind calls like the other lists.
 const CONSOLE_LINES_KEYS := ["lines", "count", "limit", "tail", "last", "n"]
@@ -1353,8 +1338,8 @@ const RUN_TIMEOUT_KEYS := ["timeout_seconds", "timeout", "max_seconds", "limit"]
 const RUN_SCRIPT_PATH_KEYS := ["path", "script", "file", "filename", "filepath"]
 
 ## One-line usage reminders the run tools' argument errors carry, in the SEARCH_USAGE pattern.
-const RUN_GAME_USAGE := "All arguments are optional: \"scene\" plays one scene (res:// path) instead of the main scene, \"wait_seconds\" sets the capture window (default 6, max 30), \"keep_running\": true leaves the game up for the user afterwards, and \"show\": [\"collisions\"] draws debug overlays in the run."
-const RUN_SCRIPT_USAGE := "Pass the script in \"path\" ({\"path\": \"res://checks/my_check.gd\"}) — it must extend SceneTree and end with quit(); optionally \"args\" (an array of strings the script reads via OS.get_cmdline_user_args()) and \"timeout_seconds\" (default 30, max 120)."
+const RUN_GAME_USAGE := "All arguments are optional: \"scene\" plays one scene (res:// path) instead of the main scene, \"wait_seconds\" sets the capture window (default {tunable:run_game_default_wait_seconds}, max {tunable:run_game_max_wait_seconds}), \"keep_running\": true leaves the game up for the user afterwards, and \"show\": [\"collisions\"] draws debug overlays in the run."
+const RUN_SCRIPT_USAGE := "Pass the script in \"path\" ({\"path\": \"res://checks/my_check.gd\"}) — it must extend SceneTree and end with quit(); optionally \"args\" (an array of strings the script reads via OS.get_cmdline_user_args()) and \"timeout_seconds\" (default {tunable:run_script_default_timeout_seconds}, max {tunable:run_script_max_timeout_seconds})."
 
 ## The tools that execute project code — game runs, headless scripts, the game-driving tools that feed input into or call methods on a live run, and stepping a paused one back into motion. They ride the `mutating` gate (executed code can change anything the edit tools can), and _dispatch words their refusal as running code rather than modifying files.
 const RUN_TOOLS := ["run_game", "stop_game", "run_script", "send_game_input", "call_game_method", "debug_game", "suspend_game", "reload_game_scripts"]
@@ -1365,16 +1350,9 @@ const DEBUG_TOOLS := ["set_breakpoint"]
 ## Tools whose IDENTICAL call does the work again rather than returning a stale answer: stepping a frame, arming or clearing a breakpoint, replaying an input, pushing a reload, resuming a paused game, running a script, re-importing an asset (a no-settings set_import_setting call is a rebuild), re-taking the user's focus to a place they navigated away from. Their results are numbered from the second occurrence on (see GDLLMRepeats), because the duplicate brake reads identical content as a repeat that added nothing and four such firings end the turn — measured, on four of these tools. Membership is the whole opt-in: a new tool that does real work on repeat joins this list and needs no numbering code of its own.
 const REPEAT_REAL_WORK_TOOLS := ["suspend_game", "set_breakpoint", "send_game_input", "reload_game_scripts", "debug_game", "run_script", "set_import_setting", "open_for_user"]
 
-## run_game's capture-window bounds (seconds): the default covers boot plus first frames, the cap keeps one call from parking the tool loop for minutes.
-const RUN_GAME_DEFAULT_WAIT := 6
-const RUN_GAME_MAX_WAIT := 30
-## How long after launch the editor may report no playing scene before run_game calls the launch failed, rather than mistaking slow boot for an instant crash.
-const RUN_GAME_LAUNCH_GRACE_MS := 2000
-## run_script's timeout bounds (seconds); unlike the fixed validation timeout the model may raise this, since a legitimate script can compute longer than a load check.
-const RUN_SCRIPT_DEFAULT_TIMEOUT := 30
-const RUN_SCRIPT_MAX_TIMEOUT := 120
-## The most output lines a run_script result relays. More generous than the console default because a killed or finished subprocess's output has nowhere else to live — what this drops, only a re-run can reprint.
-const RUN_SCRIPT_OUTPUT_LINES := 80
+# run_game's capture-window bounds (default covering boot plus first frames, cap keeping one call from parking the tool loop for minutes) are user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
+# How long after launch the editor may report no playing scene before run_game calls the launch failed (rather than mistaking slow boot for an instant crash) is user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
+# run_script's timeout bounds (the model may raise the default up to the cap, since a legitimate script can compute longer than a load check) and its output-line relay cap (more generous than the console default because a killed or finished subprocess's output has nowhere else to live — what it drops, only a re-run can reprint) are user-configurable — see GDLLMTunables' gdllm/tool_runtime and gdllm/tool_output sections.
 
 ## The game-driving tools' argument synonyms and usage lines, in the same tolerant-key pattern; the step dictionaries inside send_game_input's array have their own tolerant keys in GDLLMGameProtocol.
 const GAME_SCOPE_KEYS := ["path", "node", "node_path", "scope", "under"]
@@ -1398,18 +1376,12 @@ const SUSPEND_ALIASES := {
 	"frame": "frame", "frames": "frame", "step": "frame", "advance": "frame", "next": "frame", "next_frame": "frame", "tick": "frame",
 }
 const SUSPEND_GAME_USAGE := "Pass \"action\": \"on\" to freeze the game, \"off\" to let it run again, or \"frame\" to advance a few frames ({\"action\": \"frame\", \"frames\": 3})."
-## The most frames one suspend_game call may advance, so stepping stays a bounded look rather than an unattended run.
-const SUSPEND_MAX_FRAMES := 30
-## How long the editor waits between checks that a stepped frame has landed, and the whole call's wall-clock budget for stepping — a game too slow to confirm its frames reports how many it managed rather than parking the tool loop.
-const SUSPEND_FRAME_SETTLE_MS := 40
-const SUSPEND_STEP_BUDGET_MS := 12000
-## How long a stepped frame's prints are waited for before the capture reads the console: a suspended game answers the debugger slowly, and the whole point of stepping one frame is to see what that frame printed.
-const SUSPEND_OUTPUT_SETTLE_MS := 1500
+# The most frames one suspend_game call may advance (stepping stays a bounded look rather than an unattended run) and the whole call's wall-clock stepping budget (a game too slow to confirm its frames reports how many it managed rather than parking the tool loop) are user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
+# The frame-landed poll interval and the wait for a stepped frame's prints to cross the debugger (a suspended game answers slowly, and the whole point of stepping one frame is to see what it printed) are user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
 
-## reload_game_scripts' argument synonyms and usage, plus the cap on how many changed scripts one reload pushes before the list is refused as too broad to be a targeted fix.
+## reload_game_scripts' argument synonyms and usage; the cap on how many changed scripts one reload pushes before the list is refused as too broad to be a targeted fix is user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
 const RELOAD_PATHS_KEYS := ["paths", "path", "files", "file", "scripts", "script"]
 const RELOAD_GAME_SCRIPTS_USAGE := "Call it with no arguments to reload every .gd changed since the run started, or pass \"paths\": [\"res://player.gd\"] to reload specific files."
-const RELOAD_MAX_FILES := 40
 ## The editor's Debug-menu run flags, as the project-metadata keys the engine reads at launch (EditorSettings project metadata, section "debug_options"), keyed by the name run_game's `show` takes. Both hot-reload flags are set for every run this session starts: the reload message needs BOTH armed at launch or it silently breaks the running scripts instead of updating them (probe-verified on 4.7).
 const RUN_DEBUG_OPTIONS := {
 	"collisions": "run_debug_collisions",
@@ -1435,9 +1407,7 @@ const RUN_OVERLAY_LABELS := {
 	"avoidance": "avoidance agent radii",
 	"redraw": "canvas redraw flashes",
 }
-## How much longer than the sequence itself the editor waits for the input reply, and the flat wait for snapshot/call replies, before an unanswered command is reported instead of parked on.
-const GAME_REPLY_MARGIN_MS := 4000
-const GAME_REPLY_TIMEOUT_MS := 4000
+# How much longer than the sequence itself the editor waits for the input reply, and the flat wait for snapshot/call replies, are user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
 
 ## The debugging tools' argument synonyms and usage lines, in the same tolerant-key pattern.
 const BREAK_FRAME_KEYS := ["frame", "stack_frame", "level", "index"]
@@ -1448,13 +1418,9 @@ const BREAK_PATH_KEYS := ["path", "script", "file", "filename", "filepath"]
 const BREAK_LINE_KEYS := ["line", "line_number", "lineno", "at_line"]
 const BREAK_REMOVE_KEYS := ["remove", "clear", "disable", "off", "delete"]
 const READ_GAME_BREAK_USAGE := "All arguments are optional: \"frame\" reports a caller instead of the innermost frame (0 is where execution stopped) and \"all\": true includes the frame's globals."
-const DEBUG_GAME_USAGE := "Pass \"action\" as one of \"break\" (halt a running game), \"continue\", \"step\" (into), \"next\" (over), or \"out\" ({\"action\": \"next\", \"times\": 3}); \"times\" repeats a step up to 10 times."
+const DEBUG_GAME_USAGE := "Pass \"action\" as one of \"break\" (halt a running game), \"continue\", \"step\" (into), \"next\" (over), or \"out\" ({\"action\": \"next\", \"times\": 3}); \"times\" repeats a step up to {tunable:debug_game_max_steps} times."
 const SET_BREAKPOINT_USAGE := "Pass the script in \"path\" and the 1-based \"line\" ({\"path\": \"res://player.gd\", \"line\": 42}); add \"remove\": true to clear it, or \"remove\": true with no line to clear every breakpoint this session armed."
-## How long one step press may take to land the next break before the result reports that the game ran on instead of parking on it, and the shorter window a resume is watched for an immediate second break.
-const BREAK_ADVANCE_TIMEOUT_MS := 4000
-const BREAK_CONTINUE_WATCH_MS := 1500
-## How many frames the script editor is given to build the text control whose gutter carries a breakpoint.
-const BREAK_EDITOR_FRAMES := 20
+# How long one step press may take to land the next break, the shorter window a resume is watched for an immediate second break, and the frames the script editor gets to build the breakpoint gutter are user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
 
 ## The performance tools' argument synonyms and usage lines, in the same tolerant-key pattern; run_game's profile flag rides its own list, and doubles as a profiler selector there.
 const PERF_SECONDS_KEYS := ["seconds", "window", "duration", "last", "time"]
@@ -1465,15 +1431,11 @@ const PERF_FILTER_KEYS := ["filter", "contains", "search", "match", "query", "na
 const RUN_PROFILE_KEYS := ["profile", "profiler", "profile_functions"]
 const VRAM_LIMIT_KEYS := ["limit", "count", "rows", "top", "max", "n"]
 const VRAM_FILTER_KEYS := ["filter", "contains", "search", "grep", "match", "query", "path", "name"]
-const READ_PERFORMANCE_USAGE := "All arguments are optional: \"seconds\" sets the summary window (default 30, max 180) and \"all\": true reports every built-in monitor instead of the curated set."
-const PROFILE_GAME_USAGE := "All arguments are optional: \"seconds\" sets how long the profiler samples the live game (default 6, max 30), \"mode\" picks which profiler — \"functions\" (default), \"visual\", or \"network\" — and \"limit\"/\"filter\" control the report rows (raise the row cap, or match rows by name)."
-const READ_VIDEO_RAM_USAGE := "Both arguments are optional: \"limit\" sets how many of the largest resources to list (default 20, max 100) and \"filter\" keeps only rows whose path, type, or format contains it (e.g. \"res://textures\")."
-const PROFILE_GAME_DEFAULT_SECONDS := 6
-const PROFILE_GAME_MAX_SECONDS := 30
-## How long a Video RAM refresh waits for the game's reply before reporting that it never answered, rather than passing the tab's previous list off as the current one.
-const VRAM_REPLY_TIMEOUT_MS := 4000
-## How long send_game_input waits for clicked-control records still short of the pointer steps played. The game drains these reports at about one per second (probe-measured: adjacent clicks' records arrive almost exactly 1000 ms apart), so the last click's record trails the sequence's reply by up to a second; this covers the dominant one-or-two-click case, and the composer's wording owns the cadence for longer chains rather than claiming a miss for a record still queued.
-const CLICK_RECORD_SETTLE_MS := 1600
+const READ_PERFORMANCE_USAGE := "All arguments are optional: \"seconds\" sets the summary window (default {tunable:performance_default_window_seconds}, max {tunable:performance_history_seconds}) and \"all\": true reports every built-in monitor instead of the curated set."
+const PROFILE_GAME_USAGE := "All arguments are optional: \"seconds\" sets how long the profiler samples the live game (default {tunable:profile_game_default_seconds}, max {tunable:profile_game_max_seconds}), \"mode\" picks which profiler — \"functions\" (default), \"visual\", or \"network\" — and \"limit\"/\"filter\" control the report rows (raise the row cap, or match rows by name)."
+const READ_VIDEO_RAM_USAGE := "Both arguments are optional: \"limit\" sets how many of the largest resources to list (default {tunable:video_ram_default_rows}, max {tunable:video_ram_max_rows}) and \"filter\" keeps only rows whose path, type, or format contains it (e.g. \"res://textures\")."
+# profile_game's sampling-window bounds are user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
+# The Video RAM refresh reply wait and the clicked-control record settle are user-configurable — see GDLLMTunables' gdllm/tool_runtime section. The game drains click records at about one per second (probe-measured: adjacent clicks' records arrive almost exactly 1000 ms apart), so the last click's record trails the sequence's reply by up to a second; the settle default covers the dominant one-or-two-click case, and the composer's wording owns the cadence for longer chains rather than claiming a miss for a record still queued.
 ## list_dependencies' argument synonyms; the reverse side accepts the natural "who uses this" spellings.
 const DEPS_PATH_KEYS := ["path", "file", "filename", "filepath", "resource", "target"]
 const DEPS_REVERSE_KEYS := ["reverse", "users", "usages", "referenced_by", "reverse_deps", "who_uses", "uses"]
@@ -1493,8 +1455,7 @@ const SET_PROJECT_SETTING_USAGE := "Pass \"setting\" (e.g. \"input/jump\", \"aut
 const SET_IMPORT_SETTING_USAGE := "Pass the ASSET in \"path\" ({\"path\": \"res://sprites/hero.png\"}) and optionally \"settings\" as an object ({\"compress/mode\": 0}); with no settings the asset is simply re-imported."
 ## The extensions whose files carry engine dependency records; everything else is text for the purposes of dependency tracing.
 const DEP_RESOURCE_EXTENSIONS := ["tscn", "scn", "tres", "res"]
-## The most dependency/user lines one list_dependencies result prints before collapsing the rest, in the narrow-context spirit.
-const MAX_DEPENDENCY_LINES := 40
+# The most dependency/user lines one list_dependencies result prints before collapsing the rest (in the narrow-context spirit) is user-configurable — see GDLLMTunables' gdllm/tool_output section.
 
 ## The one-line usage reminder create_resource errors carry, so a malformed call comes back with the expected shape instead of a dead end.
 const CREATE_RESOURCE_USAGE :="Pass \"from\" (a .tres/.res path, a built-in Resource class like \"StandardMaterial3D\", or a script class/res:// .gd path) and \"path\" (the res:// destination ending in .tres or .res); optionally \"properties\" (name→value) and \"overwrite\" (true to replace an existing file)."
@@ -1526,17 +1487,14 @@ const DESCRIBE_SCENE_FILE_USAGE := "Pass the scene file in \"path\" ({\"path\": 
 const UNDO_WINDOW_KEYS := ["window", "count", "limit", "last", "n", "actions"]
 const OPEN_LINE_KEYS := ["line", "line_number", "at_line", "row"]
 const OPEN_REVEAL_KEYS := ["reveal", "reveal_only", "select_only", "locate", "show_in_filesystem"]
-const READ_UNDO_HISTORY_USAGE := "The one argument is optional: \"window\" is how many recent actions each history shows (default 15, capped at 100)."
+const READ_UNDO_HISTORY_USAGE := "The one argument is optional: \"window\" is how many recent actions each history shows (default {tunable:undo_history_default_window}, capped at {tunable:undo_history_max_window})."
 const OPEN_FOR_USER_USAGE := "Pass the file in \"path\" ({\"path\": \"res://player/player.gd\"}); optionally \"line\" (1-based) opens a script at that line, and \"reveal\": true selects the file in the FileSystem dock instead of opening it."
-## read_undo_history's window bounds: the default covers a working stretch of edits, and the cap keeps a history of user actions from ever dumping whole.
-const UNDO_HISTORY_DEFAULT_WINDOW := 15
-const UNDO_HISTORY_MAX_WINDOW := 100
+# read_undo_history's window bounds (the default covers a working stretch of edits, and the cap keeps a history of user actions from ever dumping whole) are user-configurable — see GDLLMTunables' gdllm/tool_output section.
 
 ## edit_file's one-line usage reminder, like SEARCH_USAGE, and the lines of context shown on each side of the changed region in the result excerpt so a confirmation stays a narrow snippet, not a file dump.
 const EDIT_FILE_USAGE := "Pass \"path\" plus \"old_string\" (the exact text to replace) and \"new_string\" (its replacement); add \"replace_all\": true to change every occurrence instead of requiring a unique match."
 
-## The most located errors a validation report shows with an excerpt, so a badly broken file doesn't flood the result.
-const EDIT_ERROR_EXCERPTS := 3
+# The most located errors a validation report shows with an excerpt (so a badly broken file doesn't flood the result) is user-configurable — see GDLLMTunables' gdllm/tool_output section.
 
 ## write_file argument aliases and usage reminder, in the same tolerant-key pattern as the other tools.
 const WRITE_CONTENT_KEYS := ["content", "text", "contents", "body", "source", "data"]
@@ -1548,9 +1506,7 @@ const WRITE_FORCE_KEYS := ["force", "confirm"]
 const DELETE_FORCE_KEYS := ["force", "force_delete", "confirm"]
 
 const DELETE_FILE_USAGE := "Pass the file to delete in \"path\" ({\"path\": \"res://old.gd\"}); add \"force\": true only after accounting for the files the refusal listed as still referencing it."
-const EDIT_EXCERPT_CONTEXT := 1
-## Most changed lines an edit confirmation echoes before the middle is counted instead: the replacement text already sits in the conversation as the call's own arguments, so a long echo pays for it twice; the head and tail with real line numbers carry the placement, which is the new information.
-const EDIT_EXCERPT_MAX_CHANGED_LINES := 20
+# The excerpt's context lines per side, and the most changed lines an edit confirmation echoes before the middle is counted instead (the replacement text already sits in the conversation as the call's own arguments, so a long echo pays for it twice; the head and tail with real line numbers carry the placement, which is the new information), are user-configurable — see GDLLMTunables' gdllm/tool_output section.
 
 ## move_file/rename_file argument aliases and usage reminders, in the same tolerant-key pattern; force shares delete's accounting framing but never overrides containment or overwriting.
 const MOVE_DEST_KEYS := ["to", "destination", "dest", "new_path", "target", "into"]
@@ -1564,8 +1520,7 @@ const COPY_SOURCE_KEYS := ["path", "source", "from", "file", "filename", "filepa
 const COPY_DEST_KEYS := ["to", "destination", "dest", "new_path", "target", "copy_to", "into"]
 const COPY_FILE_USAGE := "Pass the file to duplicate in \"path\" and the copy's location in \"to\" — a full res:// path with the new file name, or a directory (existing, or ending in \"/\") to copy it into under its own name ({\"path\": \"res://sprites/coin.png\", \"to\": \"res://sprites/coin_silver.png\"})."
 
-## Wall-clock cap on one headless validation subprocess (ms). The checks normally finish in well under a second, but a run can wedge outright (observed contending with a live editor), and an unbounded wait there freezes the whole editor with it.
-const ENGINE_CHECK_TIMEOUT_MS := 15000
+# The wall-clock cap on one headless validation subprocess is user-configurable — see GDLLMTunables' gdllm/tool_runtime section. The checks normally finish in well under a second, but a run can wedge outright (observed contending with a live editor), and an unbounded wait there freezes the whole editor with it.
 
 ## Completion sentinels for the script-driven validation subprocesses: a run whose output lacks its pattern died before finishing, so its (possibly empty) error list is no verdict — load_check.gd prints the marker explicitly, while the linter's mandatory OK/Failure summary doubles as its own.
 const LOAD_CHECK_DONE_PATTERN := "(?m)^GDLLM_CHECK_DONE$"
@@ -1596,15 +1551,12 @@ const SHADER_ERROR_MARKER := "SHADER ERROR:"
 const SHADER_TYPE_REFUSAL := "Shader type (.*?) not supported in .* renderer\\."
 const SHADER_ABSENT_MARKER := "Parameter \"shader\" is null."
 
-## Cap on the child-output line quoted into a dead validation run's why — one line names the cause without spilling an error cascade into context.
-const CHECK_DEATH_TAIL_CHARS := 200
+# The cap on the child-output line quoted into a dead validation run's why (one line names the cause without spilling an error cascade into context) is user-configurable — see GDLLMTunables' gdllm/tool_output section.
 
 ## The `why` a validator reports when cancel_running_checks interrupted it, phrased to complete "the engine validation run …" in a result line.
 const CHECK_CANCELLED_WHY := "was cancelled before it finished"
 
-## describe_class caps, kept in the narrow-context spirit: the most members one section prints before it's truncated with a note steering the model to a `filter` substring (base classes like Node/Control have hundreds of methods), and the most near-miss class names suggested when a lookup doesn't resolve.
-const MAX_CLASS_MEMBERS_PER_SECTION := 80
-const MAX_CLASS_SUGGESTIONS := 12
+# describe_class's caps — the most members one section prints before it's truncated with a note steering the model to a `filter` substring (base classes like Node/Control have hundreds of methods), and the most near-miss class names suggested when a lookup doesn't resolve (the universal suggestion cap) — are user-configurable, kept small by default in the narrow-context spirit; see GDLLMTunables' gdllm/tool_output section.
 
 ## Theme-item kind → the theme_override_* property namespace that sets it per node, for the pointer describe_class/describe_member add when a Control lookup misses (see _theme_item_note).
 const THEME_OVERRIDE_NAMESPACES := {
@@ -1616,11 +1568,7 @@ const THEME_OVERRIDE_NAMESPACES := {
 	"icon": "theme_override_icons",
 }
 
-## Scene-inspection caps in the narrow-context spirit: the most tree lines one result prints before collapsing the rest, the most property/connection lines one node's detail shows, and the longest a rendered property value runs before an ellipsis (a packed array or long text must never flood a result).
-const MAX_SCENE_TREE_NODES := 150
-const MAX_SCENE_NODE_PROPERTIES := 40
-const MAX_SCENE_NODE_CONNECTIONS := 30
-const MAX_PROPERTY_VALUE_CHARS := 120
+# The scene-inspection caps — tree lines per result, property/connection lines per node's detail, and the rendered-value clip (a packed array or long text must never flood a result) — are user-configurable, kept small by default in the narrow-context spirit; see GDLLMTunables' gdllm/tool_output section.
 
 ## The ledger for callers that pass execute() none — the headless test scripts — so single-session runs need no setup; every in-editor caller passes its session's own (see SessionLedger at the end of this file).
 static var _fallback_ledger := SessionLedger.new()
@@ -1639,7 +1587,7 @@ static func tool_search_schema(allow_changes: bool = false, allow_delete: bool =
 	var schema := _schema(TOOL_SEARCH, TOOL_SEARCH_TOOL)
 	if retirement_disclosed:
 		schema["function"]["description"] += "\n\n" + TOOL_SEARCH_RETIREMENT_NOTE
-	schema["function"]["description"] += "\n\n" + _catalog(allow_changes, allow_delete, active_tools)
+	schema["function"]["description"] = GDLLMTunables.fill(String(schema["function"]["description"]) + "\n\n" + _catalog(allow_changes, allow_delete, active_tools))
 	return schema
 
 
@@ -1746,13 +1694,13 @@ static func retirement_in_history(history: Array, count: int = -1) -> bool:
 	return false
 
 
-## The attached tools an imminent cache rewrite can drop for free: idle for at least SCHEMA_RETIRE_IDLE_TURNS user turns (no recorded use counts as idle forever), sorted so notices and tests are deterministic. tool_search is never a candidate — it is the way back.
+## The attached tools an imminent cache rewrite can drop for free: idle for at least GDLLMTunables.SCHEMA_RETIRE_IDLE_TURNS user turns (no recorded use counts as idle forever), sorted so notices and tests are deterministic. tool_search is never a candidate — it is the way back.
 static func schema_retirement_candidates(active: Dictionary, last_used: Dictionary, current_turn: int) -> PackedStringArray:
 	var retired := PackedStringArray()
 	for name in active:
 		if String(name) == TOOL_SEARCH:
 			continue
-		if current_turn - int(last_used.get(name, 0)) >= SCHEMA_RETIRE_IDLE_TURNS:
+		if current_turn - int(last_used.get(name, 0)) >= GDLLMTunables.geti(GDLLMTunables.SCHEMA_RETIRE_IDLE_TURNS):
 			retired.append(String(name))
 	retired.sort()
 	return retired
@@ -1790,7 +1738,8 @@ static func max_consecutive_uses(name: String) -> int:
 ## The one-off reflection instruction injected when a tool trips its loop guard, asking the model to explain itself before the stop notice shows (the session sends it as a user turn with no tools attached and never stores it). A tool may declare its own tailored `loop_break_message` otherwise DEFAULT_LOOP_BREAK_MESSAGE is used, naming the tool.
 static func loop_break_message(name: String) -> String:
 	var custom := String(_definition_for(name).get("loop_break_message", ""))
-	return custom if custom != "" else DEFAULT_LOOP_BREAK_MESSAGE % [name, name]
+	# fill() rides along for future-proofing: no break message carries a {tunable:...} token today, but this is a model-visible surface and must stay covered if one ever does.
+	return GDLLMTunables.fill(custom if custom != "" else DEFAULT_LOOP_BREAK_MESSAGE % [name, name])
 
 
 ## Nudge appended to a round's last tool result when the run's rounds ping-pong A→B→A→B between two tools AND some call in the cycle re-returned an already-seen result — a cycle the single-tool streak guard can't see, named only once the repeat proves it isn't converging (see GDLLMLoopBrakes.oscillation_nudge). Like DUPLICATE_CALL_NUDGE the loop continues; the pattern is only named, to the model and the user alike.
@@ -1809,17 +1758,24 @@ static func _definition_for(name: String) -> Dictionary:
 
 ## Wrap a tool definition ({description, parameters, ...}) in the Ollama/OpenAI function-schema envelope under `name`. Extra fields on the definition (like max_consecutive_uses) are left out, so they never reach the model.
 static func _schema(name: String, entry: Dictionary) -> Dictionary:
+	# Tool prose quotes its own defaults and caps as {tunable:...} tokens; fill() substitutes the values currently configured, so the model is never told a number the settings no longer hold. The parameters pass rides a JSON round-trip to reach the nested per-argument descriptions without walking the dict by hand.
+	var parameters: Variant = entry["parameters"]
+	var params_json := JSON.stringify(parameters)
+	if params_json.contains("{tunable:"):
+		var filled: Variant = JSON.parse_string(GDLLMTunables.fill(params_json))
+		if filled is Dictionary:
+			parameters = filled
 	return {
 		"type": "function",
 		"function": {
 			"name": name,
-			"description": entry["description"],
-			"parameters": entry["parameters"],
+			"description": GDLLMTunables.fill(String(entry["description"])),
+			"parameters": parameters,
 		},
 	}
 
 
-## Registered tools matching `query`, most-relevant first, each as {name, description, parameters}. A query word that exactly names a tool returns just the named tool(s) — the model picked from the catalog, so nothing else should ride along. Otherwise a tool matches only when EVERY query word appears in its name or one-line summary; any looser rule returned most of the registry for vague queries, so matches are strict, with ties broken toward name matches. The MAX_SEARCH_RESULTS activation cap is applied — and disclosed — by _tool_search, not here, so a silent cut never masquerades as the whole match set. Mutating tools are excluded while `allow_changes` is off — and destructive ones while `allow_delete` is off — matching the catalog, so a search can never activate a tool the session would refuse to run.
+## Registered tools matching `query`, most-relevant first, each as {name, description, parameters}. A query word that exactly names a tool returns just the named tool(s) — the model picked from the catalog, so nothing else should ride along. Otherwise a tool matches only when EVERY query word appears in its name or one-line summary; any looser rule returned most of the registry for vague queries, so matches are strict, with ties broken toward name matches. The GDLLMTunables.TOOL_SEARCH_MAX_RESULTS activation cap is applied — and disclosed — by _tool_search, not here, so a silent cut never masquerades as the whole match set. Mutating tools are excluded while `allow_changes` is off — and destructive ones while `allow_delete` is off — matching the catalog, so a search can never activate a tool the session would refuse to run.
 static func search(query: String, allow_changes: bool = false, allow_delete: bool = false) -> Array:
 	var terms := query.to_lower().split(" ", false)
 	var named: Array = []
@@ -1881,8 +1837,8 @@ static func _tool_search(query: String, allow_changes: bool, allow_delete: bool,
 	var matches := search(query, allow_changes, allow_delete)
 	# The activation cap lands here so it can be disclosed: everything returned attaches to all later turns, but a silent top-5 read as "only 5 matched" (audit-caught).
 	var total := matches.size()
-	if total > MAX_SEARCH_RESULTS:
-		matches = matches.slice(0, MAX_SEARCH_RESULTS)
+	if total > GDLLMTunables.geti(GDLLMTunables.TOOL_SEARCH_MAX_RESULTS):
+		matches = matches.slice(0, GDLLMTunables.geti(GDLLMTunables.TOOL_SEARCH_MAX_RESULTS))
 	var activate := PackedStringArray()
 	var attached := PackedStringArray()
 	var entries: Array = []
@@ -1894,7 +1850,7 @@ static func _tool_search(query: String, allow_changes: bool, allow_delete: bool,
 			attached.append(match_name)
 			entries.append({"name": match_name, "note": "already attached — do not search for it again; call it now, as %s%s" % [match_name, _params_hint(definition)]})
 		else:
-			entries.append({"name": match_name, "summary": String(definition.get("summary", definition["description"])), "note": "now attached to your tools — call it as %s%s" % [match_name, _params_hint(definition)]})
+			entries.append({"name": match_name, "summary": GDLLMTunables.fill(String(definition.get("summary", definition["description"]))), "note": "now attached to your tools — call it as %s%s" % [match_name, _params_hint(definition)]})
 	var content: String
 	if matches.is_empty():
 		var blocked := _gate_blocked_matches(query, allow_changes, allow_delete)
@@ -1911,8 +1867,8 @@ static func _tool_search(query: String, allow_changes: bool, allow_delete: bool,
 		content = "Already attached: %s. The full definition is already in your tools list, so do NOT call tool_search again — your next action must be to CALL the tool itself: %s." % [", ".join(attached), ", ".join(shapes)]
 	else:
 		var payload := {"tools": entries}
-		if total > MAX_SEARCH_RESULTS:
-			payload["note"] = "top %d of %d matches attached — add a word to narrow, or name one tool from the catalog exactly" % [MAX_SEARCH_RESULTS, total]
+		if total > GDLLMTunables.geti(GDLLMTunables.TOOL_SEARCH_MAX_RESULTS):
+			payload["note"] = "top %d of %d matches attached — add a word to narrow, or name one tool from the catalog exactly" % [GDLLMTunables.geti(GDLLMTunables.TOOL_SEARCH_MAX_RESULTS), total]
 		content = JSON.stringify(payload, "\t")
 	return {"content": content, "activate": activate}
 
@@ -2212,7 +2168,7 @@ static func _broken_reminder_hook(args: Dictionary, result: Dictionary, ledger: 
 		return ""
 	var paths: Array = ledger.broken_files.keys()
 	paths.sort()
-	ledger.broken_reminder_cooldown = 2
+	ledger.broken_reminder_cooldown = GDLLMTunables.geti(GDLLMTunables.BROKEN_REMINDER_COOLDOWN)
 	return "Automatic reminder: you left %d file(s) BROKEN on disk and have not fixed them yet: %s. Fix them with edit_file before finishing." % [paths.size(), ", ".join(paths)]
 
 
@@ -2249,7 +2205,7 @@ static func _dependent_mentions(resolved: String, class_word: String, include_pa
 	return out
 
 
-## The project files leaning on `resolved`, as {"total": int, "lines": Array} of "- path (why)" entries capped at MAX_DEPENDENT_MENTIONS with an honest remainder line: whole-word mentions of `class_word` (skipped when ""), plus — when `include_path_refs` — path/uid references through engine dependency records for scenes/resources and literal text match for scripts and project.godot, mirroring _reverse_dependencies. The word check needs the text form, so binary .scn/.res are only seen through their dependency records.
+## The project files leaning on `resolved`, as {"total": int, "lines": Array} of "- path (why)" entries capped at GDLLMTunables.DEPENDENT_MENTIONS_CAP with an honest remainder line: whole-word mentions of `class_word` (skipped when ""), plus — when `include_path_refs` — path/uid references through engine dependency records for scenes/resources and literal text match for scripts and project.godot, mirroring _reverse_dependencies. The word check needs the text form, so binary .scn/.res are only seen through their dependency records.
 static func _dependent_mentions_scan(resolved: String, class_word: String, include_path_refs: bool) -> Dictionary:
 	var uid_text := _uid_text_for(resolved)
 	var word: RegEx = null
@@ -2276,11 +2232,11 @@ static func _dependent_mentions_scan(resolved: String, class_word: String, inclu
 			if marker != "-":
 				hits.append("- %s (references it by path%s)" % [path, marker])
 	var total := hits.size()
-	if total > MAX_DEPENDENT_MENTIONS:
-		hits = hits.slice(0, MAX_DEPENDENT_MENTIONS)
+	if total > GDLLMTunables.geti(GDLLMTunables.DEPENDENT_MENTIONS_CAP):
+		hits = hits.slice(0, GDLLMTunables.geti(GDLLMTunables.DEPENDENT_MENTIONS_CAP))
 		# With path refs in play the overflow can hold engine-record references search_files structurally misses (UID-based, binary .scn/.res) — the lever that sees those is list_dependencies.
 		var levers := "search_files, or list_dependencies with reverse: true," if include_path_refs else "search_files"
-		hits.append("(and %d more — %s for the rest)" % [total - MAX_DEPENDENT_MENTIONS, levers])
+		hits.append("(and %d more — %s for the rest)" % [total - GDLLMTunables.geti(GDLLMTunables.DEPENDENT_MENTIONS_CAP), levers])
 	return {"total": total, "lines": hits}
 
 
@@ -2447,10 +2403,11 @@ static func _unexpected_arg_error(args: Dictionary, keys: Array, usage: String) 
 	var got := PackedStringArray()
 	for key in args.keys():
 		got.append("\"%s\"" % key)
-	return "Error: unrecognized argument(s) %s. %s" % [", ".join(got), usage]
+	# fill() resolves any {tunable:...} tokens the usage line quotes its defaults with, so the retry is told the numbers actually in force.
+	return "Error: unrecognized argument(s) %s. %s" % [", ".join(got), GDLLMTunables.fill(usage)]
 
 
-## Read the file named by `args.path` and return an execute()-shaped result: normally "<resolved path>:\n\n<contents>", but a file past READ_FILE_SUMMARY_THRESHOLD_CHARS characters defers to a `subagent` map instead (see _summarize_via_subagent) and a loadable .tscn returns its saved node tree (see _scene_read_map) — both overridden by `args.full` (whole file regardless) or a `start_line`/`end_line` range (exactly those lines verbatim, see _render_line_range). Long packed-array payloads are elided in every DEFAULT path — before the threshold is measured, so the gate judges the size that would actually be delivered (see _elide_packed_arrays) — while `full` returns them verbatim and sticky-disarms the overwrite gate (see SessionLedger.elided_files). Errors return as plain content the model can recover from; binary files are refused so a garbled blob never lands in the conversation. A path that only resolved by file-name search is disclosed loudly up front (see _resolution_note).
+## Read the file named by `args.path` and return an execute()-shaped result: normally "<resolved path>:\n\n<contents>", but a file past GDLLMTunables.READ_FILE_SUMMARY_THRESHOLD characters defers to a `subagent` map instead (see _summarize_via_subagent) and a loadable .tscn returns its saved node tree (see _scene_read_map) — both overridden by `args.full` (whole file regardless) or a `start_line`/`end_line` range (exactly those lines verbatim, see _render_line_range). Long packed-array payloads are elided in every DEFAULT path — before the threshold is measured, so the gate judges the size that would actually be delivered (see _elide_packed_arrays) — while `full` returns them verbatim and sticky-disarms the overwrite gate (see SessionLedger.elided_files). Errors return as plain content the model can recover from; binary files are refused so a garbled blob never lands in the conversation. A path that only resolved by file-name search is disclosed loudly up front (see _resolution_note).
 static func _read_file(args: Dictionary, ledger: SessionLedger) -> Dictionary:
 	var requested := _arg_string(args, FILE_PATH_KEYS)
 	if requested == "":
@@ -2496,7 +2453,7 @@ static func _read_file(args: Dictionary, ledger: SessionLedger) -> Dictionary:
 			_stamp_elided_path(resolved, ledger)
 		var ranged := _render_line_range(resolved, text, line_count, start_line, end_line)
 		return _plain(note + ranged + _elision_note(ranged))
-	if not force_full and READ_FILE_SUMMARY_THRESHOLD_CHARS >= 0 and text.length() > READ_FILE_SUMMARY_THRESHOLD_CHARS:
+	if not force_full and GDLLMTunables.geti(GDLLMTunables.READ_FILE_SUMMARY_THRESHOLD) > 0 and text.length() > GDLLMTunables.geti(GDLLMTunables.READ_FILE_SUMMARY_THRESHOLD):
 		_mark_seen(resolved, false, ledger) # the map shows the file's shape, not its exact text
 		if elided:
 			_stamp_elided_path(resolved, ledger)
@@ -2607,9 +2564,9 @@ static func _count_lines(text: String) -> int:
 	return 0 if text == "" else text.count("\n") + 1
 
 
-## Replace each ELIDABLE_PACKED_ARRAYS payload in `text` longer than PACKED_ARRAY_ELIDE_CHARS with a count marker, keeping the wrapper so the property still reads as that array type. Only payloads made purely of serialized-data characters are touched, so a code expression that constructs one is never mangled.
+## Replace each ELIDABLE_PACKED_ARRAYS payload in `text` longer than GDLLMTunables.PACKED_ARRAY_ELIDE_CHARS with a count marker, keeping the wrapper so the property still reads as that array type. Only payloads made purely of serialized-data characters are touched, so a code expression that constructs one is never mangled.
 static func _elide_packed_arrays(text: String) -> String:
-	if PACKED_ARRAY_ELIDE_CHARS < 0:
+	if GDLLMTunables.geti(GDLLMTunables.PACKED_ARRAY_ELIDE_CHARS) <= 0:
 		return text
 	for type_name: String in ELIDABLE_PACKED_ARRAYS:
 		if text.contains(type_name + "("):
@@ -2633,7 +2590,7 @@ static func _elide_packed_payloads(text: String, type_name: String, scalars_per_
 			break
 		var payload := text.substr(payload_start, close - payload_start)
 		var is_data := _is_packed_byte_payload(payload) if is_bytes else _is_packed_numeric_payload(payload)
-		if payload.length() > PACKED_ARRAY_ELIDE_CHARS and is_data:
+		if payload.length() > GDLLMTunables.geti(GDLLMTunables.PACKED_ARRAY_ELIDE_CHARS) and is_data:
 			out += text.substr(pos, payload_start - pos)
 			if is_bytes:
 				out += "<%d bytes elided>" % _packed_byte_payload_size(payload)
@@ -2773,7 +2730,7 @@ static func _subagent_task_label(task: String) -> String:
 	return line.substr(0, SUBAGENT_LABEL_MAX_CHARS - 1).strip_edges() + "…"
 
 
-## Print the immediate contents of the directory named by `args.path` (or the project root when omitted): subdirectories (trailing "/") first, then files, with editor save-temps folded into a count line rather than listed (see _is_editor_temp) or hidden outright. A listing past MAX_LIST_ROWS truncates with a counted line naming `full` unless `full` waives the cap; hidden directories are refused outright (see _hidden_dir_guard). An error line if the directory can't be found.
+## Print the immediate contents of the directory named by `args.path` (or the project root when omitted): subdirectories (trailing "/") first, then files, with editor save-temps folded into a count line rather than listed (see _is_editor_temp) or hidden outright. A listing past GDLLMTunables.LIST_DIRECTORY_MAX_ROWS truncates with a counted line naming `full` unless `full` waives the cap; hidden directories are refused outright (see _hidden_dir_guard). An error line if the directory can't be found.
 static func _list_directory(args: Dictionary) -> String:
 	var unexpected := _unexpected_arg_error(args, DIR_PATH_KEYS + LIST_SIDECAR_KEYS + LIST_FULL_KEYS, "Pass the directory in \"path\", or omit it to list the project root.")
 	if unexpected != "":
@@ -2817,10 +2774,10 @@ static func _list_directory(args: Dictionary) -> String:
 			folded = split["folded"]
 	for f in listable:
 		rows.append("  %s" % f)
-	var over := rows.size() - MAX_LIST_ROWS
+	var over := rows.size() - GDLLMTunables.geti(GDLLMTunables.LIST_DIRECTORY_MAX_ROWS)
 	# The cap counts what would actually print — after temp omission and sidecar folding — and truncating a single overflow row would spend the disclosure line to hide one name (the fold_saves rule), so it takes at least two.
 	if over > 1 and not _arg_bool(args, LIST_FULL_KEYS):
-		lines.append_array(rows.slice(0, MAX_LIST_ROWS))
+		lines.append_array(rows.slice(0, GDLLMTunables.geti(GDLLMTunables.LIST_DIRECTORY_MAX_ROWS)))
 		# The final entry is named so the hidden tail has a visible end — wild-caught: models extrapolated the cut-off pattern past the real files, and a differently-named last file was reported nonexistent. The contents-not-names clause is wild-caught too: this line's earlier "to find specific files" sent a file-NAME question into a content search whose empty result read as proof of absence.
 		lines.append("  (…%d more of %d entries not shown, ending at %s — pass full: true for the whole listing, or search_files with this directory as \"path\" to search inside the files. Search matches file CONTENTS, never names: to confirm a file name exists or is absent, use full: true.)" % [over, rows.size(), rows[rows.size() - 1].strip_edges()])
 	else:
@@ -2845,7 +2802,7 @@ static func _search_files(args: Dictionary, ledger: SessionLedger) -> String:
 		return "Error: no search query was provided. " + SEARCH_USAGE
 	var full := _arg_bool(args, SEARCH_FULL_KEYS)
 	# No ceiling: an explicit context ask is the model pulling detail in on demand, and refusing it strands the model mid-task (measured); only the sign is normalized.
-	var context_lines := maxi(0, _arg_int(args, CONTEXT_LINES_KEYS, DEFAULT_SEARCH_CONTEXT))
+	var context_lines := maxi(0, _arg_int(args, CONTEXT_LINES_KEYS, GDLLMTunables.geti(GDLLMTunables.SEARCH_CONTEXT_LINES)))
 	var scope := _arg_string(args, SCOPE_PATH_KEYS)
 	var scan_root := ""
 	var files: Array[String] = []
@@ -2887,7 +2844,7 @@ static func _search_files(args: Dictionary, ledger: SessionLedger) -> String:
 			total_matches = int(totals["matches"])
 			# Recomputed because it gates the overview fallback below: dropping addon files can let the project's own matches fit as excerpts where the combined set would only have fitted as a file list.
 			total_blocks = int(totals["blocks"])
-	if not full and hits.size() > 1 and (hits.size() > MAX_OVERVIEW_FILES or total_blocks > MAX_SEARCH_BLOCKS):
+	if not full and hits.size() > 1 and (hits.size() > GDLLMTunables.geti(GDLLMTunables.SEARCH_OVERVIEW_FILES) or total_blocks > GDLLMTunables.geti(GDLLMTunables.SEARCH_MAX_BLOCKS)):
 		for hit: Dictionary in hits:
 			_mark_seen(String(hit["path"]), false, ledger) # an overview line names the file without showing its text
 			_stamp_elided(hit, ledger)
@@ -3001,13 +2958,13 @@ static func _scan_matches(path: String, lines: PackedStringArray, matched: Array
 static func _render_search_overview(query: String, scope_label: String, hits: Array, total_matches: int) -> String:
 	hits.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return (a["matched"] as Array).size() > (b["matched"] as Array).size())
 	var lines: Array = ["Found %d match(es) across %d files for \"%s\" in %s — too many to excerpt, so here is the per-file breakdown:" % [total_matches, hits.size(), query, scope_label], ""]
-	var shown := mini(hits.size(), MAX_SEARCH_BLOCKS)
+	var shown := mini(hits.size(), GDLLMTunables.geti(GDLLMTunables.SEARCH_MAX_BLOCKS))
 	for i in shown:
 		var hit: Dictionary = hits[i]
 		var funcs := ""
 		var names: Array[String] = hit["func_names"]
 		if not names.is_empty():
-			var listed := names.slice(0, MAX_OVERVIEW_FUNCS)
+			var listed := names.slice(0, GDLLMTunables.geti(GDLLMTunables.SEARCH_OVERVIEW_FUNCS))
 			var more := ", …" if names.size() > listed.size() else ""
 			funcs = " (in %s%s)" % [", ".join(listed), more]
 		lines.append("%s: %d match(es)%s" % [hit["path"], (hit["matched"] as Array).size(), funcs])
@@ -3018,11 +2975,11 @@ static func _render_search_overview(query: String, scope_label: String, hits: Ar
 	return "\n".join(lines)
 
 
-## Render the excerpt result: each file's blocks up to MAX_SEARCH_BLOCKS total (uncapped when `full`), headed by true totals; when the cap cuts blocks (one file dense with matches) the header says how many were omitted and names both ways through — narrowing and the full: true waiver — rather than passing the cap off as the whole count.
+## Render the excerpt result: each file's blocks up to GDLLMTunables.SEARCH_MAX_BLOCKS total (uncapped when `full`), headed by true totals; when the cap cuts blocks (one file dense with matches) the header says how many were omitted and names both ways through — narrowing and the full: true waiver — rather than passing the cap off as the whole count.
 static func _render_search_excerpts(query: String, scope_label: String, hits: Array, total_matches: int, total_blocks: int, full := false) -> String:
 	var rendered: Array = []
 	for h in hits:
-		if not full and rendered.size() >= MAX_SEARCH_BLOCKS:
+		if not full and rendered.size() >= GDLLMTunables.geti(GDLLMTunables.SEARCH_MAX_BLOCKS):
 			break
 		var hit: Dictionary = h
 		var path := String(hit["path"])
@@ -3031,7 +2988,7 @@ static func _render_search_excerpts(query: String, scope_label: String, hits: Ar
 			continue
 		var matched: Array[int] = hit["matched"]
 		for block in hit["blocks"]:
-			if not full and rendered.size() >= MAX_SEARCH_BLOCKS:
+			if not full and rendered.size() >= GDLLMTunables.geti(GDLLMTunables.SEARCH_MAX_BLOCKS):
 				break
 			rendered.append(_render_block(path, lines, block, matched))
 	var note := ""
@@ -3076,7 +3033,7 @@ static func _files_named_like(files: Array, query: String) -> Array[String]:
 		var matches := fname.get_extension() == ext if ext != "" else fname.contains(needle)
 		if matches:
 			out.append(String(path))
-			if out.size() >= MAX_FILENAME_SUGGESTIONS:
+			if out.size() >= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP):
 				break
 	return out
 
@@ -3226,9 +3183,9 @@ static func _read_function(args: Dictionary, ledger: SessionLedger) -> String:
 		for n in names:
 			if _node_name_near_miss(n, clean.to_lower()):
 				near.append(n)
-		if not near.is_empty() and near.size() <= MAX_CLASS_SUGGESTIONS:
+		if not near.is_empty() and near.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP):
 			return "No function named \"%s\" in %s. Closest names in this file: %s." % [clean, resolved, ", ".join(near)]
-		var shown: Array = names.slice(0, MAX_CLASS_SUGGESTIONS)
+		var shown: Array = names.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
 		var more := ""
 		if names.size() > shown.size():
 			more = " (and %d more — read_file lists every function)" % (names.size() - shown.size())
@@ -3390,7 +3347,7 @@ static func _file_not_found(requested: String, noun := "file") -> String:
 	return msg
 
 
-## Project files whose basename contains the requested one or vice versa (case-insensitive, the reverse floored like _create_res_near_miss so a tiny name doesn't drag in everything), capped at MAX_CLASS_SUGGESTIONS and sorted — transcripts show a model retrying a guessed name ("seed_managem.tres") that only existed with a prefix, with no pointer to the real file.
+## Project files whose basename contains the requested one or vice versa (case-insensitive, the reverse floored like _create_res_near_miss so a tiny name doesn't drag in everything), capped at GDLLMTunables.SUGGESTION_LIST_CAP and sorted — transcripts show a model retrying a guessed name ("seed_managem.tres") that only existed with a prefix, with no pointer to the real file.
 static func _basename_near_miss(file_name: String) -> PackedStringArray:
 	var out := PackedStringArray()
 	if file_name == "":
@@ -3403,7 +3360,7 @@ static func _basename_near_miss(file_name: String) -> PackedStringArray:
 		if base.contains(needle) or (base.get_basename().length() >= 4 and needle.contains(base)):
 			out.append(path)
 	out.sort()
-	return out.slice(0, MAX_CLASS_SUGGESTIONS)
+	return out.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
 
 
 ## Split the immediate children of `dir_path` into `dirs_out` (subdirectory names) and `files_out` (file names), both bare names. Hidden entries (leading ".") are skipped.
@@ -3473,7 +3430,7 @@ static func _index_within_any(idx: int, spans: Array[Vector2i]) -> bool:
 	return false
 
 
-## The excerpt to show for a match at `idx`, as {span, func_name, func_len, windowed}: the whole enclosing GDScript function when it fits the excerpt budget, otherwise a `context_lines` window — still annotated with the function it sits in so read_function can pull the body on demand. The budget is MAX_FUNCTION_EXCERPT_LINES at the default context but grows with an explicit larger `context_lines` ask, so a function is never windowed smaller than the window the caller asked for.
+## The excerpt to show for a match at `idx`, as {span, func_name, func_len, windowed}: the whole enclosing GDScript function when it fits the excerpt budget, otherwise a `context_lines` window — still annotated with the function it sits in so read_function can pull the body on demand. The budget is GDLLMTunables.SEARCH_MAX_FUNCTION_LINES at the default context but grows with an explicit larger `context_lines` ask, so a function is never windowed smaller than the window the caller asked for.
 static func _excerpt_for(lines: PackedStringArray, idx: int, context_lines: int, is_gd: bool) -> Dictionary:
 	var func_name := ""
 	var func_len := 0
@@ -3482,7 +3439,7 @@ static func _excerpt_for(lines: PackedStringArray, idx: int, context_lines: int,
 		if fspan.x != -1:
 			func_name = _func_name(lines[fspan.x])
 			func_len = fspan.y - fspan.x + 1
-			if func_len <= maxi(MAX_FUNCTION_EXCERPT_LINES, 2 * context_lines + 1):
+			if func_len <= maxi(GDLLMTunables.geti(GDLLMTunables.SEARCH_MAX_FUNCTION_LINES), 2 * context_lines + 1):
 				return {"span": fspan, "func_name": func_name, "func_len": func_len, "windowed": false}
 	var span := Vector2i(maxi(0, idx - context_lines), mini(lines.size() - 1, idx + context_lines))
 	return {"span": span, "func_name": func_name, "func_len": func_len, "windowed": func_name != ""}
@@ -3683,7 +3640,7 @@ static func _describe_non_classdb(requested: String, no_inheritance: bool, filte
 	return _unknown_class_message(requested, String(docs.get("error", "")))
 
 
-## Error text for a class that resolves in none of the three registries, with up to MAX_CLASS_SUGGESTIONS near-miss names drawn from all of them so a misspelling is correctable wherever the real name lives, and naming the tools that answer for what has no class at all — a script with no class_name, or a concept whose name is the thing being looked for. `docs_error` is passed when the doc cache itself was the thing that failed, since then "no such page" would be a claim this run can't make.
+## Error text for a class that resolves in none of the three registries, with up to GDLLMTunables.SUGGESTION_LIST_CAP near-miss names drawn from all of them so a misspelling is correctable wherever the real name lives, and naming the tools that answer for what has no class at all — a script with no class_name, or a concept whose name is the thing being looked for. `docs_error` is passed when the doc cache itself was the thing that failed, since then "no such page" would be a claim this run can't make.
 static func _unknown_class_message(requested: String, docs_error: String = "") -> String:
 	var seen: Dictionary = {}
 	var suggestions: Array[String] = []
@@ -3706,8 +3663,8 @@ static func _unknown_class_message(requested: String, docs_error: String = "") -
 	if suggestions.is_empty():
 		return msg + levers
 	suggestions.sort()
-	var note := "" if suggestions.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (suggestions.size() - MAX_CLASS_SUGGESTIONS)
-	return "%s Did you mean: %s%s?%s" % [msg, ", ".join(suggestions.slice(0, MAX_CLASS_SUGGESTIONS)), note, levers]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return "%s Did you mean: %s%s?%s" % [msg, ", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note, levers]
 
 
 ## Whether `candidate` is worth suggesting for `requested`: either name contains the other, the same rule the member lookups use. The reverse direction is what catches an invented name built out of a real one — "StyleBoxBase" suggests StyleBox, where plain containment suggested nothing at all — and it carries the same length floor, or a short class name would near-miss every long request.
@@ -3976,8 +3933,8 @@ static func _unknown_member_message(cls: String, member: String) -> String:
 			msg += " Call describe_class with a `filter` substring to browse the class's API."
 		return msg
 	suggestions.sort()
-	var note := "" if suggestions.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (suggestions.size() - MAX_CLASS_SUGGESTIONS)
-	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, MAX_CLASS_SUGGESTIONS)), note]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note]
 
 
 ## A pointer added when a member or filter lookup on a Control-derived class finds nothing: theme items live in ThemeDB, not ClassDB, and transcripts show a model told "no members" for one (RichTextLabel's default_color) abandoning engine truth for a project grep. Names the exact theme_override_* property when the name IS a theme item, else a generic reminder that theme items exist; "" for non-Control classes.
@@ -4052,7 +4009,7 @@ static func _format_default(value: Variant) -> String:
 	return str(value)
 
 
-## Render one describe_class section, sorted by name and headed with its count. A section longer than MAX_CLASS_MEMBERS_PER_SECTION is truncated with a note pointing the model at `filter`, keeping a huge base class from flooding the context; an empty section is a single "Title: none" line.
+## Render one describe_class section, sorted by name and headed with its count. A section longer than GDLLMTunables.CLASS_MEMBERS_PER_SECTION is truncated with a note pointing the model at `filter`, keeping a huge base class from flooding the context; an empty section is a single "Title: none" line.
 static func _format_class_section(title: String, items: Array) -> String:
 	if items.is_empty():
 		return "%s: none" % title
@@ -4060,9 +4017,9 @@ static func _format_class_section(title: String, items: Array) -> String:
 	var total := items.size()
 	var shown: Array = items
 	var note := ""
-	if total > MAX_CLASS_MEMBERS_PER_SECTION:
-		shown = items.slice(0, MAX_CLASS_MEMBERS_PER_SECTION)
-		note = " (%d of %d shown — pass a `filter` substring to narrow)" % [MAX_CLASS_MEMBERS_PER_SECTION, total]
+	if total > GDLLMTunables.geti(GDLLMTunables.CLASS_MEMBERS_PER_SECTION):
+		shown = items.slice(0, GDLLMTunables.geti(GDLLMTunables.CLASS_MEMBERS_PER_SECTION))
+		note = " (%d of %d shown — pass a `filter` substring to narrow)" % [GDLLMTunables.geti(GDLLMTunables.CLASS_MEMBERS_PER_SECTION), total]
 	var lines: Array = ["%s (%d)%s:" % [title, total, note]]
 	for it in shown:
 		lines.append("  " + String(it))
@@ -4102,7 +4059,7 @@ static func _describe_scene(args: Dictionary) -> String:
 				others.append(_scene_label(r))
 		lines.append("Other open scenes: %s — pass one as `scene` to inspect it." % ", ".join(others))
 	lines.append("")
-	var budget := {"left": MAX_SCENE_TREE_NODES, "hidden": 0}
+	var budget := {"left": GDLLMTunables.geti(GDLLMTunables.SCENE_TREE_MAX_NODES), "hidden": 0}
 	_live_tree_lines(root, root, 0, _arg_int(args, DEPTH_KEYS, 0), budget, lines)
 	if int(budget["hidden"]) > 0:
 		lines.append("")
@@ -4204,10 +4161,10 @@ static func _live_node_detail(root: Node, raw_path: String, filter := "") -> Str
 	if not groups.is_empty():
 		lines.append("Groups: %s" % ", ".join(groups))
 	lines.append("")
-	lines.append(_format_capped_section("Non-default properties", _live_property_lines(node, filter != ""), MAX_SCENE_NODE_PROPERTIES, filter))
+	lines.append(_format_capped_section("Non-default properties", _live_property_lines(node, filter != ""), GDLLMTunables.geti(GDLLMTunables.SCENE_NODE_MAX_PROPERTIES), filter))
 	lines.append("")
 	var runtime := {"count": 0}
-	lines.append(_format_capped_section("Signal connections (persisted)", _live_connection_lines(node, root, runtime), MAX_SCENE_NODE_CONNECTIONS, filter))
+	lines.append(_format_capped_section("Signal connections (persisted)", _live_connection_lines(node, root, runtime), GDLLMTunables.geti(GDLLMTunables.SCENE_NODE_MAX_CONNECTIONS), filter))
 	if int(runtime["count"]) > 0:
 		lines.append("(+%d runtime, non-persisted connection(s) not shown — mostly editor wiring.)" % int(runtime["count"]))
 	return "\n".join(lines)
@@ -4233,8 +4190,8 @@ static func _unknown_node_message(root: Node, raw_path: String) -> String:
 	if suggestions.is_empty():
 		return msg + " Call describe_scene without node_path to see the tree and its paths."
 	suggestions.sort()
-	var note := "" if suggestions.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (suggestions.size() - MAX_CLASS_SUGGESTIONS)
-	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, MAX_CLASS_SUGGESTIONS)), note]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note]
 
 
 ## The coaching appended when a node lookup misses and OTHER scenes are open in the editor: only one scene is ever searched, so name the escape hatch — the `scene` argument — and what it could point at. "" headlessly or when nothing else is open.
@@ -4397,7 +4354,7 @@ static func _scene_state_tree(state: SceneState, resolved: String, depth_cap: in
 		if depth_cap > 0 and depth > depth_cap:
 			depth_hidden += 1
 			continue
-		if shown >= MAX_SCENE_TREE_NODES:
+		if shown >= GDLLMTunables.geti(GDLLMTunables.SCENE_TREE_MAX_NODES):
 			hidden += 1
 			continue
 		shown += 1
@@ -4474,9 +4431,9 @@ static func _scene_state_node_detail(state: SceneState, resolved: String, raw_pa
 			names.append(String(g))
 		lines.append("Groups: %s" % ", ".join(names))
 	lines.append("")
-	lines.append(_format_capped_section("Stored properties", _scene_state_property_lines(state, index, filter != ""), MAX_SCENE_NODE_PROPERTIES, filter, ", or read_file this scene file with full: true"))
+	lines.append(_format_capped_section("Stored properties", _scene_state_property_lines(state, index, filter != ""), GDLLMTunables.geti(GDLLMTunables.SCENE_NODE_MAX_PROPERTIES), filter, ", or read_file this scene file with full: true"))
 	lines.append("")
-	lines.append(_format_capped_section("Signal connections", _scene_state_connection_lines(state, node_path), MAX_SCENE_NODE_CONNECTIONS, filter, ", or read_file this scene file with full: true"))
+	lines.append(_format_capped_section("Signal connections", _scene_state_connection_lines(state, node_path), GDLLMTunables.geti(GDLLMTunables.SCENE_NODE_MAX_CONNECTIONS), filter, ", or read_file this scene file with full: true"))
 	return "\n".join(lines)
 
 
@@ -4506,8 +4463,8 @@ static func _scene_state_unknown_node_message(state: SceneState, raw_path: Strin
 	if suggestions.is_empty():
 		return msg
 	suggestions.sort()
-	var note := "" if suggestions.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (suggestions.size() - MAX_CLASS_SUGGESTIONS)
-	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, MAX_CLASS_SUGGESTIONS)), note]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note]
 
 
 static func _scene_state_property_lines(state: SceneState, index: int, whole := false) -> Array:
@@ -4558,7 +4515,7 @@ static func _read_undo_history(args: Dictionary) -> String:
 		return arg_error
 	if not Engine.is_editor_hint():
 		return "Error: reading undo history needs the running editor, and this session is running headless — no editor is running, so there are no user actions to read."
-	var window := clampi(_arg_int(args, UNDO_WINDOW_KEYS, UNDO_HISTORY_DEFAULT_WINDOW), 1, UNDO_HISTORY_MAX_WINDOW)
+	var window := clampi(_arg_int(args, UNDO_WINDOW_KEYS, GDLLMTunables.geti(GDLLMTunables.UNDO_HISTORY_DEFAULT_WINDOW)), 1, GDLLMTunables.geti(GDLLMTunables.UNDO_HISTORY_MAX_WINDOW))
 	return GDLLMEditorState.format_undo(GDLLMEditorState.gather_undo(), window)
 
 
@@ -4796,8 +4753,8 @@ static func _edit_tilemap_spec(action: String, raw: Variant, record: Dictionary)
 			var entries: Array = raw if raw is Array else [raw]
 			if entries.is_empty():
 				return {"error": "Error: \"cells\" is empty — pass [{\"at\": [x, y], \"source\": ...}, ...]."}
-			if entries.size() > GDLLMTilemap.MAX_SET_CELLS:
-				return {"error": "Error: %d cells in one call is past the %d-cell cap — use fill for a rect, replace for a source swap, or split the batch." % [entries.size(), GDLLMTilemap.MAX_SET_CELLS]}
+			if entries.size() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_SET_CELLS):
+				return {"error": "Error: %d cells in one call is past the %d-cell cap — use fill for a rect, replace for a source swap, or split the batch." % [entries.size(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_SET_CELLS)]}
 			var cells: Array = []
 			for i in entries.size():
 				if not entries[i] is Dictionary:
@@ -4822,8 +4779,8 @@ static func _edit_tilemap_spec(action: String, raw: Variant, record: Dictionary)
 			var rect: Dictionary = GDLLMTilemap.parse_rect((raw as Dictionary).get("rect"))
 			if rect.has("error"):
 				return rect
-			if (rect["rect"] as Rect2i).get_area() > GDLLMTilemap.MAX_FILL_AREA:
-				return {"error": "Error: the fill rect covers %d cells, past the %d-cell cap — split it into smaller rects." % [(rect["rect"] as Rect2i).get_area(), GDLLMTilemap.MAX_FILL_AREA]}
+			if (rect["rect"] as Rect2i).get_area() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_FILL_AREA):
+				return {"error": "Error: the fill rect covers %d cells, past the %d-cell cap — split it into smaller rects." % [(rect["rect"] as Rect2i).get_area(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_FILL_AREA)]}
 			var source: Dictionary = GDLLMTilemap.resolve_source(record["tile_set"], (raw as Dictionary).get("source"), names)
 			if source.has("error"):
 				return source
@@ -4874,8 +4831,8 @@ static func _edit_tilemap_spec(action: String, raw: Variant, record: Dictionary)
 			elif body.has("cells"):
 				var cells: Array = []
 				var raw_cells: Array = body["cells"] if body["cells"] is Array else []
-				if raw_cells.size() > GDLLMTilemap.MAX_SET_CELLS:
-					return {"error": "Error: %d cells in one erase is past the %d-cell cap — use a rect or a source instead." % [raw_cells.size(), GDLLMTilemap.MAX_SET_CELLS]}
+				if raw_cells.size() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_SET_CELLS):
+					return {"error": "Error: %d cells in one erase is past the %d-cell cap — use a rect or a source instead." % [raw_cells.size(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_SET_CELLS)]}
 				for i in raw_cells.size():
 					var at: Dictionary = GDLLMTilemap.parse_cell(raw_cells[i], "erase.cells[%d]" % i)
 					if at.has("error"):
@@ -4889,9 +4846,9 @@ static func _edit_tilemap_spec(action: String, raw: Variant, record: Dictionary)
 				var rect: Dictionary = GDLLMTilemap.parse_rect(body.get("rect"))
 				if rect.has("error"):
 					return rect
-				if (rect["rect"] as Rect2i).get_area() > GDLLMTilemap.MAX_FILL_AREA:
+				if (rect["rect"] as Rect2i).get_area() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_FILL_AREA):
 					# A giant rect is nearly always "clear everything" in disguise, and "split it" is absurd advice for that intent — name the spelling that says it.
-					return {"error": "Error: the erase rect covers %d cells, past the %d-cell cap — to clear the WHOLE layer pass {\"all\": true}; otherwise split the rect." % [(rect["rect"] as Rect2i).get_area(), GDLLMTilemap.MAX_FILL_AREA]}
+					return {"error": "Error: the erase rect covers %d cells, past the %d-cell cap — to clear the WHOLE layer pass {\"all\": true}; otherwise split the rect." % [(rect["rect"] as Rect2i).get_area(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_FILL_AREA)]}
 				spec = {"rect": rect["rect"]}
 				line = "erase %s" % GDLLMTilemap._rect_span(rect["rect"])
 			elif body.has("source"):
@@ -4928,8 +4885,8 @@ static func _edit_tilemap_spec(action: String, raw: Variant, record: Dictionary)
 						cells.append(Vector2i(x, y))
 			if cells.is_empty():
 				return {"error": "Error: \"terrain\" needs cells or a rect to paint."}
-			if cells.size() > GDLLMTilemap.MAX_TERRAIN_CELLS:
-				return {"error": "Error: %d cells in one terrain paint is past the %d-cell cap — each is an engine matching step; split the region." % [cells.size(), GDLLMTilemap.MAX_TERRAIN_CELLS]}
+			if cells.size() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_TERRAIN_CELLS):
+				return {"error": "Error: %d cells in one terrain paint is past the %d-cell cap — each is an engine matching step; split the region." % [cells.size(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_TERRAIN_CELLS)]}
 			return {"spec": {"cells": cells, "set": int(terrain["set"]), "terrain": int(terrain["terrain"])}, "line": "paint %d cell(s) with terrain \"%s\"" % [cells.size(), terrain["name"]], "notes": notes}
 	return {"error": "Error: unknown action \"%s\"." % action}
 
@@ -5280,8 +5237,8 @@ static func _format_property_value(value: Variant, whole := false) -> String:
 		rendered = "^\"%s\"" % String(value)
 	else:
 		rendered = _format_default(value)
-	if not whole and rendered.length() > MAX_PROPERTY_VALUE_CHARS:
-		rendered = rendered.substr(0, MAX_PROPERTY_VALUE_CHARS) + "… (%d chars total)" % rendered.length()
+	if not whole and rendered.length() > GDLLMTunables.geti(GDLLMTunables.RENDERED_VALUE_MAX_CHARS):
+		rendered = rendered.substr(0, GDLLMTunables.geti(GDLLMTunables.RENDERED_VALUE_MAX_CHARS)) + "… (%d chars total)" % rendered.length()
 	return rendered
 
 
@@ -5476,15 +5433,15 @@ static func _apply_script_swap(resource: Resource, script_value: Variant, batch_
 	return {"carried": carried, "dropped": dropped}
 
 
-## The disclosure line for a script swap inside a property batch, naming the carried count and up to MAX_CLASS_SUGGESTIONS properties the new script dropped — the swap must never be silent about values it moved or lost.
+## The disclosure line for a script swap inside a property batch, naming the carried count and up to GDLLMTunables.SUGGESTION_LIST_CAP properties the new script dropped — the swap must never be silent about values it moved or lost.
 static func _script_swap_note(swap: Dictionary) -> String:
 	var carried := int(swap["carried"])
 	var note := "script changed — %d existing propert%s carried across the swap" % [carried, "y" if carried == 1 else "ies"]
 	var dropped: Array = swap["dropped"]
 	if not dropped.is_empty():
 		dropped.sort()
-		var more := "" if dropped.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (dropped.size() - MAX_CLASS_SUGGESTIONS)
-		note += "; dropped because the new script no longer declares them: %s%s" % [", ".join(dropped.slice(0, MAX_CLASS_SUGGESTIONS)), more]
+		var more := "" if dropped.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (dropped.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+		note += "; dropped because the new script no longer declares them: %s%s" % [", ".join(dropped.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), more]
 	return note + "."
 
 
@@ -5523,11 +5480,11 @@ static func _edit_res_unknown_property_message(res: Resource, name: String, sett
 		if real.is_empty():
 			return msg + " It has no settable properties at all."
 		real.sort()
-		var more := "" if real.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (real.size() - MAX_CLASS_SUGGESTIONS)
-		return msg + " Its settable properties: %s%s." % [", ".join(PackedStringArray(real.slice(0, MAX_CLASS_SUGGESTIONS))), more]
+		var more := "" if real.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (real.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+		return msg + " Its settable properties: %s%s." % [", ".join(PackedStringArray(real.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP)))), more]
 	suggestions.sort()
-	var note := "" if suggestions.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (suggestions.size() - MAX_CLASS_SUGGESTIONS)
-	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, MAX_CLASS_SUGGESTIONS)), note]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note]
 
 
 ## The most specific type name for a resource: its script's global class_name when it has one, otherwise the native class.
@@ -5644,8 +5601,8 @@ static func _edit_res_coerce_inline_object(spec: Dictionary, info: Dictionary) -
 				var names: Array = settable.keys()
 				names.erase("script")
 				names.sort()
-				var more := "" if names.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (names.size() - MAX_CLASS_SUGGESTIONS)
-				hint = " Its settable properties: %s%s." % [", ".join(PackedStringArray(names.slice(0, MAX_CLASS_SUGGESTIONS))), more]
+				var more := "" if names.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (names.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+				hint = " Its settable properties: %s%s." % [", ".join(PackedStringArray(names.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP)))), more]
 			return _edit_res_err("could not be built: %s has no editable property named \"%s\".%s" % [_edit_res_type_label(res), pname, hint])
 		var coerced := _edit_res_coerce(spec[raw_name], settable[pname])
 		if not bool(coerced.get("ok", false)):
@@ -5968,8 +5925,8 @@ static func _lint_written_uid(dest: String, text: String, ledger: SessionLedger)
 		var refs: Array = _uid_reference_files(declared, dest) if declared_id != ResourceUID.INVALID_ID else []
 		if not refs.is_empty():
 			ResourceUID.add_id(declared_id, dest)
-			var listed := ", ".join(refs.slice(0, MAX_CLASS_SUGGESTIONS))
-			var more := "" if refs.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (refs.size() - MAX_CLASS_SUGGESTIONS)
+			var listed := ", ".join(refs.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP)))
+			var more := "" if refs.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (refs.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
 			return {"text": text, "note": "\n\nNote: the header uid \"%s\" is not engine-assigned, but %s%s already reference(s) it, so it was KEPT and registered to this file rather than breaking them. UIDs are normally engine-assigned — prefer referencing resources by res:// path and letting the engine assign the uid." % [declared, listed, more], "end": found.get_end(2)}
 		var fresh_id := ResourceUID.create_id()
 		replacement = ResourceUID.id_to_text(fresh_id)
@@ -6313,20 +6270,20 @@ static func _edit_file_load_excerpts(content: String, new_load: Array, res_path:
 	return _excerpt_blocks(content, numbers)
 
 
-## The shared renderer behind both excerpt forms: at most EDIT_ERROR_EXCERPTS blocks of `content` around the deduplicated `numbers` — a load failure reports the same line once per load attempt, and quoting it twice says nothing new.
+## The shared renderer behind both excerpt forms: at most GDLLMTunables.EDIT_ERROR_EXCERPTS blocks of `content` around the deduplicated `numbers` — a load failure reports the same line once per load attempt, and quoting it twice says nothing new.
 static func _excerpt_blocks(content: String, numbers: Array) -> String:
 	var lines := content.split("\n")
 	var blocks: Array = []
 	var seen: Dictionary = {}
 	for number in numbers:
-		if blocks.size() >= EDIT_ERROR_EXCERPTS:
+		if blocks.size() >= GDLLMTunables.geti(GDLLMTunables.EDIT_ERROR_EXCERPTS):
 			break
 		var n := int(number)
 		if n < 1 or n > lines.size() or seen.has(n):
 			continue
 		seen[n] = true
 		var body: Array = []
-		for i in range(maxi(0, n - 1 - EDIT_EXCERPT_CONTEXT), mini(lines.size() - 1, n - 1 + EDIT_EXCERPT_CONTEXT) + 1):
+		for i in range(maxi(0, n - 1 - GDLLMTunables.geti(GDLLMTunables.EDIT_EXCERPT_CONTEXT_LINES)), mini(lines.size() - 1, n - 1 + GDLLMTunables.geti(GDLLMTunables.EDIT_EXCERPT_CONTEXT_LINES)) + 1):
 			body.append("%s %4d: %s" % [">" if i == n - 1 else " ", i + 1, lines[i]])
 		blocks.append("\n".join(body))
 	if blocks.is_empty():
@@ -6617,7 +6574,7 @@ static func _shader_files_including(res_path: String) -> Array:
 	_collect_text_files("res://", files)
 	var found: Array = []
 	for path in files:
-		if found.size() >= MAX_CLASS_SUGGESTIONS:
+		if found.size() >= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP):
 			break
 		if path.get_extension().to_lower() != SHADER_EXTENSION:
 			continue
@@ -6882,8 +6839,11 @@ static func _edit_file_lint_problems(res_path: String) -> Dictionary:
 	return {"ok": bool(run["ok"]), "why": String(run["why"]), "problems": problems}
 
 
-## Run the running engine binary (OS.get_executable_path()) headlessly against this project with `extra_args` appended, returning {"ok", "why", "output", "exit_code"} — combined stdout+stderr plus whether the run actually completed; the shared launcher for the parse, lint, and load checks. Kept minimal (--headless, no full editor) so the subprocess stays fast. Launched through a pipe rather than OS.execute because OS.execute waits unconditionally — a wedged check would freeze the editor with it — while this drains output in a bounded poll and kills the subprocess at `timeout_ms` (ENGINE_CHECK_TIMEOUT_MS for the validation checks; run_script passes its own, model-raisable cap). ok is false when the subprocess failed to launch, hit the timeout, or (given `done_pattern`, a regex a finished run's output always matches) died before completing: empty output from a dead run once parsed as ZERO errors and earned a false "engine-checked" clean claim, so a caller must treat ok=false as "nothing is known" — never as clean — and surface `why` (phrased to complete "the subprocess …") in its own result rather than in a push_warning nobody sees. A dead run's why also quotes the child's most telling output line (see _check_death_note), because capturing the output and then discarding it left the 2026-07-18 checker outage undiagnosable from the transcripts. In-editor each poll pass yields a frame, so the editor stays responsive for the child's whole run; headless it sleeps, keeping the test scripts synchronous.
-static func _edit_file_run_engine(extra_args: Array, done_pattern := "", timeout_ms := ENGINE_CHECK_TIMEOUT_MS) -> Dictionary:
+## Run the running engine binary (OS.get_executable_path()) headlessly against this project with `extra_args` appended, returning {"ok", "why", "output", "exit_code"} — combined stdout+stderr plus whether the run actually completed; the shared launcher for the parse, lint, and load checks. Kept minimal (--headless, no full editor) so the subprocess stays fast. Launched through a pipe rather than OS.execute because OS.execute waits unconditionally — a wedged check would freeze the editor with it — while this drains output in a bounded poll and kills the subprocess at `timeout_ms` (GDLLMTunables.ENGINE_CHECK_TIMEOUT_MS for the validation checks; run_script passes its own, model-raisable cap). ok is false when the subprocess failed to launch, hit the timeout, or (given `done_pattern`, a regex a finished run's output always matches) died before completing: empty output from a dead run once parsed as ZERO errors and earned a false "engine-checked" clean claim, so a caller must treat ok=false as "nothing is known" — never as clean — and surface `why` (phrased to complete "the subprocess …") in its own result rather than in a push_warning nobody sees. A dead run's why also quotes the child's most telling output line (see _check_death_note), because capturing the output and then discarding it left the 2026-07-18 checker outage undiagnosable from the transcripts. In-editor each poll pass yields a frame, so the editor stays responsive for the child's whole run; headless it sleeps, keeping the test scripts synchronous.
+static func _edit_file_run_engine(extra_args: Array, done_pattern := "", timeout_ms := -1) -> Dictionary:
+	# -1 (a default parameter can't call the settings read) stands for the user-configurable validation cap; run_script passes its own, model-raisable figure.
+	if timeout_ms < 0:
+		timeout_ms = GDLLMTunables.geti(GDLLMTunables.ENGINE_CHECK_TIMEOUT_MS)
 	var args := PackedStringArray(["--headless", "--path", ProjectSettings.globalize_path("res://")])
 	for a in extra_args:
 		args.append(String(a))
@@ -6909,7 +6869,7 @@ static func _edit_file_run_engine(extra_args: Array, done_pattern := "", timeout
 	_live_check_pids.erase(pid)
 	output += _edit_file_drain_pipe(pipe["stdio"]) + _edit_file_drain_pipe(pipe["stderr"])
 	if killed:
-		return {"ok": false, "why": "hung and was killed after %d seconds (the editor or machine may have been busy)%s" % [timeout_ms / 1000, _check_death_note(output)], "output": output, "exit_code": -1, "killed": true}
+		return {"ok": false, "why": "hung and was killed after %.1f seconds (the editor or machine may have been busy)%s" % [timeout_ms / 1000.0, _check_death_note(output)], "output": output, "exit_code": -1, "killed": true}
 	var exit_code := OS.get_process_exit_code(pid)
 	if done_pattern != "" and RegEx.create_from_string(done_pattern).search(output) == null:
 		return {"ok": false, "why": "exited before finishing its check (exit code %d)%s" % [exit_code, _check_death_note(output)], "output": output, "exit_code": exit_code, "killed": false}
@@ -6930,8 +6890,8 @@ static func _check_death_note(output: String) -> String:
 	var pick := last_error if last_error != "" else tail
 	if pick == "":
 		return "; it printed nothing beyond the engine banner"
-	if pick.length() > CHECK_DEATH_TAIL_CHARS:
-		pick = pick.substr(0, CHECK_DEATH_TAIL_CHARS) + "…"
+	if pick.length() > GDLLMTunables.geti(GDLLMTunables.CHECK_DEATH_TAIL_CHARS):
+		pick = pick.substr(0, GDLLMTunables.geti(GDLLMTunables.CHECK_DEATH_TAIL_CHARS)) + "…"
 	for entry_script in ["res://addons/gdllm-godot-agentic-harness/tools/load_check.gd", "res://addons/gdllm-godot-agentic-harness/tools/style_lint.gd"]:
 		if output.contains("script: %s" % entry_script) or output.contains("script \"%s\"" % entry_script):
 			return "; its last output line: \"%s\" — the harness's own checker script failed to load, so the addon install at res://addons/gdllm-godot-agentic-harness is likely incomplete or mid-sync; tell the user, since restoring/re-syncing the addon fixes every check" % pick
@@ -6964,18 +6924,18 @@ static func _edit_file_new_problems(pre: Array, post: Array) -> Array:
 	return fresh
 
 
-## A compact excerpt of the changed region in `updated`: the lines spanned by the replacement at offset `at` plus EDIT_EXCERPT_CONTEXT lines on each side, changed lines marked ">", rendered like _render_block so a confirmation shows the edit in place without echoing the whole file. The caller passes the edit's own offset so a deletion (empty new_text) still points at the right region. A replacement past EDIT_EXCERPT_MAX_CHANGED_LINES shows its head and tail with the middle counted, since that text is already in the conversation as the call's own new_string.
+## A compact excerpt of the changed region in `updated`: the lines spanned by the replacement at offset `at` plus GDLLMTunables.EDIT_EXCERPT_CONTEXT_LINES lines on each side, changed lines marked ">", rendered like _render_block so a confirmation shows the edit in place without echoing the whole file. The caller passes the edit's own offset so a deletion (empty new_text) still points at the right region. A replacement past GDLLMTunables.EDIT_EXCERPT_MAX_CHANGED_LINES shows its head and tail with the middle counted, since that text is already in the conversation as the call's own new_string.
 static func _edit_file_excerpt(updated: String, new_text: String, at: int) -> String:
 	var lines := updated.split("\n")
 	var start_line := 0 if at < 0 else updated.substr(0, at).count("\n")
 	var end_line := start_line + (0 if new_text == "" else new_text.count("\n"))
-	var from := maxi(0, start_line - EDIT_EXCERPT_CONTEXT)
-	var to := mini(lines.size() - 1, end_line + EDIT_EXCERPT_CONTEXT)
+	var from := maxi(0, start_line - GDLLMTunables.geti(GDLLMTunables.EDIT_EXCERPT_CONTEXT_LINES))
+	var to := mini(lines.size() - 1, end_line + GDLLMTunables.geti(GDLLMTunables.EDIT_EXCERPT_CONTEXT_LINES))
 	var changed := end_line - start_line + 1
-	var half := EDIT_EXCERPT_MAX_CHANGED_LINES / 2
+	var half := GDLLMTunables.geti(GDLLMTunables.EDIT_EXCERPT_MAX_CHANGED_LINES) / 2
 	var skip_from := -1
 	var skip_to := -1
-	if changed > EDIT_EXCERPT_MAX_CHANGED_LINES:
+	if changed > GDLLMTunables.geti(GDLLMTunables.EDIT_EXCERPT_MAX_CHANGED_LINES):
 		skip_from = start_line + half
 		skip_to = end_line - half
 	var body: Array = []
@@ -7431,9 +7391,9 @@ static func _move_reference_scan(resolved: String, uid_text: String) -> Dictiona
 			elif uid_text != "" and text.contains(uid_text):
 				surviving += 1
 	var total := breaking.size()
-	if total > MAX_DEPENDENT_MENTIONS:
-		breaking = breaking.slice(0, MAX_DEPENDENT_MENTIONS)
-		breaking.append("(and %d more — search_files for the rest)" % (total - MAX_DEPENDENT_MENTIONS))
+	if total > GDLLMTunables.geti(GDLLMTunables.DEPENDENT_MENTIONS_CAP):
+		breaking = breaking.slice(0, GDLLMTunables.geti(GDLLMTunables.DEPENDENT_MENTIONS_CAP))
+		breaking.append("(and %d more — search_files for the rest)" % (total - GDLLMTunables.geti(GDLLMTunables.DEPENDENT_MENTIONS_CAP)))
 	return {"breaking": breaking, "breaking_total": total, "surviving": surviving}
 
 
@@ -7844,8 +7804,8 @@ static func _create_res_unknown_from_message(from: String) -> String:
 	if suggestions.is_empty():
 		return msg + " " + CREATE_RESOURCE_USAGE
 	suggestions.sort()
-	var note := "" if suggestions.size() <= MAX_CLASS_SUGGESTIONS else " (and %d more)" % (suggestions.size() - MAX_CLASS_SUGGESTIONS)
-	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, MAX_CLASS_SUGGESTIONS)), note]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note]
 
 
 ## The `properties` object from `args`, tolerant of a synonym key; {} when none is a Dictionary.
@@ -7918,7 +7878,7 @@ static func _create_res_valid_properties(resource: Resource) -> Dictionary:
 	return out
 
 
-## Up to MAX_CLASS_SUGGESTIONS names from `candidates` that near-miss `name` (either contains the other, with a length floor on the reverse), sorted — the same rule describe_member uses.
+## Up to GDLLMTunables.SUGGESTION_LIST_CAP names from `candidates` that near-miss `name` (either contains the other, with a length floor on the reverse), sorted — the same rule describe_member uses.
 static func _create_res_near_miss(name: String, candidates: Array) -> Array:
 	var needle := name.to_lower()
 	var out: Array = []
@@ -7927,7 +7887,7 @@ static func _create_res_near_miss(name: String, candidates: Array) -> Array:
 		if lowered.contains(needle) or (lowered.length() >= 4 and needle.contains(lowered)):
 			out.append(String(c))
 	out.sort()
-	return out.slice(0, MAX_CLASS_SUGGESTIONS)
+	return out.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
 
 
 ## A readable type name for a created resource: its global class_name when scripted, else the engine class, noting an unnamed script's path.
@@ -7998,7 +7958,7 @@ static func _run_game(args: Dictionary) -> String:
 		label = _resolve_file_path(main)
 		if label == "":
 			return "Error: the project's main scene setting (application/run/main_scene = %s) doesn't resolve to a file on disk, so the game can't start. Fix it with set_project_setting, or pass an existing scene in \"scene\"." % main
-	var wait := clampi(_arg_int(args, RUN_WAIT_KEYS, RUN_GAME_DEFAULT_WAIT), 1, RUN_GAME_MAX_WAIT)
+	var wait := clampi(_arg_int(args, RUN_WAIT_KEYS, GDLLMTunables.geti(GDLLMTunables.RUN_GAME_DEFAULT_WAIT)), 1, GDLLMTunables.geti(GDLLMTunables.RUN_GAME_MAX_WAIT))
 	var keep := _arg_bool(args, RUN_KEEP_KEYS)
 	var profile := _run_profile_mode(args)
 	if profile != "" and not GDLLMPerf.PROFILERS.has(profile):
@@ -8029,7 +7989,7 @@ static func _run_game(args: Dictionary) -> String:
 			if not GDLLMBreak.current_break().is_empty():
 				# A paused game does nothing for the rest of the window, so waiting it out would only delay the report of why it stopped.
 				break
-		elif seen_playing or Time.get_ticks_msec() - started_ms > RUN_GAME_LAUNCH_GRACE_MS:
+		elif seen_playing or Time.get_ticks_msec() - started_ms > GDLLMTunables.geti(GDLLMTunables.RUN_GAME_LAUNCH_GRACE_MS):
 			break
 		await _yield_frame()
 	var paused: Dictionary = GDLLMBreak.current_break()
@@ -8041,7 +8001,7 @@ static func _run_game(args: Dictionary) -> String:
 	var status: String
 	if not still_playing and not seen_playing:
 		_game_run = {}
-		status = "Error: the editor never reported %s as running within %d s of the launch — the run most likely failed to start; the capture below may name why." % [label, RUN_GAME_LAUNCH_GRACE_MS / 1000]
+		status = "Error: the editor never reported %s as running within %.1f s of the launch — the run most likely failed to start; the capture below may name why." % [label, GDLLMTunables.geti(GDLLMTunables.RUN_GAME_LAUNCH_GRACE_MS) / 1000.0]
 	elif not still_playing:
 		_game_run = {}
 		status = "Ran %s; the run ended on its own after %.1f s — a quit, a crash, or the user pressing Stop. New errors below say if it crashed." % [label, ran_s]
@@ -8176,14 +8136,14 @@ static func _stop_game() -> String:
 static func _run_script(args: Dictionary) -> String:
 	var requested := _arg_string(args, RUN_SCRIPT_PATH_KEYS)
 	if requested == "":
-		return "Error: no script path was provided. " + RUN_SCRIPT_USAGE
+		return "Error: no script path was provided. " + GDLLMTunables.fill(RUN_SCRIPT_USAGE)
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
 		return _file_not_found(requested)
 	if resolved.get_extension().to_lower() != "gd":
 		return "Error: %s is not a GDScript file — run_script executes .gd scripts. A scene is run with run_game." % resolved
 	await _await_path_stable(resolved)
-	var timeout := clampi(_arg_int(args, RUN_TIMEOUT_KEYS, RUN_SCRIPT_DEFAULT_TIMEOUT), 1, RUN_SCRIPT_MAX_TIMEOUT)
+	var timeout := clampi(_arg_int(args, RUN_TIMEOUT_KEYS, GDLLMTunables.geti(GDLLMTunables.RUN_SCRIPT_DEFAULT_TIMEOUT)), 1, GDLLMTunables.geti(GDLLMTunables.RUN_SCRIPT_MAX_TIMEOUT))
 	var extra: Array = ["--script", resolved]
 	var script_args := _arg_string_array(args, RUN_ARGS_KEYS)
 	if not script_args.is_empty():
@@ -8204,7 +8164,7 @@ static func format_run_capture(output_delta: Dictionary, error_deltas: Array, hi
 		if lines.is_empty():
 			parts.append("The run printed nothing new to the Output console.")
 		else:
-			var tail: Dictionary = GDLLMConsole.tail_lines(lines, GDLLMConsole.DEFAULT_OUTPUT_LINES)
+			var tail: Dictionary = GDLLMConsole.tail_lines(lines, GDLLMTunables.geti(GDLLMTunables.CONSOLE_OUTPUT_LINES))
 			var window := ", newest %d shown — read_output has the full console" % (lines.size() - int(tail["omitted"])) if int(tail["omitted"]) > 0 else ""
 			parts.append("New Output during the run (%d lines%s):\n%s" % [lines.size(), window, tail["text"]])
 			if bool(output_delta.get("reset", false)):
@@ -8231,7 +8191,7 @@ static func _run_errors_block(error_deltas: Array) -> String:
 			flat.append("%s:\n%s" % [delta["session"], GDLLMConsole.format_error_entry(entry)] if multi else GDLLMConsole.format_error_entry(entry))
 	if flat.is_empty():
 		return "No new errors or warnings reached the debugger during the run."
-	var shown: Array = flat.slice(maxi(0, flat.size() - GDLLMConsole.DEFAULT_ERROR_LIMIT))
+	var shown: Array = flat.slice(maxi(0, flat.size() - GDLLMTunables.geti(GDLLMTunables.CONSOLE_ERROR_ENTRIES)))
 	var window := ", newest %d shown — read_errors has the full history" % shown.size() if shown.size() < flat.size() else ""
 	var body := "%d new debugger entr%s during the run (%d errors, %d warnings%s):\n%s" % [flat.size(), "y" if flat.size() == 1 else "ies", errors, flat.size() - errors, window, "\n".join(PackedStringArray(shown))]
 	if reset:
@@ -8246,13 +8206,13 @@ static func format_script_run(resolved: String, run: Dictionary, timeout_s: int)
 		# The engine banner is boot noise, not the script's output.
 		if not String(line).begins_with("Godot Engine v"):
 			lines.append(line)
-	var tail: Dictionary = GDLLMConsole.tail_lines(lines, RUN_SCRIPT_OUTPUT_LINES)
+	var tail: Dictionary = GDLLMConsole.tail_lines(lines, GDLLMTunables.geti(GDLLMTunables.RUN_SCRIPT_OUTPUT_LINES))
 	var output_block := "\nIt printed nothing beyond the engine banner."
 	if not lines.is_empty():
 		var window := ", newest %d shown — the rest is gone; only a re-run can reprint it" % (lines.size() - int(tail["omitted"])) if int(tail["omitted"]) > 0 else ""
 		output_block = "\n\nIts output (%d lines%s):\n%s" % [lines.size(), window, tail["text"]]
 	if bool(run.get("killed", false)):
-		return "Error: %s was still running when its %d s timeout expired and was killed — there is no exit code, and nothing more will arrive. If the script legitimately needs longer, raise timeout_seconds (up to %d); if it should have finished, make sure every path reaches quit().%s" % [resolved, timeout_s, RUN_SCRIPT_MAX_TIMEOUT, output_block]
+		return "Error: %s was still running when its %d s timeout expired and was killed — there is no exit code, and nothing more will arrive. If the script legitimately needs longer, raise timeout_seconds (up to %d); if it should have finished, make sure every path reaches quit().%s" % [resolved, timeout_s, GDLLMTunables.geti(GDLLMTunables.RUN_SCRIPT_MAX_TIMEOUT), output_block]
 	if not bool(run["ok"]):
 		return "Error: the engine subprocess for %s %s — the script was NOT executed.%s" % [resolved, String(run["why"]), output_block]
 	var verdict := "%s ran to completion with exit code %d%s." % [resolved, int(run["exit_code"]), "" if int(run["exit_code"]) == 0 else " — nonzero, which by the quit(code) convention signals failure"]
@@ -8312,7 +8272,7 @@ static func _profile_game(args: Dictionary) -> String:
 	var requested := _arg_string(args, PERF_MODE_KEYS)
 	var mode := GDLLMPerf.profiler_mode(requested) if requested != "" else "functions"
 	if mode == "":
-		return "Error: \"%s\" is not a profiler this tool can run. %s" % [requested, PROFILE_GAME_USAGE]
+		return "Error: \"%s\" is not a profiler this tool can run. %s" % [requested, GDLLMTunables.fill(PROFILE_GAME_USAGE)]
 	var tab := String((GDLLMPerf.PROFILERS[mode] as Dictionary)["tab"])
 	if not Engine.is_editor_hint():
 		return "Error: the engine's profilers run on a game attached to the editor's debugger, and this session is running headless — there is nothing to profile."
@@ -8323,7 +8283,7 @@ static func _profile_game(args: Dictionary) -> String:
 	if not paused.is_empty():
 		# A paused game draws no frames, runs no scripts, and sends no packets, so every mode would spend its whole window recording nothing and report an empty tab as if the capture had merely been short.
 		return "Error: the game is PAUSED in the debugger on %s, so it is running nothing for a profiler to measure. Resume it with debug_game (\"continue\") and profile the running game; read_game_break shows where it stopped." % GDLLMBreak.describe_reason(String(paused.get("reason", "")))
-	var seconds := clampi(_arg_int(args, PERF_SECONDS_KEYS, PROFILE_GAME_DEFAULT_SECONDS), 1, PROFILE_GAME_MAX_SECONDS)
+	var seconds := clampi(_arg_int(args, PERF_SECONDS_KEYS, GDLLMTunables.geti(GDLLMTunables.PROFILE_GAME_DEFAULT_SECONDS)), 1, GDLLMTunables.geti(GDLLMTunables.PROFILE_GAME_MAX_SECONDS))
 	GDLLMPerf.ensure_connected()
 	var toggled: Dictionary = GDLLMPerf.toggle_profiler(mode, true)
 	if not bool(toggled["ok"]):
@@ -8449,7 +8409,7 @@ static func _read_video_ram(args: Dictionary) -> String:
 		var body := ""
 		if not answered.has(session):
 			# Deliberately not blaming a breakpoint: a game paused in the debugger still answers this request (probe-verified), so silence means stuck or dying, not stopped on a line.
-			body = "The game did not answer the refresh within %d s, so nothing here would be current — it is most likely frozen, deadlocked, or on its way down (a game merely paused at a breakpoint still answers). read_errors and read_game_break say more; Debugger → Video RAM holds whatever it last reported." % (VRAM_REPLY_TIMEOUT_MS / 1000)
+			body = "The game did not answer the refresh within %.1f s, so nothing here would be current — it is most likely frozen, deadlocked, or on its way down (a game merely paused at a breakpoint still answers). read_errors and read_game_break say more; Debugger → Video RAM holds whatever it last reported." % (GDLLMTunables.geti(GDLLMTunables.VRAM_REPLY_TIMEOUT_MS) / 1000.0)
 		else:
 			body = GDLLMPerf.format_video_ram(GDLLMPerf.video_ram_rows(tab["tree"]), GDLLMPerf.video_ram_total(tab), limit, filter)
 		if tabs.size() > 1:
@@ -8461,7 +8421,7 @@ static func _read_video_ram(args: Dictionary) -> String:
 ## The sessions whose Video RAM reply landed after their refresh press, waited for until every pressed session answered or the timeout runs out; a run that ends mid-wait stops it, since a dead game will never answer.
 static func _await_video_ram(before: Dictionary, pressed: PackedStringArray) -> Dictionary:
 	var answered: Dictionary = {}
-	var deadline := Time.get_ticks_msec() + VRAM_REPLY_TIMEOUT_MS
+	var deadline := Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.VRAM_REPLY_TIMEOUT_MS)
 	while answered.size() < pressed.size() and Time.get_ticks_msec() < deadline and EditorInterface.is_playing_scene():
 		await _yield_frame()
 		var now := GDLLMPerf.video_ram_stamps()
@@ -8477,7 +8437,7 @@ static func _read_game_ui(args: Dictionary) -> String:
 	if unexpected != "":
 		return unexpected
 	GDLLMPerf.ensure_connected()
-	var res: Dictionary = await GDLLMGame.command({"op": "ui", "scope": _arg_string(args, GAME_SCOPE_KEYS), "all": _arg_bool(args, GAME_ALL_KEYS), "filter": _arg_string(args, GAME_FILTER_KEYS)}, GAME_REPLY_TIMEOUT_MS)
+	var res: Dictionary = await GDLLMGame.command({"op": "ui", "scope": _arg_string(args, GAME_SCOPE_KEYS), "all": _arg_bool(args, GAME_ALL_KEYS), "filter": _arg_string(args, GAME_FILTER_KEYS)}, GDLLMTunables.geti(GDLLMTunables.GAME_REPLY_TIMEOUT_MS))
 	if not bool(res["ok"]):
 		return _game_reach_error("read", String(res["why_kind"]), String(res["why"]))
 	var reply: Dictionary = res["reply"]
@@ -8499,7 +8459,7 @@ static func _inspect_game_node(args: Dictionary) -> String:
 	var path := _arg_string(args, GAME_CALL_PATH_KEYS)
 	if path == "":
 		return "Error: no node path was given. " + INSPECT_GAME_NODE_USAGE
-	var res: Dictionary = await GDLLMGame.command({"op": "inspect", "path": path, "filter": _arg_string(args, GAME_FILTER_KEYS), "all": _arg_bool(args, INSPECT_ALL_KEYS)}, GAME_REPLY_TIMEOUT_MS)
+	var res: Dictionary = await GDLLMGame.command({"op": "inspect", "path": path, "filter": _arg_string(args, GAME_FILTER_KEYS), "all": _arg_bool(args, INSPECT_ALL_KEYS)}, GDLLMTunables.geti(GDLLMTunables.GAME_REPLY_TIMEOUT_MS))
 	if not bool(res["ok"]):
 		return _game_reach_error("read", String(res["why_kind"]), String(res["why"]))
 	var reply: Dictionary = res["reply"]
@@ -8519,7 +8479,7 @@ static func _suspend_game(args: Dictionary) -> String:
 		if raw == "":
 			return "Error: no action was given. " + SUSPEND_GAME_USAGE
 		return "Error: \"%s\" is not a suspend action. %s" % [raw, SUSPEND_GAME_USAGE]
-	var frames := clampi(_arg_int(args, SUSPEND_FRAMES_KEYS, 1), 1, SUSPEND_MAX_FRAMES)
+	var frames := clampi(_arg_int(args, SUSPEND_FRAMES_KEYS, 1), 1, GDLLMTunables.geti(GDLLMTunables.SUSPEND_MAX_FRAMES))
 	var output_base := GDLLMConsole.output_baseline()
 	var errors_base := GDLLMConsole.errors_baseline()
 	var was_suspended := GDLLMGame.suspended
@@ -8544,7 +8504,7 @@ static func _suspend_game(args: Dictionary) -> String:
 		# Every frame is CONFIRMED, never assumed: next_frame is a flag the game clears when it runs a frame, not a counter, so several sent inside one of its poll cycles collapse into a single frame (measured: 5 presses landing as 2–5 frames depending on spacing). Watching the agent's own frame count move is what makes "advanced 3 frames" true.
 		var seen := await _game_frame_count()
 		first_frame = seen
-		var budget := Time.get_ticks_msec() + SUSPEND_STEP_BUDGET_MS
+		var budget := Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.SUSPEND_STEP_BUDGET_MS)
 		for i in frames:
 			if seen < 0 or Time.get_ticks_msec() > budget:
 				break
@@ -8558,7 +8518,7 @@ static func _suspend_game(args: Dictionary) -> String:
 			last_frame = seen
 			advanced += 1
 	if advanced > 0:
-		await _settle_console(output_base, SUSPEND_OUTPUT_SETTLE_MS)
+		await _settle_console(output_base, GDLLMTunables.geti(GDLLMTunables.SUSPEND_OUTPUT_SETTLE_MS))
 	for i in 5:
 		await _yield_frame()
 	var capture := format_run_capture(GDLLMConsole.output_delta_since(output_base), GDLLMConsole.errors_delta_since(errors_base), GDLLMConsole.output_hidden_note())
@@ -8567,7 +8527,7 @@ static func _suspend_game(args: Dictionary) -> String:
 
 ## How many frames of the GAME have run, as the agent inside it counts them, or -1 when it cannot be asked. The count comes from the agent's own _process rather than any engine counter: scene suspension stops _process while the main loop, the renderer and SceneTree.get_frame() all keep running at full speed (probe-measured), so an engine counter would report frames for a game that is standing still.
 static func _game_frame_count() -> int:
-	var res: Dictionary = await GDLLMGame.command({"op": "ping"}, GAME_REPLY_TIMEOUT_MS)
+	var res: Dictionary = await GDLLMGame.command({"op": "ping"}, GDLLMTunables.geti(GDLLMTunables.GAME_REPLY_TIMEOUT_MS))
 	if not bool(res["ok"]):
 		return -1
 	return int((res["reply"] as Dictionary).get("scene_frame", -1))
@@ -8579,7 +8539,7 @@ static func _await_frame_after(seen: int, budget_ms: int) -> int:
 		var now := await _game_frame_count()
 		if now < 0 or now > seen:
 			return now
-		await _wait_ms(SUSPEND_FRAME_SETTLE_MS)
+		await _wait_ms(GDLLMTunables.geti(GDLLMTunables.SUSPEND_FRAME_SETTLE_MS))
 	return seen
 
 
@@ -8661,7 +8621,7 @@ static func _reload_game_scripts(args: Dictionary) -> String:
 	if not bool(sent["ok"]):
 		return _game_reach_error("reload", String(sent["why_kind"]), String(sent["why"]))
 	# A reload runs at the game's own pace and a failing script errors on the way; both need frames to cross the debugger before the capture reads, and a script that reloads into new prints is the evidence the reload took.
-	await _settle_console(output_base, SUSPEND_OUTPUT_SETTLE_MS)
+	await _settle_console(output_base, GDLLMTunables.geti(GDLLMTunables.SUSPEND_OUTPUT_SETTLE_MS))
 	for i in 5:
 		await _yield_frame()
 	var capture := format_run_capture(GDLLMConsole.output_delta_since(output_base), GDLLMConsole.errors_delta_since(errors_base), GDLLMConsole.output_hidden_note())
@@ -8768,7 +8728,7 @@ static func _reload_paths(args: Dictionary) -> Dictionary:
 	for path: String in files:
 		if path.get_extension().to_lower() == "gd" and FileAccess.get_modified_time(path) >= since:
 			changed.append(path)
-	if changed.size() > RELOAD_MAX_FILES:
+	if changed.size() > GDLLMTunables.geti(GDLLMTunables.RELOAD_MAX_FILES):
 		return {"ok": false, "why": "Error: %d .gd files have changed since this run started, which is more than a targeted reload should carry — that many changes are better taken by a fresh run_game. Pass \"paths\" to reload specific ones." % changed.size(), "paths": []}
 	changed.sort()
 	return {"ok": true, "why": "", "paths": changed}
@@ -8797,12 +8757,12 @@ static func _send_game_input(args: Dictionary) -> String:
 	# Hooked before the sequence plays, so a click landing on a Control is recorded while it happens rather than missed and then reported as a click that reached nothing.
 	GDLLMPerf.ensure_connected()
 	var started_ms := Time.get_ticks_msec()
-	var res: Dictionary = await GDLLMGame.command({"op": "input", "steps": raw}, int(float(normalized["seconds"]) * 1000.0) + GAME_REPLY_MARGIN_MS)
+	var res: Dictionary = await GDLLMGame.command({"op": "input", "steps": raw}, int(float(normalized["seconds"]) * 1000.0) + GDLLMTunables.geti(GDLLMTunables.GAME_REPLY_MARGIN_MS))
 	if not bool(res["ok"]):
 		return _game_reach_error("drive", String(res["why_kind"]), String(res["why"]))
 	# The last step is parsed game-side right before the reply, so its effects — the clicked-control record, a handler's prints — can trail the reply across the wire; while the records are still short of the pointer steps played, a bounded wall-clock wait closes that race instead of composing a miss for a click that landed (a sequence that really missed pays the full wait, the price of not lying about it).
 	var pointer_steps := _pointer_step_count(normalized["steps"])
-	var settle_deadline := Time.get_ticks_msec() + CLICK_RECORD_SETTLE_MS
+	var settle_deadline := Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.CLICK_RECORD_SETTLE_MS)
 	while pointer_steps > 0 and GDLLMPerf.clicks_since(started_ms).size() < pointer_steps and Time.get_ticks_msec() < settle_deadline:
 		await _yield_frame()
 	# Let the sequence's last prints cross the debugger before the capture reads the panels.
@@ -8867,7 +8827,7 @@ static func _call_game_method(args: Dictionary) -> String:
 			break
 	var output_base := GDLLMConsole.output_baseline()
 	var errors_base := GDLLMConsole.errors_baseline()
-	var res: Dictionary = await GDLLMGame.command({"op": "call", "path": path, "method": method, "args": call_args}, GAME_REPLY_TIMEOUT_MS)
+	var res: Dictionary = await GDLLMGame.command({"op": "call", "path": path, "method": method, "args": call_args}, GDLLMTunables.geti(GDLLMTunables.GAME_REPLY_TIMEOUT_MS))
 	if not bool(res["ok"]):
 		return _game_reach_error("reach", String(res["why_kind"]), String(res["why"]))
 	# Let the call's prints and errors cross the debugger before the capture reads the panels.
@@ -8917,7 +8877,7 @@ static func _read_selected_frame(state: Dictionary, wanted: int, all: bool, filt
 
 ## Wait for a break's stack and variables to arrive. The editor requests both on its own the moment the game breaks (probe-measured 48–173 ms behind it), so this is a settle and never a request of its own; a break with no script stack lands complete and returns immediately.
 static func _settle_break(state: Dictionary) -> void:
-	var deadline := Time.get_ticks_msec() + GDLLMBreak.STACK_SETTLE_MS
+	var deadline := Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.DEBUGGER_STACK_SETTLE_MS)
 	while Time.get_ticks_msec() < deadline and not GDLLMBreak.stack_landed(state):
 		await _yield_frame()
 
@@ -8931,7 +8891,7 @@ static func _debug_game(args: Dictionary) -> String:
 		return "Error: stepping a paused game needs the editor's debugger, and this session is running headless — there is nothing paused to step."
 	var action := GDLLMBreak.normalize_action(_arg_string(args, BREAK_ACTION_KEYS))
 	if action == "":
-		return "Error: no recognized action was given. " + DEBUG_GAME_USAGE
+		return "Error: no recognized action was given. " + GDLLMTunables.fill(DEBUG_GAME_USAGE)
 	GDLLMBreak.ensure_connected()
 	var state: Dictionary = GDLLMBreak.current_break()
 	if action == "break":
@@ -8947,18 +8907,23 @@ static func _debug_game(args: Dictionary) -> String:
 	elif action != "continue" and not bool(state.get("can_debug", false)):
 		return "Error: this break cannot be stepped — the engine reports it as not steppable, which is what a runtime error break is. Only \"continue\" is offered from here, and it resumes with the failed function abandoned; read_game_break shows the stack and the frame's variables while it is still paused."
 	var asked_times := _arg_int(args, BREAK_TIMES_KEYS, 1)
-	var times := 1 if action in ["continue", "break"] else clampi(asked_times, 1, GDLLMBreak.MAX_STEPS)
+	var times := 1 if action in ["continue", "break"] else clampi(asked_times, 1, GDLLMTunables.geti(GDLLMTunables.DEBUG_GAME_MAX_STEPS))
 	# A silent clamp narrates 10 presses as if they were the whole request (audit-caught) — the cut must be named so the model knows to call again for the rest.
-	var clamp_note := "" if action in ["continue", "break"] or asked_times <= GDLLMBreak.MAX_STEPS else "\n(times was capped at %d of the %d asked — one call presses at most %d; call debug_game again for the rest.)" % [times, asked_times, GDLLMBreak.MAX_STEPS]
+	var clamp_note := "" if action in ["continue", "break"] or asked_times <= GDLLMTunables.geti(GDLLMTunables.DEBUG_GAME_MAX_STEPS) else "\n(times was capped at %d of the %d asked — one call presses at most %d; call debug_game again for the rest.)" % [times, asked_times, GDLLMTunables.geti(GDLLMTunables.DEBUG_GAME_MAX_STEPS)]
 	var all := _arg_bool(args, BREAK_ALL_KEYS)
 	var output_base := GDLLMConsole.output_baseline()
 	var errors_base := GDLLMConsole.errors_baseline()
 	var trace: Array = []
 	var halt := ""
+	# The stepping counterpart to suspend_game's budget: a slow game with raised per-step timeouts could otherwise hold the tool loop for minutes; running out reports the presses that landed rather than pressing on.
+	var budget_deadline := Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.DEBUG_GAME_STEP_BUDGET_MS)
 	for i in times:
 		var current: Dictionary = GDLLMBreak.current_break()
 		# "break" is pressed precisely BECAUSE nothing is paused; every other action needs the break it is about to move.
 		if current.is_empty() and action != "break":
+			break
+		if i > 0 and Time.get_ticks_msec() > budget_deadline:
+			halt = "the %d ms step budget ran out (raise it in Editor Settings → Gdllm → Tool Runtime)" % GDLLMTunables.geti(GDLLMTunables.DEBUG_GAME_STEP_BUDGET_MS)
 			break
 		var was_at := int(current.get("at", 0))
 		var pressed: Dictionary = GDLLMBreak.press(action)
@@ -8968,7 +8933,7 @@ static func _debug_game(args: Dictionary) -> String:
 			# A refusal mid-sequence (a step landing on an unsteppable break, say) must be carried, or the short trace reads as the game simply running on.
 			halt = String(pressed["why"])
 			break
-		var landed: Dictionary = await _await_new_break(was_at, BREAK_CONTINUE_WATCH_MS if action == "continue" else BREAK_ADVANCE_TIMEOUT_MS)
+		var landed: Dictionary = await _await_new_break(was_at, GDLLMTunables.geti(GDLLMTunables.BREAK_CONTINUE_WATCH_MS) if action == "continue" else GDLLMTunables.geti(GDLLMTunables.BREAK_ADVANCE_TIMEOUT_MS))
 		if landed.is_empty():
 			break
 		await _settle_break(landed)
@@ -9027,7 +8992,7 @@ static func _toggle_breakpoint(path: String, line: int, enabled: bool) -> Dictio
 	if not bool(opened["ok"]):
 		return {"ok": false, "why": String(opened["why"]), "note": "", "text": ""}
 	# The script editor builds its text control over the frames after the open, so its gutter is only reachable once they pass.
-	for i in BREAK_EDITOR_FRAMES:
+	for i in GDLLMTunables.geti(GDLLMTunables.BREAK_EDITOR_FRAMES):
 		await _yield_frame()
 	var found: Dictionary = GDLLMBreak.code_edit_for(path)
 	if not bool(found["ok"]):
@@ -9513,12 +9478,13 @@ static func _is_ref_terminator(c: int) -> bool:
 	return TERMINATORS.has(c)
 
 
-## A dependency listing capped at MAX_DEPENDENCY_LINES with a remainder note naming the waiver, so a hub resource never floods the context by default — but `full` serves every line, because these are engine-record references no other tool can recover (search_files misses UID-based and binary ones by construction).
+## A dependency listing capped at GDLLMTunables.DEPENDENCY_LINES_CAP with a remainder note naming the waiver, so a hub resource never floods the context by default — but `full` serves every line, because these are engine-record references no other tool can recover (search_files misses UID-based and binary ones by construction).
 static func _capped_lines(lines: Array, full := false) -> Array:
-	if full or lines.size() <= MAX_DEPENDENCY_LINES:
+	var cap := GDLLMTunables.geti(GDLLMTunables.DEPENDENCY_LINES_CAP)
+	if full or lines.size() <= cap:
 		return lines
-	var out: Array = lines.slice(0, MAX_DEPENDENCY_LINES)
-	out.append("(and %d more not shown — pass full: true for every line)" % (lines.size() - MAX_DEPENDENCY_LINES))
+	var out: Array = lines.slice(0, cap)
+	out.append("(and %d more not shown — pass full: true for every line)" % (lines.size() - cap))
 	return out
 
 
@@ -9534,7 +9500,7 @@ class SessionLedger:
 	var auto_check_reports: Dictionary = {}
 	## Files an edit_file/write_file verdict left BROKEN on disk and nothing has validated clean since, by resolved path — the ground truth behind the broken_reminder hook, so a model can't wander off mid-repair and later claim success (see _broken_reminder_hook). Cleared per path when the same path validates clean again (a clean edit_file/write_file on it, or check_script reporting it clean).
 	var broken_files: Dictionary = {}
-	## Completed calls the broken_reminder hook still skips before it may fire again — the rate limit keeping the reminder to at most once every three calls instead of a nag on every one.
+	## Completed calls the broken_reminder hook still skips before it may fire again — the configurable rate limit (GDLLMTunables.BROKEN_REMINDER_COOLDOWN) that keeps the reminder a nudge instead of a per-call nag.
 	var broken_reminder_cooldown: int = 0
 	## Importers whose numeric-choice legend a .import read has already spelled out this session, by importer name — the block is per-importer and identical every time, so a session reading six textures paid for it six times (wild-measured: 71% of all legend characters were duplicates). A repeat gets a pointer naming the choice options and the by-name spelling instead (see GDLLMImport.legend_block).
 	var legended_importers: Dictionary = {}

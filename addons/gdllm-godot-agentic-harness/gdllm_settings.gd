@@ -34,6 +34,9 @@ const MAX_PARALLEL_SUBAGENTS := "gdllm/agents/max_parallel_subagents"
 ## Whether a newly created session starts with "Make changes" on. Off by default so write permission stays a per-conversation opt-in; existing sessions keep their own stored state either way.
 const NEW_SESSION_EDITS := "gdllm/agents/new_sessions_start_with_edits"
 
+## The "Delete files" counterpart to NEW_SESSION_EDITS: whether a newly created session starts with the delete toggle on. Off by default for the same reason, only more so — deletion stays a per-conversation opt-in.
+const NEW_SESSION_DELETE := "gdllm/agents/new_sessions_start_with_delete_files"
+
 ## Whether the plugin keeps the GDLLMGameAgent autoload registered in the project — the in-game half of the game-driving tools (read_game_ui, send_game_input, call_game_method). The autoload is inert without a debugger attached; turning this off removes it from Project Settings → Globals on the spot (see the plugin's _sync_game_agent).
 const GAME_AGENT := "gdllm/agents/register_game_input_agent"
 
@@ -75,6 +78,7 @@ const DEFAULT_AUTO_EXPAND_TOOL_RESULTS := false
 const DEFAULT_MARKDOWN_RESPONSES := true
 const DEFAULT_MAX_PARALLEL_SUBAGENTS := 4
 const DEFAULT_NEW_SESSION_EDITS := false
+const DEFAULT_NEW_SESSION_DELETE := false
 const DEFAULT_GAME_AGENT := true
 const DEFAULT_AUTO_COMPACTION := true
 ## 16k absorbs the incremental predictor's worst log-measured miss (~8.6k over 3421 wild requests) plus a typical reply's tokens.
@@ -143,6 +147,7 @@ static func register() -> void:
 	# or_greater lets the spinbox go past 64 by typing, while 0 stands for "no cap".
 	_define_int(es, MAX_PARALLEL_SUBAGENTS, DEFAULT_MAX_PARALLEL_SUBAGENTS, "0,64,1,or_greater")
 	_define_bool(es, NEW_SESSION_EDITS, DEFAULT_NEW_SESSION_EDITS)
+	_define_bool(es, NEW_SESSION_DELETE, DEFAULT_NEW_SESSION_DELETE)
 	_define_bool(es, GAME_AGENT, DEFAULT_GAME_AGENT)
 	_define_bool(es, AUTO_COMPACTION, DEFAULT_AUTO_COMPACTION)
 	# or_greater lets the buffer pass 64k by typing; 0 means trigger only once the window itself is predicted full.
@@ -163,6 +168,13 @@ static func register() -> void:
 	for color_key: String in GDLLMColors.DEFAULTS:
 		var color_default: Color = GDLLMColors.DEFAULTS[color_key]
 		_define_color(es, color_key, color_default)
+	# Every numeric tunable, defined straight off GDLLMTunables' spec map the same way — a float default registers a float spinbox, an int default an integer one.
+	for tunable_key: String in GDLLMTunables.SPECS:
+		var spec: Dictionary = GDLLMTunables.SPECS[tunable_key]
+		if spec["default"] is float:
+			_define_float(es, tunable_key, spec["default"], GDLLMTunables.range_hint(spec))
+		else:
+			_define_int(es, tunable_key, spec["default"], GDLLMTunables.range_hint(spec))
 	# Seed the pickers from last session's cached list so boot never waits on model HTTP; a fresh sweep runs only on demand.
 	load_cached_models()
 
@@ -196,6 +208,19 @@ static func _define_int(es: EditorSettings, key: String, default: int, range_hin
 	es.add_property_info({
 		"name": key,
 		"type": TYPE_INT,
+		"hint": PROPERTY_HINT_RANGE,
+		"hint_string": range_hint,
+	})
+
+
+## The float counterpart to _define_int, for the tunables whose values are ratios or fractional seconds.
+static func _define_float(es: EditorSettings, key: String, default: float, range_hint: String) -> void:
+	if not es.has_setting(key):
+		es.set_setting(key, default)
+	es.set_initial_value(key, default, false)
+	es.add_property_info({
+		"name": key,
+		"type": TYPE_FLOAT,
 		"hint": PROPERTY_HINT_RANGE,
 		"hint_string": range_hint,
 	})
@@ -362,6 +387,11 @@ static func get_max_parallel_subagents() -> int:
 ## Whether a newly created session starts with "Make changes" on (see GDLLMSessionStore._new_record).
 static func is_new_session_edits_on() -> bool:
 	return bool(EditorInterface.get_editor_settings().get_setting(NEW_SESSION_EDITS))
+
+
+## Whether a newly created session starts with "Delete files" on (see GDLLMSessionStore._new_record); the delete counterpart to is_new_session_edits_on.
+static func is_new_session_delete_on() -> bool:
+	return bool(EditorInterface.get_editor_settings().get_setting(NEW_SESSION_DELETE))
 
 
 ## Whether the plugin keeps the GDLLMGameAgent autoload registered (see the plugin's _sync_game_agent). Read defensively because _enable_plugin consults it before register() has defined the key.

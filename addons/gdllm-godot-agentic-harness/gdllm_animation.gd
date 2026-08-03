@@ -6,14 +6,7 @@ class_name GDLLMAnimation extends RefCounted
 ## Errors surface what happened — the failing input and the real state — with no remedial advice built in; where the engine accepts an input silently, so does this.
 ## Every method is static — this is a namespace, not an instance.
 
-## Keys listed per track before the rest collapse and the `window` lever is named.
-const MAX_KEYS_LISTED := 24
-## Animations listed per player before the rest collapse to a count.
-const MAX_ANIMATIONS_LISTED := 40
-## Tracks rendered per zoomed animation before the rest collapse to a count.
-const MAX_TRACKS_LISTED := 40
-## Rendered key values past this are clipped — a giant value must never flood the context.
-const MAX_VALUE_CHARS := 120
+# The key, animation, and track listing caps and the rendered-value clip this file renders under are user-configurable — see GDLLMTunables' gdllm/tool_output section.
 ## The one action spec each edit_animation call carries.
 const EDIT_ACTION_KEYS: Array[String] = ["add_track", "remove_track", "move_track", "insert_key", "set_key", "remove_key", "add_animation", "remove_animation"]
 ## Animation.TrackType values as words, indexed by the enum.
@@ -850,8 +843,8 @@ static func value_string(value: Variant) -> String:
 			return "<%s %s>" % [res.get_class(), res.resource_path]
 		return "<%s>" % (value as Object).get_class()
 	var rendered := var_to_str(value).replace("\n", " ")
-	if rendered.length() > MAX_VALUE_CHARS:
-		rendered = rendered.substr(0, MAX_VALUE_CHARS) + "… (%d chars total)" % rendered.length()
+	if rendered.length() > GDLLMTunables.geti(GDLLMTunables.RENDERED_VALUE_MAX_CHARS):
+		rendered = rendered.substr(0, GDLLMTunables.geti(GDLLMTunables.RENDERED_VALUE_MAX_CHARS)) + "… (%d chars total)" % rendered.length()
 	return rendered
 
 
@@ -880,19 +873,19 @@ static func anim_header(anim: Animation) -> String:
 
 static func track_list(anim: Animation) -> String:
 	var parts := PackedStringArray()
-	for i in mini(anim.get_track_count(), MAX_TRACKS_LISTED):
+	for i in mini(anim.get_track_count(), GDLLMTunables.geti(GDLLMTunables.ANIMATION_TRACKS_LISTED_CAP)):
 		parts.append("%d: %s \"%s\"" % [i, track_type_name(anim.track_get_type(i)), anim.track_get_path(i)])
-	if anim.get_track_count() > MAX_TRACKS_LISTED:
-		parts.append("… %d more" % (anim.get_track_count() - MAX_TRACKS_LISTED))
+	if anim.get_track_count() > GDLLMTunables.geti(GDLLMTunables.ANIMATION_TRACKS_LISTED_CAP):
+		parts.append("… %d more" % (anim.get_track_count() - GDLLMTunables.geti(GDLLMTunables.ANIMATION_TRACKS_LISTED_CAP)))
 	return "The tracks are — %s." % "; ".join(parts)
 
 
 static func key_time_list(anim: Animation, track: int) -> String:
 	var parts := PackedStringArray()
-	for k in mini(anim.track_get_key_count(track), MAX_KEYS_LISTED):
+	for k in mini(anim.track_get_key_count(track), GDLLMTunables.geti(GDLLMTunables.ANIMATION_KEYS_LISTED_CAP)):
 		parts.append(time_str(anim.track_get_key_time(track, k)))
-	if anim.track_get_key_count(track) > MAX_KEYS_LISTED:
-		parts.append("… %d more" % (anim.track_get_key_count(track) - MAX_KEYS_LISTED))
+	if anim.track_get_key_count(track) > GDLLMTunables.geti(GDLLMTunables.ANIMATION_KEYS_LISTED_CAP):
+		parts.append("… %d more" % (anim.track_get_key_count(track) - GDLLMTunables.geti(GDLLMTunables.ANIMATION_KEYS_LISTED_CAP)))
 	return ", ".join(parts) if not parts.is_empty() else "(none)"
 
 
@@ -1075,13 +1068,13 @@ static func _players_scope(players: Array) -> String:
 ## Animation keys listed for an error or overview, with the owning player named only when several exist.
 static func _entry_key_list(entries: Array, with_player: bool) -> String:
 	var names := PackedStringArray()
-	for entry: Dictionary in entries.slice(0, MAX_ANIMATIONS_LISTED):
+	for entry: Dictionary in entries.slice(0, GDLLMTunables.geti(GDLLMTunables.ANIMATION_ANIMATIONS_LISTED_CAP)):
 		var name := "\"%s\"" % String(entry["key"])
 		if with_player:
 			name += " (on %s)" % String((entry["player"] as Dictionary)["path"])
 		names.append(name)
-	if entries.size() > MAX_ANIMATIONS_LISTED:
-		names.append("… %d more" % (entries.size() - MAX_ANIMATIONS_LISTED))
+	if entries.size() > GDLLMTunables.geti(GDLLMTunables.ANIMATION_ANIMATIONS_LISTED_CAP):
+		names.append("… %d more" % (entries.size() - GDLLMTunables.geti(GDLLMTunables.ANIMATION_ANIMATIONS_LISTED_CAP)))
 	return ", ".join(names)
 
 
@@ -1091,7 +1084,7 @@ static func _track_lines(anim: Animation, window: Vector2, has_window: bool) -> 
 	if anim.get_track_count() == 0:
 		lines.append("No tracks.")
 		return lines
-	for i in mini(anim.get_track_count(), MAX_TRACKS_LISTED):
+	for i in mini(anim.get_track_count(), GDLLMTunables.geti(GDLLMTunables.ANIMATION_TRACKS_LISTED_CAP)):
 		var type := anim.track_get_type(i)
 		var head := "track %d — %s \"%s\" — %d key(s)" % [i, track_type_name(type), anim.track_get_path(i), anim.track_get_key_count(i)]
 		if type != Animation.TYPE_BEZIER and type != Animation.TYPE_AUDIO and type != Animation.TYPE_ANIMATION:
@@ -1105,8 +1098,8 @@ static func _track_lines(anim: Animation, window: Vector2, has_window: bool) -> 
 			head += " [imported]"
 		lines.append(head)
 		lines.append_array(_key_lines(anim, i, window, has_window))
-	if anim.get_track_count() > MAX_TRACKS_LISTED:
-		lines.append("… %d more track(s) — pass \"window\" to narrow, or read specific tracks by re-calling." % (anim.get_track_count() - MAX_TRACKS_LISTED))
+	if anim.get_track_count() > GDLLMTunables.geti(GDLLMTunables.ANIMATION_TRACKS_LISTED_CAP):
+		lines.append("… %d more track(s) — pass \"window\" to narrow, or read specific tracks by re-calling." % (anim.get_track_count() - GDLLMTunables.geti(GDLLMTunables.ANIMATION_TRACKS_LISTED_CAP)))
 	return lines
 
 
@@ -1120,7 +1113,7 @@ static func _key_lines(anim: Animation, track: int, window: Vector2, has_window:
 		if has_window and (t < window.x or t > window.y):
 			skipped += 1
 			continue
-		if shown >= MAX_KEYS_LISTED:
+		if shown >= GDLLMTunables.geti(GDLLMTunables.ANIMATION_KEYS_LISTED_CAP):
 			skipped += 1
 			continue
 		shown += 1
@@ -1176,11 +1169,11 @@ static func _compose_overview(origin: String, scan: Dictionary, players: Array, 
 static func _library_lines(indent: String, lib: AnimationLibrary) -> Array:
 	var lines: Array = []
 	var names := lib.get_animation_list()
-	for i in mini(names.size(), MAX_ANIMATIONS_LISTED):
+	for i in mini(names.size(), GDLLMTunables.geti(GDLLMTunables.ANIMATION_ANIMATIONS_LISTED_CAP)):
 		var anim := lib.get_animation(names[i])
 		lines.append("%s\"%s\" — %s" % [indent, names[i], anim_header(anim)])
-	if names.size() > MAX_ANIMATIONS_LISTED:
-		lines.append("%s… %d more" % [indent, names.size() - MAX_ANIMATIONS_LISTED])
+	if names.size() > GDLLMTunables.geti(GDLLMTunables.ANIMATION_ANIMATIONS_LISTED_CAP):
+		lines.append("%s… %d more" % [indent, names.size() - GDLLMTunables.geti(GDLLMTunables.ANIMATION_ANIMATIONS_LISTED_CAP)])
 	if names.is_empty():
 		lines.append("%s(no animations)" % indent)
 	return lines

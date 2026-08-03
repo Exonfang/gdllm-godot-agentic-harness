@@ -322,7 +322,7 @@ func _test_grid_window_and_cap() -> void:
 	big.free()
 	var scan := {"layers": [record], "legacy": 0, "has_instances": false}
 	var capped := GDLLMTilemap.compose_report("Test.", scan, "Big", Rect2i(), false)
-	_check(capped.contains("4800 cells, past the %d-cell view cap" % GDLLMTilemap.MAX_GRID_CELLS), "an over-cap grid is withheld with the arithmetic shown")
+	_check(capped.contains("4800 cells, past the %d-cell view cap" % GDLLMTunables.geti(GDLLMTunables.TILEMAP_GRID_CELL_CAP)), "an over-cap grid is withheld with the arithmetic shown")
 	_check(capped.contains("\"rect\": [x, y, width, height]"), "the cap names the rect lever")
 	_check(capped.contains("4800 cells in x 0..79, y 0..59"), "the counts still cover the whole layer")
 	var windowed_big := GDLLMTilemap.compose_report("Test.", scan, "Big", Rect2i(0, 0, 4, 2), true)
@@ -596,12 +596,12 @@ func _test_edit_refusals() -> void:
 	_check((await _run("edit_tilemap", {"scene": EDIT_SCENE, "erase": {"rect": [0, 0, 1, 1]}}, true)).contains("no layer was given"), "a missing layer is refused naming read_tilemap")
 	_check((await _run("edit_tilemap", {"scene": FIXTURE_TILESET, "layer": "x", "erase": {"rect": [0, 0, 1, 1]}}, true)).contains("not a .tscn"), "a non-scene path is refused")
 	var big_cells: Array = []
-	for i in GDLLMTilemap.MAX_SET_CELLS + 1:
+	for i in GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_SET_CELLS) + 1:
 		big_cells.append({"at": [i, 0], "source": 7})
 	var capped := await _run("edit_tilemap", {"scene": EDIT_SCENE, "layer": "Ground", "cells": big_cells}, true)
-	_check(capped.contains("past the %d-cell cap" % GDLLMTilemap.MAX_SET_CELLS) and capped.contains("fill"), "an over-cap cell batch is refused naming the bulk verbs")
+	_check(capped.contains("past the %d-cell cap" % GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_SET_CELLS)) and capped.contains("fill"), "an over-cap cell batch is refused naming the bulk verbs")
 	var big_fill := await _run("edit_tilemap", {"scene": EDIT_SCENE, "layer": "Ground", "fill": {"rect": [0, 0, 200, 200], "source": 7}}, true)
-	_check(big_fill.contains("past the %d-cell cap" % GDLLMTilemap.MAX_FILL_AREA), "an over-cap fill rect is refused with its arithmetic")
+	_check(big_fill.contains("past the %d-cell cap" % GDLLMTunables.geti(GDLLMTunables.TILEMAP_MAX_FILL_AREA)), "an over-cap fill rect is refused with its arithmetic")
 	var bad_id := await _run("edit_tilemap", {"scene": EDIT_SCENE, "layer": "Ground", "fill": {"rect": [0, 0, 1, 1], "source": 99}}, true)
 	_check(bad_id.contains("no source 99") and bad_id.contains("stone"), "an id the TileSet lacks is refused with the real sources")
 	var no_atlas := await _run("edit_tilemap", {"scene": EDIT_SCENE, "layer": "Ground", "cells": [{"at": [0, 0], "source": "stone"}]}, true)

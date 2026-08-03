@@ -2,14 +2,7 @@
 class_name GDLLMBreak extends RefCounted
 ## Engine-truth access to a game paused in the debugger: what it is paused ON (a breakpoint, a breakpoint statement, a runtime error), where (the GDScript call stack), with what state (the frame's locals, members and globals), and the stepping controls. Nothing here asks the game for any of it: on every break the editor itself sends get_stack_dump, and frame 0 auto-selecting in its stack tree sends get_stack_frame_vars (ScriptEditorDebugger::_thread_debug_enter, then _msg_stack_dump's s->select(0)), so this class only records the deserialized signals those replies raise — probe-measured 48–173 ms behind the break, which is why a read settles before it answers. Execution is controlled by pressing the debugger tab's OWN Continue/Step/Next/Out buttons, never by sending "continue"/"step" over the wire: those messages must carry the breaking thread's id, which EditorDebuggerSession.send_message cannot set (it defaults to the main thread), and the buttons additionally clear the execution markers, restore the game's foreground and unmute the audio the break muted. Each button's disabled state is the engine's own verdict on what is legal here — an error break reports can_debug false and disables every step — so a refusal quotes it instead of guessing. Every method is static — this is a namespace, not an instance.
 
-## How long a read waits for a break's stack and variables to land before answering with what it has.
-const STACK_SETTLE_MS := 1200
-## Report bounds: frames, variables, and the length of one printed value.
-const MAX_FRAMES := 12
-const MAX_VARS := 30
-const MAX_VALUE_CHARS := 120
-## The most steps one debug_game call may take, so a stepping run stays one bounded tool round.
-const MAX_STEPS := 10
+# The settle wait, report bounds (frames, variables, printed-value length), and step cap this file runs under are user-configurable — see GDLLMTunables' gdllm/tool_runtime and gdllm/tool_output sections.
 
 ## The debugger controls, keyed by the action name a tool takes: the editor theme icon that identifies the button (icon names are not localized, unlike the tooltips), how the result words what happened, whether the engine's can_debug verdict has to allow it, and whether the game must already be paused — "break" is the one press that needs the opposite, a game that is running.
 const ACTIONS := {
@@ -340,7 +333,7 @@ static func format_break(state: Dictionary, now_ms: int, whose: String, all: boo
 	for i in frames.size():
 		var frame: Dictionary = frames[i]
 		var index := int(frame.get("frame", i))
-		if listed >= MAX_FRAMES and index != selected:
+		if listed >= GDLLMTunables.geti(GDLLMTunables.DEBUGGER_STACK_FRAMES_CAP) and index != selected:
 			skipped += 1
 			continue
 		listed += 1
@@ -376,7 +369,7 @@ static func _var_lines(vars: Array, frame: int, all: bool, filter := "") -> Arra
 			continue
 		lines.append("%s in frame %d:" % ["Locals" if kind == VAR_LOCAL else "Members of self", frame])
 		for data: Array in group:
-			if printed >= MAX_VARS:
+			if printed >= GDLLMTunables.geti(GDLLMTunables.DEBUGGER_VARIABLES_CAP):
 				dropped += 1
 				continue
 			printed += 1
@@ -387,7 +380,7 @@ static func _var_lines(vars: Array, frame: int, all: bool, filter := "") -> Arra
 	if all and not globals.is_empty():
 		lines.append("Globals (autoloads and named globals):")
 		for data: Array in globals:
-			if printed >= MAX_VARS:
+			if printed >= GDLLMTunables.geti(GDLLMTunables.DEBUGGER_VARIABLES_CAP):
 				dropped += 1
 				continue
 			printed += 1
@@ -446,8 +439,8 @@ static func render_value(value: Variant, whole := false) -> String:
 	if value is Object:
 		return "<%s>" % (value as Object).get_class()
 	var text := var_to_str(value)
-	if not whole and text.length() > MAX_VALUE_CHARS:
-		return text.substr(0, MAX_VALUE_CHARS) + "… (%d chars — a \"filter\" naming this variable prints it whole)" % text.length()
+	if not whole and text.length() > GDLLMTunables.geti(GDLLMTunables.RENDERED_VALUE_MAX_CHARS):
+		return text.substr(0, GDLLMTunables.geti(GDLLMTunables.RENDERED_VALUE_MAX_CHARS)) + "… (%d chars — a \"filter\" naming this variable prints it whole)" % text.length()
 	return text
 
 

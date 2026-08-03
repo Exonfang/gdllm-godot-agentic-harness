@@ -4,14 +4,7 @@ class_name GDLLMDocs extends RefCounted
 ## The cache's `classes` meta holds one Dictionary per class, covering everything the Help panel shows — including non-ClassDB pages like @GDScript, @GlobalScope, and the Variant math types — which is why this is the prose source rather than --doctool (whose dump carries empty descriptions: it merges prose from disk, never from the binary).
 ## Like the other describe_* tools this exists for reality grounding: prose is pulled per class or per member on demand, never dumped wholesale into context.
 
-const MAX_SUGGESTIONS := 12
-## Longest prose block returned whole; a runaway description is truncated with a pointer instead of flooding the model's context.
-const MAX_PROSE_CHARS := 6000
-## search()'s result cap and per-hit snippet window, kept small so a search maps the docs — one line per hit, read in full via describe_docs — rather than dumping prose.
-const MAX_SEARCH_HITS := 12
-const SNIPPET_CHARS := 160
-## Most values one enum prints on its structural line before the rest are counted and `filter` is named; @GlobalScope's Key alone has 193.
-const MAX_ENUM_VALUES := 24
+# The prose, search-hit, snippet, enum, and suggestion caps this file renders under are user-configurable — see GDLLMTunables' gdllm/tool_output section.
 ## Scoring weights: a query word in the entry's own name beats one in the class name, which beats prose hits, so exact terminology surfaces above passing mentions.
 const SCORE_NAME := 4
 const SCORE_CLASS := 2
@@ -86,8 +79,8 @@ static func search(query: String) -> String:
 		return "No documentation entries contain all of: %s. Every word must appear in a single entry's name or prose — try fewer, simpler, or different words (\"wrap\" rather than \"word wrapping\")." % ", ".join(words)
 	var hits := best.values()
 	hits.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["score"] > b["score"] if a["score"] != b["score"] else String(a["label"]) < String(b["label"]))
-	var shown: Array = hits if hits.size() <= MAX_SEARCH_HITS else hits.slice(0, MAX_SEARCH_HITS)
-	var note := "" if hits.size() <= MAX_SEARCH_HITS else " (top %d of %d — add words to narrow)" % [MAX_SEARCH_HITS, hits.size()]
+	var shown: Array = hits if hits.size() <= GDLLMTunables.geti(GDLLMTunables.DOCS_SEARCH_MAX_HITS) else hits.slice(0, GDLLMTunables.geti(GDLLMTunables.DOCS_SEARCH_MAX_HITS))
+	var note := "" if hits.size() <= GDLLMTunables.geti(GDLLMTunables.DOCS_SEARCH_MAX_HITS) else " (top %d of %d — add words to narrow)" % [GDLLMTunables.geti(GDLLMTunables.DOCS_SEARCH_MAX_HITS), hits.size()]
 	var lines: Array = ["Documentation entries matching \"%s\" — %d hit(s)%s. Read one in full with describe_docs:" % [" ".join(words), hits.size(), note]]
 	for hit in shown:
 		var snippet := String(hit["snippet"])
@@ -232,9 +225,9 @@ static func _enum_structure_line(enumeration: String, items: Array, filter: Stri
 	if shown.is_empty():
 		return ""
 	var note := ""
-	if shown.size() > MAX_ENUM_VALUES:
-		note = ", … (%d of %d — pass a `filter` substring for the rest)" % [MAX_ENUM_VALUES, shown.size()]
-		shown = shown.slice(0, MAX_ENUM_VALUES)
+	if shown.size() > GDLLMTunables.geti(GDLLMTunables.DOCS_ENUM_VALUES_CAP):
+		note = ", … (%d of %d — pass a `filter` substring for the rest)" % [GDLLMTunables.geti(GDLLMTunables.DOCS_ENUM_VALUES_CAP), shown.size()]
+		shown = shown.slice(0, GDLLMTunables.geti(GDLLMTunables.DOCS_ENUM_VALUES_CAP))
 	var pairs: Array[String] = []
 	for item in shown:
 		pairs.append("%s = %s" % [item.get("name", ""), item.get("value", "")])
@@ -348,10 +341,10 @@ static func _search_snippet(words: PackedStringArray, brief: String, desc: Strin
 		if pos != -1:
 			break
 	var start := maxi(0, pos - 40)
-	var window := _flatten_prose(source.substr(start, SNIPPET_CHARS))
+	var window := _flatten_prose(source.substr(start, GDLLMTunables.geti(GDLLMTunables.DOCS_SNIPPET_CHARS)))
 	if start > 0:
 		window = "…" + window
-	if start + SNIPPET_CHARS < source.length():
+	if start + GDLLMTunables.geti(GDLLMTunables.DOCS_SNIPPET_CHARS) < source.length():
 		window += "…"
 	return window
 
@@ -514,17 +507,17 @@ static func _member_block(declaring: String, section: String, item: Dictionary) 
 static func _enum_block(enum_hits: Array) -> String:
 	var first: Dictionary = enum_hits[0]
 	var lines: Array = ["Enum %s (declared in %s):" % [first["enumeration"], first["declaring"]]]
-	for hit in enum_hits.slice(0, MAX_ENUM_VALUES):
+	for hit in enum_hits.slice(0, GDLLMTunables.geti(GDLLMTunables.DOCS_ENUM_VALUES_CAP)):
 		var item: Dictionary = hit["item"]
 		var prose := _clean_prose(String(item.get("description", "")))
 		lines.append("")
 		lines.append("%s = %s" % [item.get("name", ""), item.get("value", "")])
 		if prose != "":
 			lines.append(prose)
-	if enum_hits.size() > MAX_ENUM_VALUES:
-		var next_name := String((enum_hits[MAX_ENUM_VALUES]["item"] as Dictionary).get("name", ""))
+	if enum_hits.size() > GDLLMTunables.geti(GDLLMTunables.DOCS_ENUM_VALUES_CAP):
+		var next_name := String((enum_hits[GDLLMTunables.geti(GDLLMTunables.DOCS_ENUM_VALUES_CAP)]["item"] as Dictionary).get("name", ""))
 		lines.append("")
-		lines.append("(%d of %d values shown — pass one value's own name as `member` (e.g. \"%s\") for its prose.)" % [MAX_ENUM_VALUES, enum_hits.size(), next_name])
+		lines.append("(%d of %d values shown — pass one value's own name as `member` (e.g. \"%s\") for its prose.)" % [GDLLMTunables.geti(GDLLMTunables.DOCS_ENUM_VALUES_CAP), enum_hits.size(), next_name])
 	return "\n".join(lines)
 
 
@@ -573,11 +566,11 @@ static func _clean_prose(raw: String) -> String:
 	return _substitute_docs_url(text)
 
 
-## The whole-result prose cap, applied once at describe()'s exit instead of per block (per-block caps could still stack past any budget): past MAX_PROSE_CHARS the text is cut with a note naming full: true — the model-callable lever the old note lacked (it pointed only at the Help panel, a surface the model cannot open) — alongside the Help-panel pointer that still serves the user.
+## The whole-result prose cap, applied once at describe()'s exit instead of per block (per-block caps could still stack past any budget): past GDLLMTunables.DOCS_PROSE_MAX_CHARS the text is cut with a note naming full: true — the model-callable lever the old note lacked (it pointed only at the Help panel, a surface the model cannot open) — alongside the Help-panel pointer that still serves the user.
 static func _capped_prose(text: String, full: bool) -> String:
-	if full or text.length() <= MAX_PROSE_CHARS:
+	if full or text.length() <= GDLLMTunables.geti(GDLLMTunables.DOCS_PROSE_MAX_CHARS):
 		return text
-	return text.substr(0, MAX_PROSE_CHARS) + "\n[... %d more characters — re-run with full: true for the whole text. The user can also read it in the editor's Help panel.]" % (text.length() - MAX_PROSE_CHARS)
+	return text.substr(0, GDLLMTunables.geti(GDLLMTunables.DOCS_PROSE_MAX_CHARS)) + "\n[... %d more characters — re-run with full: true for the whole text. The user can also read it in the editor's Help panel.]" % (text.length() - GDLLMTunables.geti(GDLLMTunables.DOCS_PROSE_MAX_CHARS))
 
 
 ## Doc links use a $DOCS_URL placeholder; point it at this build's minor-version manual.
@@ -597,8 +590,8 @@ static func _unknown_class_message(requested: String) -> String:
 	if suggestions.is_empty():
 		return msg + " Docs exist only for engine classes and built-in pages (e.g. \"@GDScript\", \"@GlobalScope\"), not for this project's own scripts — for one of those call describe_class, which reads the script's real API, and read_file for the rest. Names are matched case-insensitively but must otherwise be exact."
 	suggestions.sort()
-	var note := "" if suggestions.size() <= MAX_SUGGESTIONS else " (and %d more)" % (suggestions.size() - MAX_SUGGESTIONS)
-	return msg + " Did you mean: %s%s?" % [", ".join(suggestions.slice(0, MAX_SUGGESTIONS)), note]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return msg + " Did you mean: %s%s?" % [", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note]
 
 
 ## Error text for a member with no doc block, with near-miss member names gathered along the inheritance chain — names containing the request or contained by it — so a misremembered name can be corrected.
@@ -623,5 +616,5 @@ static func _unknown_member_message(entry: Dictionary, member: String) -> String
 	if suggestions.is_empty():
 		return msg + " Call describe_class to browse what %s actually has." % cls
 	suggestions.sort()
-	var note := "" if suggestions.size() <= MAX_SUGGESTIONS else " (and %d more)" % (suggestions.size() - MAX_SUGGESTIONS)
-	return msg + " Did you mean: %s%s?" % [", ".join(suggestions.slice(0, MAX_SUGGESTIONS)), note]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return msg + " Did you mean: %s%s?" % [", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note]

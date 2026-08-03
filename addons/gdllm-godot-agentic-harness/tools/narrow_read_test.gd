@@ -55,7 +55,7 @@ func _make_long_file() -> String:
 	for i in range(2, 13):
 		lines.append("var pad_%d := %d" % [i, i])
 	var text := "\n".join(lines)
-	while text.length() < GDLLMTools.READ_FILE_SUMMARY_THRESHOLD_CHARS + 1000:
+	while text.length() < GDLLMTunables.geti(GDLLMTunables.READ_FILE_SUMMARY_THRESHOLD) + 1000:
 		lines.append("")
 		lines.append("")
 		lines.append("func f_%d() -> void:" % lines.size())
@@ -69,7 +69,7 @@ func _make_long_file() -> String:
 func _test_long_file_map_and_ranged_read() -> void:
 	var long_path := _make_long_file()
 	var long_text := FileAccess.get_file_as_string(long_path)
-	_check(long_text.split("\n").size() < 1000 and long_text.length() > GDLLMTools.READ_FILE_SUMMARY_THRESHOLD_CHARS, "the fixture is under the old 1000-line gate but over the character threshold")
+	_check(long_text.split("\n").size() < 1000 and long_text.length() > GDLLMTunables.geti(GDLLMTunables.READ_FILE_SUMMARY_THRESHOLD), "the fixture is under the old 1000-line gate but over the character threshold")
 	var mapped: Dictionary = await GDLLMTools.execute("read_file", {"path": long_path})
 	_check(mapped.has("subagent"), "a file over the character threshold defers to the map subagent")
 	var preamble := String(mapped.get("subagent", {}).get("result_preamble", ""))
@@ -97,7 +97,7 @@ func _test_long_file_map_and_ranged_read() -> void:
 	var sparse_path := TMP_DIR + "/sparse_sample.txt"
 	var sparse := "x\n".repeat(1500)
 	_write(sparse_path, sparse)
-	_check(sparse.split("\n").size() > 1000 and sparse.length() < GDLLMTools.READ_FILE_SUMMARY_THRESHOLD_CHARS, "the sparse fixture is over the old line gate but small in characters")
+	_check(sparse.split("\n").size() > 1000 and sparse.length() < GDLLMTunables.geti(GDLLMTunables.READ_FILE_SUMMARY_THRESHOLD), "the sparse fixture is over the old line gate but small in characters")
 	var whole: Dictionary = await GDLLMTools.execute("read_file", {"path": sparse_path})
 	_check(not whole.has("subagent") and String(whole.get("content", "")).contains("x"), "a many-line but small file is returned whole — the gate is characters, not lines")
 
@@ -217,7 +217,7 @@ func _test_search_full_waiver() -> void:
 ## The miss error's roster: near-misses first, then a capped list — never every function in a large script.
 func _test_read_function_miss_suggestions() -> void:
 	var body := PackedStringArray(["extends RefCounted"])
-	for i in range(GDLLMTools.MAX_CLASS_SUGGESTIONS + 2):
+	for i in range(GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) + 2):
 		body.append("")
 		body.append("")
 		body.append("func fn_%02d() -> void:" % i)
@@ -228,7 +228,7 @@ func _test_read_function_miss_suggestions() -> void:
 	_check(near.contains("Closest names in this file: fn_07"), "a near-miss suggests its likely target instead of the whole roster")
 	var missed := await _run("read_function", {"path": path, "name": "nosuchfn"}, false)
 	_check(missed.contains("(and 2 more — read_file lists every function)"), "a plain miss caps the roster with a counted remainder naming the lever")
-	_check(not missed.contains("fn_%02d" % (GDLLMTools.MAX_CLASS_SUGGESTIONS + 1)), "names past the cap are not printed")
+	_check(not missed.contains("fn_%02d" % (GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) + 1)), "names past the cap are not printed")
 
 
 ## The wild overflow both halves guard against: a model debugging a broken import listed res://.godot/imported three times at ~64 KB of engine cache names per call, through the one context-facing tool that had no bound at all.
@@ -249,7 +249,7 @@ func _test_hidden_guard_and_row_cap() -> void:
 
 	var crowd := TMP_DIR + "/crowd"
 	DirAccess.make_dir_recursive_absolute(crowd)
-	var total := GDLLMTools.MAX_LIST_ROWS + 20
+	var total := GDLLMTunables.geti(GDLLMTunables.LIST_DIRECTORY_MAX_ROWS) + 20
 	for i in range(total):
 		_write("%s/entry_%03d.txt" % [crowd, i], "x")
 	out = await _run("list_directory", {"path": crowd}, false)
@@ -263,10 +263,10 @@ func _test_hidden_guard_and_row_cap() -> void:
 	# One overflow row would spend the disclosure line to hide one name, so the cap takes at least two (the fold_saves rule).
 	var edge := TMP_DIR + "/edge"
 	DirAccess.make_dir_recursive_absolute(edge)
-	for i in range(GDLLMTools.MAX_LIST_ROWS + 1):
+	for i in range(GDLLMTunables.geti(GDLLMTunables.LIST_DIRECTORY_MAX_ROWS) + 1):
 		_write("%s/edge_%03d.txt" % [edge, i], "x")
 	out = await _run("list_directory", {"path": edge}, false)
-	_check(not out.contains("not shown") and out.contains("edge_%03d.txt" % GDLLMTools.MAX_LIST_ROWS), "a single overflow row lists whole instead of truncating")
+	_check(not out.contains("not shown") and out.contains("edge_%03d.txt" % GDLLMTunables.geti(GDLLMTunables.LIST_DIRECTORY_MAX_ROWS)), "a single overflow row lists whole instead of truncating")
 	_check(String(GDLLMTools.REGISTRY["list_directory"]["parameters"]["properties"]["full"]["description"]) != "", "the full lever is documented in the schema")
 
 

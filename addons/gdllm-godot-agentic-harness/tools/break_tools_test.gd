@@ -133,19 +133,19 @@ func _test_no_stack_and_post_mortem() -> void:
 
 func _test_var_bounds() -> void:
 	var many: Array = []
-	for i in Break.MAX_VARS + 5:
+	for i in GDLLMTunables.geti(GDLLMTunables.DEBUGGER_VARIABLES_CAP) + 5:
 		many.append(_var("local_%d" % i, Break.VAR_LOCAL, i))
 	var report: String = Break.format_break(_state("Breakpoint", [_frame("res://a.gd", 1, "f", 0)], many), 5000, "a run", false)
 	_check(report.contains("+5 more variable"), "variables past the cap are counted and pointed at the inspector")
-	_check(not report.contains("local_%d" % (Break.MAX_VARS + 1)), "capped variables are not relayed")
+	_check(not report.contains("local_%d" % (GDLLMTunables.geti(GDLLMTunables.DEBUGGER_VARIABLES_CAP) + 1)), "capped variables are not relayed")
 	var deep: Array = []
-	for i in Break.MAX_FRAMES + 3:
+	for i in GDLLMTunables.geti(GDLLMTunables.DEBUGGER_STACK_FRAMES_CAP) + 3:
 		deep.append(_frame("res://a.gd", i, "f_%d" % i, i))
 	var deep_report: String = Break.format_break(_state("Breakpoint", deep, []), 5000, "a run", false)
 	_check(deep_report.contains("+3 deeper frame"), "frames past the cap are counted, not dropped silently")
 	_check(Break.render_value("goblin") == "\"goblin\"", "a string value prints as a string, quotes included")
 	_check(Break.render_value(null) == "null", "a null local prints as null rather than as nothing")
-	var long_value := "x".repeat(Break.MAX_VALUE_CHARS + 40)
+	var long_value := "x".repeat(GDLLMTunables.geti(GDLLMTunables.RENDERED_VALUE_MAX_CHARS) + 40)
 	_check(Break.render_value(long_value).contains("chars — a \"filter\""), "a long value clip names its length and the filter lever")
 	_check(Break.render_value(long_value, true) == var_to_str(long_value), "whole rendering skips the clip")
 	_check(Break.render_value(RefCounted.new()).contains("RefCounted"), "an object with no live id prints as its class")

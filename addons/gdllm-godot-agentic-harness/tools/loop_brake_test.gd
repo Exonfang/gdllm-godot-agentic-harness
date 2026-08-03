@@ -49,7 +49,7 @@ func _test_repetition_note() -> void:
 	# The note replaces the duplicate's body at the call site, so its text must stand alone as the whole result.
 	_check(Tools.DUPLICATE_CALL_NUDGE.begins_with("Result withheld"), "the duplicate note reads as a stand-in body, not an appendix")
 	# Ignored withholds escalate into the redirect at a small threshold; the instruction formats the repeat count in.
-	_check(Brakes.WITHHELD_ESCALATION_THRESHOLD >= 2, "the withhold escalation threshold leaves room for honest re-reads")
+	_check(GDLLMTunables.geti(GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD) >= 2, "the withhold escalation threshold leaves room for honest re-reads")
 	_check((Tools.DUPLICATE_ESCALATION_MESSAGE % 7).contains("7 times"), "the escalation instruction carries the repeat count")
 
 
@@ -199,9 +199,9 @@ func _test_process_result_and_escalation() -> void:
 	var repeat: Dictionary = brakes.process_result("read_file", {"path": "a.gd"}, "content A")
 	_check(String(repeat["content"]) == Tools.DUPLICATE_CALL_NUDGE and bool(repeat["repeated"]), "an identical re-run is withheld behind the nudge as the whole body")
 	_check(brakes.take_escalation() == 0, "one withhold stays below the escalation threshold")
-	for i in Brakes.WITHHELD_ESCALATION_THRESHOLD:
+	for i in GDLLMTunables.geti(GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD):
 		brakes.process_result("read_file", {"path": "a.gd"}, "content A")
-	_check(brakes.take_escalation() >= Brakes.WITHHELD_ESCALATION_THRESHOLD, "ignored stubs pile up into the escalation")
+	_check(brakes.take_escalation() >= GDLLMTunables.geti(GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD), "ignored stubs pile up into the escalation")
 	_check(brakes.take_escalation() == 0, "taking the escalation resets its window")
 
 
@@ -246,9 +246,9 @@ func _test_mutation_repeat_serves_in_full() -> void:
 	# Piling noted repeats still stop the run: the escalation is the backstop the serve must not weaken.
 	brakes = Brakes.new()
 	brakes.process_result("edit_file", edit_args, miss)
-	for i in Brakes.WITHHELD_ESCALATION_THRESHOLD:
+	for i in GDLLMTunables.geti(GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD):
 		brakes.process_result("edit_file", edit_args, miss)
-	_check(brakes.take_escalation() >= Brakes.WITHHELD_ESCALATION_THRESHOLD, "ignored repeat notes still pile into the escalation")
+	_check(brakes.take_escalation() >= GDLLMTunables.geti(GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD), "ignored repeat notes still pile into the escalation")
 
 
 func _test_streak_guard() -> void:

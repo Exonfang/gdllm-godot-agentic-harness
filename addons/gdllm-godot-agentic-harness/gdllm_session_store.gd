@@ -1,7 +1,7 @@
 @tool
 class_name GDLLMSessionStore extends RefCounted
 ## Per-project persistence and in-memory roster of chat sessions. Everything lives in a single JSON file under user://gdllm/, which Godot resolves to a per-project, per-machine folder — so no manual project keying is needed.
-## Disk writes are debounced: mutations arrive in bursts (several per agentic turn), and rewriting the whole growing file per mutation stalls the editor. save() marks the roster dirty and one timer flushes the burst; structural changes (create/delete) and the dock's exit path flush immediately, so the only loss window is SAVE_DEBOUNCE_SECONDS of tail on a hard editor crash.
+## Disk writes are debounced: mutations arrive in bursts (several per agentic turn), and rewriting the whole growing file per mutation stalls the editor. save() marks the roster dirty and one timer flushes the burst; structural changes (create/delete) and the dock's exit path flush immediately, so the only loss window is GDLLMTunables.SESSION_SAVE_DEBOUNCE_SECONDS of tail on a hard editor crash.
 
 ## Emitted when a session's title changes (e.g. after Tasks-Model summarization). The dock's session dropdown and tab listen to this to refresh their labels.
 signal session_title_changed(id: String, title: String)
@@ -12,7 +12,7 @@ signal store_failed(message: String)
 const DIR := "user://gdllm"
 const PATH := "user://gdllm/sessions.json"
 const DEFAULT_TITLE := "New chat"
-const SAVE_DEBOUNCE_SECONDS := 0.75
+# The save-debounce window is user-configurable — see GDLLMTunables' gdllm/interface section.
 
 var sessions: Array[Dictionary] = [] ## Ordered roster; each entry is a session record (see _new_record).
 var active_id: String = "" ## Last-focused session, restored on load.
@@ -63,7 +63,7 @@ func _fail(message: String) -> void:
 	store_failed.emit(message)
 
 
-## Schedule a coalesced write, called after every mutation; the burst's writes land as one flush() SAVE_DEBOUNCE_SECONDS after the first. Headless (no SceneTree to defer on) it writes synchronously, keeping tests deterministic.
+## Schedule a coalesced write, called after every mutation; the burst's writes land as one flush() GDLLMTunables.SESSION_SAVE_DEBOUNCE_SECONDS after the first. Headless (no SceneTree to defer on) it writes synchronously, keeping tests deterministic.
 func save() -> void:
 	if _save_pending:
 		return
@@ -72,7 +72,7 @@ func save() -> void:
 		flush()
 		return
 	_save_pending = true
-	tree.create_timer(SAVE_DEBOUNCE_SECONDS).timeout.connect(_on_save_timer)
+	tree.create_timer(GDLLMTunables.getf(GDLLMTunables.SESSION_SAVE_DEBOUNCE_SECONDS)).timeout.connect(_on_save_timer)
 
 
 ## The debounce timer's landing point: skip the write when a manual flush already covered this burst.
@@ -259,6 +259,7 @@ func _new_record() -> Dictionary:
 		"updated": now,
 		"is_open": true,
 		"make_changes": GDLLMSettings.is_new_session_edits_on(), ## Per-session write permission; whether a fresh session starts with it on is the user's editor setting.
+		"delete_files": GDLLMSettings.is_new_session_delete_on(), ## Per-session delete permission, seeded the same way; existing sessions keep their stored state.
 		"tools_enabled": true,
 		"history": [],
 	}

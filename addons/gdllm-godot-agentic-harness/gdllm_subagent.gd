@@ -17,7 +17,7 @@ var _allow_delete: bool = false ## The spawning session's "Delete files" state a
 var _ledger: GDLLMTools.SessionLedger = null ## The spawning session's tool ledger, shared so this run's reads and verdicts land in that session's record; null lets execute() fall back to its shared default (bare headless runs).
 var _qualified_source: String = "" ## The run's source and model as a qualified id, stamped on stats events so each footer names who answered (set in run()).
 var _reported_base: int = 0 ## The compaction predictor's base: the newest provider-reported prompt+output token count in the tool loop, 0 until a request reports usage (the trigger stays silent without one, like the main chat's).
-var _delta_from: int = 0 ## Messages index the predictor's chars/4 delta counts from — everything at or past it postdates the reported base.
+var _delta_from: int = 0 ## Messages index the predictor's chars-per-token delta counts from — everything at or past it postdates the reported base.
 var _compact_refusal_noted: bool = false ## A prune skip or refusal has been disclosed this run, so later rounds don't re-post the same unchanged reason (see _note_compaction_refusal).
 var _over_window_noted: bool = false ## The over-window warning has been disclosed for the current overflow; re-armed once a prediction lands back under the window, mirroring the main chat's once-per-overflow rule.
 var _repeat_scope: String = "" ## This run's own GDLLMRepeats owner id, set in run() — repeat numbering is per-agent like the loop brakes, so a fresh run's first call is never tagged as a repeat the main chat (or another run) made.
@@ -231,7 +231,7 @@ func _break_loop(messages: Array, system_prompt: String, instruction: String, re
 	return _with_ledger("[This subagent was stopped by its loop guard (%s); its own progress summary follows.]\n\n%s" % [reason, _final_text(outcome)])
 
 
-## The main chat's compaction trigger and over-window guard, one level down (see GDLLMChatSession._maybe_trigger_compaction / _maybe_warn_over_window): before each tool-loop request, predict its size — the newest reported usage plus a chars/4 estimate of everything appended since — and once prediction + buffer reaches the model's window, prune old tool-result outputs from the loop's messages. No summarization runs down here: a subagent's growth IS tool results, exactly what pruning reclaims. The inner transcript is working state the activity feed has already surfaced in full, so the prune edits it in place, and every commit, refusal, and still-over-window outcome is disclosed as an activity event that persists with the panel (goal 2). The PASS is gated exactly like the main chat's — silent while the window is unknown, until a request has reported usage, and when compaction is switched off — but the window GUARD is not held back with it (also like the main chat): a prediction past the window still warns with no reported base (flagged as an estimate) or with compaction off, on the same asymmetry — a false warning self-corrects on the next report while a silent truncation is neither, and a run on a provider that reports no usage would otherwise go unwatched for its whole length.
+## The main chat's compaction trigger and over-window guard, one level down (see GDLLMChatSession._maybe_trigger_compaction / _maybe_warn_over_window): before each tool-loop request, predict its size — the newest reported usage plus a chars-per-token estimate of everything appended since — and once prediction + buffer reaches the model's window, prune old tool-result outputs from the loop's messages. No summarization runs down here: a subagent's growth IS tool results, exactly what pruning reclaims. The inner transcript is working state the activity feed has already surfaced in full, so the prune edits it in place, and every commit, refusal, and still-over-window outcome is disclosed as an activity event that persists with the panel (goal 2). The PASS is gated exactly like the main chat's — silent while the window is unknown, until a request has reported usage, and when compaction is switched off — but the window GUARD is not held back with it (also like the main chat): a prediction past the window still warns with no reported base (flagged as an estimate) or with compaction off, on the same asymmetry — a false warning self-corrects on the next report while a silent truncation is neither, and a run on a provider that reports no usage would otherwise go unwatched for its whole length.
 func _maybe_compact(messages: Array, system_prompt: String) -> void:
 	var window := GDLLMContexts.window_for(_qualified_source)
 	var debug_window := GDLLMSettings.get_compaction_debug_override()
@@ -281,7 +281,7 @@ func _note_over_window(predicted: int, window: int, estimate_only: bool) -> void
 ## The tail of the over-window warning, resolved from why the guard fired: an estimate with no reported base behind it, compaction switched off (the lever to pull), or a genuine overflow the pruning pass couldn't clear. Static and settings-free so the message ladder is testable headless, mirroring GDLLMChatSession._over_window_advice.
 static func _over_window_advice(estimate_only: bool, compaction_on: bool) -> String:
 	if estimate_only:
-		return " — a chars/4 estimate, since no request in this run has reported usage yet; the provider may reject it or silently truncate its oldest part."
+		return " — a chars-per-token estimate, since no request in this run has reported usage yet; the provider may reject it or silently truncate its oldest part."
 	if not compaction_on:
 		return " with compaction disabled — enable Automatic Context Compaction and Compaction Within Subagents (Editor Settings → Gdllm → Compaction), or the provider may reject it or silently truncate its oldest part."
 	return " even after compaction — the provider may reject it or silently truncate its oldest part."
@@ -299,7 +299,7 @@ func _prune_loop_results(messages: Array, predicted: int) -> int:
 	var min_recovery := GDLLMSettings.get_prune_min_recovery_tokens()
 	if chosen.is_empty() or saved < min_recovery:
 		if chosen.is_empty():
-			_note_compaction_refusal("Compaction found no tool results left to prune — errored results, tool_search, and the newest %d call/result pairs are exempt." % GDLLMTools.PRUNE_KEEP_RECENT_PAIRS)
+			_note_compaction_refusal("Compaction found no tool results left to prune — errored results, tool_search, and the newest %d call/result pairs are exempt." % GDLLMTunables.geti(GDLLMTunables.PRUNE_KEEP_RECENT_PAIRS))
 		else:
 			_note_compaction_refusal("Compaction could reclaim only ~%s tokens, under the %s-token minimum recovery (Editor Settings → Gdllm → Compaction), so nothing was pruned." % [String.num_int64(saved), String.num_int64(min_recovery)])
 		return 0
@@ -316,7 +316,7 @@ static func prune_candidates(messages: Array) -> Dictionary:
 	for i in messages.size():
 		if messages[i] is Dictionary and String(messages[i].get("role", "")) == "tool":
 			tool_indices.append(i)
-	tool_indices.resize(maxi(0, tool_indices.size() - GDLLMTools.PRUNE_KEEP_RECENT_PAIRS))
+	tool_indices.resize(maxi(0, tool_indices.size() - GDLLMTunables.geti(GDLLMTunables.PRUNE_KEEP_RECENT_PAIRS)))
 	var stamp_tokens := LLMClient.estimate_tokens(GDLLMTools.PRUNED_RESULT_STAMP.length())
 	var chosen: Array[int] = []
 	var saved := 0

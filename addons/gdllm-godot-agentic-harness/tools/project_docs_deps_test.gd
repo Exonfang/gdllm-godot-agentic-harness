@@ -147,9 +147,9 @@ func _test_search_docs() -> void:
 	_check(exact.contains("Label.autowrap_mode"), "an exact member name ranks in the hits")
 
 
-## The prose cap's lever: past MAX_PROSE_CHARS the cut names full: true — the model-callable lever the old note lacked (its Help-panel pointer serves only the user) — and full serves everything.
+## The prose cap's lever: past the docs prose cap the cut names full: true — the model-callable lever the old note lacked (its Help-panel pointer serves only the user) — and full serves everything.
 func _test_docs_prose_cap() -> void:
-	var long_text := "z".repeat(GDLLMDocs.MAX_PROSE_CHARS + 500)
+	var long_text := "z".repeat(GDLLMTunables.geti(GDLLMTunables.DOCS_PROSE_MAX_CHARS) + 500)
 	var capped: String = GDLLMDocs._capped_prose(long_text, false)
 	_check(capped.contains("500 more characters — re-run with full: true"), "the prose cut names the withheld count and the full: true lever")
 	_check(capped.contains("Help panel"), "the user-facing pointer survives alongside the model lever")
@@ -158,15 +158,15 @@ func _test_docs_prose_cap() -> void:
 
 ## The setting-value clip's lever: the list clip names the setting zoom, and the zoom itself renders whole — a zoom returning the same stump was the audit's dead end.
 func _test_setting_value_clip() -> void:
-	var long_value := "v".repeat(GDLLMProject.MAX_VALUE_CHARS + 60)
+	var long_value := "v".repeat(GDLLMTunables.geti(GDLLMTunables.BROWSE_VALUE_MAX_CHARS) + 60)
 	_check(GDLLMProject._value_text(long_value).contains("chars total — \"setting\" with this name prints it whole"), "the list clip names the zoom lever")
 	_check(GDLLMProject._value_text(long_value, true) == "\"%s\"" % long_value, "the zoom renders the value whole")
 
 
 func _test_dependencies() -> void:
-	var many := range(GDLLMTools.MAX_DEPENDENCY_LINES + 10)
+	var many := range(GDLLMTunables.geti(GDLLMTunables.DEPENDENCY_LINES_CAP) + 10)
 	var capped: Array = GDLLMTools._capped_lines(many)
-	_check(capped.size() == GDLLMTools.MAX_DEPENDENCY_LINES + 1 and String(capped[GDLLMTools.MAX_DEPENDENCY_LINES]).contains("full: true"), "a capped listing counts the cut and names the full: true waiver")
+	_check(capped.size() == GDLLMTunables.geti(GDLLMTunables.DEPENDENCY_LINES_CAP) + 1 and String(capped[GDLLMTunables.geti(GDLLMTunables.DEPENDENCY_LINES_CAP)]).contains("full: true"), "a capped listing counts the cut and names the full: true waiver")
 	_check(GDLLMTools._capped_lines(many, true).size() == many.size(), "full: true serves every dependency line")
 	DirAccess.make_dir_recursive_absolute(TMP_DIR)
 	var script := FileAccess.open(TMP_DIR + "/user.gd", FileAccess.WRITE)

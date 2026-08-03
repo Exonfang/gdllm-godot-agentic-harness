@@ -2,22 +2,7 @@
 class_name GDLLMPerf extends RefCounted
 ## Engine-truth performance and debugger-tab access for a running game. The game already streams every Performance monitor to the editor about once per second (the "performance:profile_frame" debugger message — always on, raw floats indexed by the Performance.Monitor enum), and ScriptEditorDebugger re-emits every incoming message on its public debug_data signal BEFORE the built-in handlers consume it — so this class records that stream passively per session and answers from real numbers, never from scraping formatted widget text. Three of the debugger's tabs are instead DRIVEN and read back: the Profiler, Visual Profiler, and Network Profiler are toggled by pressing their OWN Start/Stop button (see toggle_profiler for why the raw EditorDebuggerSession.toggle_profiler route cannot be used twice) and read from their own Trees, and the Video RAM tab is refreshed by pressing its own Reload button — so every capture this class takes is indistinguishable from one the user takes by hand, and fills the same tab in front of them. Two non-performance records ride the message stream too, because one debug_data hook is better than three: the Video RAM reply's arrival (the settle signal a refresh waits on) and the clicked-control record behind the Misc tab's fields. Every method is static — this is a namespace, not an instance.
 
-## Most monitor frames kept per debugger session (~one per second, so roughly three minutes of history); older samples fall off the front.
-const PERF_SAMPLE_CAP := 180
-## read_performance's summary-window bounds, in seconds.
-const DEFAULT_WINDOW_SECONDS := 30
-const MAX_WINDOW_SECONDS := 180
-## The most function/category rows one profile report relays before pointing at the Profiler tab for the rest.
-const PROFILE_MAX_ROWS := 20
-## The most render-pass rows a visual profile relays, higher than the function cap because the passes are a tree whose leaves carry the cost.
-const VISUAL_MAX_ROWS := 40
-## The most per-node rows a network profile relays from each of the Network Profiler's two tables.
-const NETWORK_MAX_ROWS := 20
-## read_video_ram's row bounds: enough of the top of a list the engine already sorted by size to answer "what is eating video memory", never the whole registry.
-const VRAM_DEFAULT_ROWS := 20
-const VRAM_MAX_ROWS := 100
-## Most clicked-control records kept per session — comfortably above one input sequence's step cap, so a sequence's own clicks never fall off its own report.
-const CLICK_RECORD_CAP := 40
+# The sample-history depth (which is also the widest summary window, at ~one sample per second), the default window, every profiler's row caps, and the clicked-control record cap are user-configurable — see GDLLMTunables' gdllm/tool_runtime and gdllm/tool_output sections.
 
 ## The debugger's three profiler tabs, keyed by the mode name a tool takes: the editor panel class that owns the tab (which is also how its widgets are located) and the tab's own English title, used when a result or a refusal has to name it.
 const PROFILERS := {
@@ -83,7 +68,7 @@ static func _on_debug_data(msg: String, data: Array, debugger: Node) -> void:
 			values.append(float(v))
 		var samples: Array = _session_state(debugger)["samples"]
 		samples.append({"at": Time.get_ticks_msec(), "values": values})
-		while samples.size() > PERF_SAMPLE_CAP:
+		while samples.size() > GDLLMTunables.geti(GDLLMTunables.PERF_HISTORY_SECONDS):
 			samples.pop_front()
 	elif msg == "performance:profile_names":
 		var names: Array = data[0] if data.size() >= 1 and data[0] is Array else data
@@ -98,13 +83,13 @@ static func _on_debug_data(msg: String, data: Array, debugger: Node) -> void:
 		# Reported about once per second, but ONLY while the network profiler is capturing, so these samples cover exactly the windows a capture spans — the tab itself shows the last reading alone.
 		var band: Array = _session_state(debugger)["bandwidth"]
 		band.append({"at": Time.get_ticks_msec(), "in": _at_float(data, 0), "out": _at_float(data, 1)})
-		while band.size() > PERF_SAMPLE_CAP:
+		while band.size() > GDLLMTunables.geti(GDLLMTunables.PERF_HISTORY_SECONDS):
 			band.pop_front()
 	elif msg == "scene:click_ctrl":
 		# The record behind the Misc tab's Clicked Control fields: the game sends it whenever a mouse press lands on a Control, synthetic input included (probe-verified against an Input.parse_input_event click), which makes it the only engine-side proof that a click reached a target rather than empty space. Kept as a ring, not one record, because an input sequence can click several times and reporting only the newest would hide an earlier click's miss behind a later one's landing.
 		var clicks: Array = _session_state(debugger)["clicks"]
 		clicks.append({"at": Time.get_ticks_msec(), "path": _at_string(data, 0), "class": _at_string(data, 1)})
-		while clicks.size() > CLICK_RECORD_CAP:
+		while clicks.size() > GDLLMTunables.geti(GDLLMTunables.CLICK_RECORD_CAP):
 			clicks.pop_front()
 
 
@@ -148,7 +133,7 @@ static func read_performance(seconds: int, all: bool) -> String:
 		return "Error: the debugger's session panels could not be located in this editor build — its internal layout may have changed. Tell the user the read_performance tool needs updating for this editor version."
 	if int(hook["hooked"]) == 0:
 		return "Error: this editor build's debugger panel has no debug_data signal to read the monitor stream from. Tell the user the read_performance tool needs updating for this editor version."
-	var window := clampi(seconds if seconds > 0 else DEFAULT_WINDOW_SECONDS, 1, MAX_WINDOW_SECONDS)
+	var window := clampi(seconds if seconds > 0 else GDLLMTunables.geti(GDLLMTunables.PERF_DEFAULT_WINDOW_SECONDS), 1, GDLLMTunables.geti(GDLLMTunables.PERF_HISTORY_SECONDS))
 	var now := Time.get_ticks_msec()
 	var states := _live_states()
 	var blocks: Array = []
@@ -391,7 +376,7 @@ static func video_ram_rows(tree: Tree) -> Array:
 static func format_video_ram(rows: Array, total: String, limit: int, filter: String) -> String:
 	if rows.is_empty():
 		return "The Video RAM tab reports no resources in video memory. That is what a game shows before it has drawn anything, or one running on a driver with no video memory to report (a --headless run); a game with visuals on screen should list its textures and meshes here."
-	var cap := clampi(limit if limit > 0 else VRAM_DEFAULT_ROWS, 1, VRAM_MAX_ROWS)
+	var cap := clampi(limit if limit > 0 else GDLLMTunables.geti(GDLLMTunables.VRAM_DEFAULT_ROWS), 1, GDLLMTunables.geti(GDLLMTunables.VRAM_MAX_ROWS))
 	var pool: Array = rows
 	if filter != "":
 		var needle := filter.to_lower()
@@ -440,11 +425,11 @@ static func _walk_visual(item: TreeItem, depth: int, out: Array) -> void:
 		item = item.get_next()
 
 
-## Pure composer for a visual (GPU) profile: the render passes as the tab nests them, each with its CPU and GPU time, capped at VISUAL_MAX_ROWS — `limit` raises the cap and `filter` narrows by pass name (matched rows print flat: nesting context belongs to the unfiltered walk). The caption is deliberate — this tab shows ONE frame's breakdown, not an average over the capture — so a reader never takes a single frame's spike for the run's cost.
+## Pure composer for a visual (GPU) profile: the render passes as the tab nests them, each with its CPU and GPU time, capped at GDLLMTunables.PERF_PROFILE_VISUAL_ROWS — `limit` raises the cap and `filter` narrows by pass name (matched rows print flat: nesting context belongs to the unfiltered walk). The caption is deliberate — this tab shows ONE frame's breakdown, not an average over the capture — so a reader never takes a single frame's spike for the run's cost.
 static func format_visual_profile(rows: Array, limit := 0, filter := "") -> String:
 	if rows.is_empty():
 		return "The Visual Profiler tab shows no captured frame — the capture may have been too short to record one, or the game's renderer reports no frame timings (a --headless run has none)."
-	var cap := limit if limit > 0 else VISUAL_MAX_ROWS
+	var cap := limit if limit > 0 else GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_VISUAL_ROWS)
 	var f := filter.to_lower()
 	var picked: Array = rows if f == "" else rows.filter(func(row: Dictionary) -> bool: return String(row["name"]).to_lower().contains(f))
 	if picked.is_empty():
@@ -478,7 +463,7 @@ static func network_rows(tree: Tree) -> Array:
 
 ## Pure composer for a network profile: the bandwidth the game actually reported across the capture (from the stream, since the tab shows only its last reading), then the per-node RPC counts and any replication traffic. A game that used no multiplayer at all says so and names why that is the expected result for a single-player project, rather than reading as a failed capture.
 static func format_network(bandwidth: Array, rpc: Array, syncs: Array, limit := 0, filter := "") -> String:
-	var cap := limit if limit > 0 else NETWORK_MAX_ROWS
+	var cap := limit if limit > 0 else GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_NETWORK_ROWS)
 	var f := filter.to_lower()
 	var had := rpc.size() + syncs.size()
 	if f != "":
@@ -616,11 +601,11 @@ static func profiler_rows(tree: Tree) -> Array:
 	return out
 
 
-## Pure composer for a profile capture: category headers with their times, child rows capped at PROFILE_MAX_ROWS across the whole report (the tab ranks them, so the cap keeps the hottest), the rest reachable through `limit` and `filter` — an explicit ask is honored, matching read_video_ram's contract — and an empty tab stated rather than passed off as "nothing was slow".
+## Pure composer for a profile capture: category headers with their times, child rows capped at GDLLMTunables.PERF_PROFILE_FUNCTION_ROWS across the whole report (the tab ranks them, so the cap keeps the hottest), the rest reachable through `limit` and `filter` — an explicit ask is honored, where read_video_ram instead clamps to its own configurable ceiling — and an empty tab stated rather than passed off as "nothing was slow".
 static func format_profile(categories: Array, limit := 0, filter := "") -> String:
 	if categories.is_empty():
 		return "The Profiler tab shows no captured frame — the profiler may not have run long enough to record one."
-	var cap := limit if limit > 0 else PROFILE_MAX_ROWS
+	var cap := limit if limit > 0 else GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_FUNCTION_ROWS)
 	var f := filter.to_lower()
 	var lines: Array = []
 	var shown := 0

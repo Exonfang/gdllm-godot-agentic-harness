@@ -56,7 +56,7 @@ func _test_output_filter() -> void:
 
 func _test_output_clip_and_empty() -> void:
 	_check(Console.format_output("", 10, "") == "The Output console is currently empty — nothing has been printed since it was last cleared.", "an empty console is stated, not returned as blank text")
-	var long_line := "y".repeat(Console.MAX_LINE_CHARS + 150)
+	var long_line := "y".repeat(GDLLMTunables.geti(GDLLMTunables.CONSOLE_LINE_MAX_CHARS) + 150)
 	var clipped := Console.format_output(long_line, 10, "")
 	_check(clipped.contains("(+150 more chars)"), "a runaway line is clipped with the elided count")
 	_check(not clipped.contains(long_line), "the full runaway line is never relayed")
@@ -111,11 +111,11 @@ func _test_error_format() -> void:
 	var none := Console.format_errors(entries, 0, "nowhere")
 	_check(none == "Debugger error history: 3 entries (2 errors, 1 warnings); none contain \"nowhere\".", "a filter that matches nothing says so")
 	var deep: Array = []
-	for i in Console.MAX_ERROR_DETAIL_ROWS + 3:
+	for i in GDLLMTunables.geti(GDLLMTunables.CONSOLE_ERROR_DETAIL_ROWS) + 3:
 		deep.append("frame %d" % i)
 	var capped := Console.format_errors([{"kind": "error", "time": "t", "title": "deep", "detail": deep}], 0, "")
 	_check(capped.contains("(+3 more detail rows)"), "detail rows past the cap collapse to a count")
-	_check(not capped.contains("frame %d" % (Console.MAX_ERROR_DETAIL_ROWS + 1)), "capped detail rows are not relayed")
+	_check(not capped.contains("frame %d" % (GDLLMTunables.geti(GDLLMTunables.CONSOLE_ERROR_DETAIL_ROWS) + 1)), "capped detail rows are not relayed")
 
 
 func _test_headless_refusals() -> void:

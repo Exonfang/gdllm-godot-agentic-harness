@@ -64,9 +64,9 @@ func _test_cap() -> void:
 		var matched := GDLLMTools.search(query, true).size()
 		var parsed: Variant = JSON.parse_string(String((await _search_with(query, {}, true))["content"]))
 		var entries: Array = (parsed as Dictionary).get("tools", [])
-		_check(entries.size() <= GDLLMTools.MAX_SEARCH_RESULTS, "single generic word \"%s\" attaches at most the cap" % query)
-		if matched > GDLLMTools.MAX_SEARCH_RESULTS:
-			_check(String((parsed as Dictionary).get("note", "")).contains("top %d of %d" % [GDLLMTools.MAX_SEARCH_RESULTS, matched]), "\"%s\"'s cut is disclosed with the real total" % query)
+		_check(entries.size() <= GDLLMTunables.geti(GDLLMTunables.TOOL_SEARCH_MAX_RESULTS), "single generic word \"%s\" attaches at most the cap" % query)
+		if matched > GDLLMTunables.geti(GDLLMTunables.TOOL_SEARCH_MAX_RESULTS):
+			_check(String((parsed as Dictionary).get("note", "")).contains("top %d of %d" % [GDLLMTunables.geti(GDLLMTunables.TOOL_SEARCH_MAX_RESULTS), matched]), "\"%s\"'s cut is disclosed with the real total" % query)
 		else:
 			_check(not (parsed as Dictionary).has("note"), "\"%s\" under the cap carries no cut note" % query)
 
@@ -119,7 +119,7 @@ func _test_mixed_attached_and_new() -> void:
 		elif entry.has("summary"):
 			fresh_count += 1
 	_check(held_entry.has("note") and not held_entry.has("summary"), "the attached match is trimmed to a note")
-	_check(fresh_count == mini(matched.size(), GDLLMTools.MAX_SEARCH_RESULTS) - 1, "the unattached matches carry their summaries")
+	_check(fresh_count == mini(matched.size(), GDLLMTunables.geti(GDLLMTunables.TOOL_SEARCH_MAX_RESULTS)) - 1, "the unattached matches carry their summaries")
 	_check(not schema_leaked, "no match re-emits a schema — activation attaches those")
 
 

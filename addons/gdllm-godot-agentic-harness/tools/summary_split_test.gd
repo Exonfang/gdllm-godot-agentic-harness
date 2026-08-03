@@ -299,7 +299,7 @@ func _test_downshift_notice_tracks_the_condition() -> void:
 	Contexts._windows = {}
 
 
-## A reported base that predates a model switch is still used — a neighbouring tokenizer beats chars/4 — but every figure quoted from it says who measured it.
+## A reported base that predates a model switch is still used — a neighbouring tokenizer beats chars-per-token — but every figure quoted from it says who measured it.
 func _test_cross_model_base_is_labelled() -> void:
 	var reply := {"role": "assistant", "content": "x".repeat(100), "model": "src::old", "stats": {"tokens_in": 40000, "tokens_out": 500}}
 	var s := _session([_u(100), reply, _u(100)])

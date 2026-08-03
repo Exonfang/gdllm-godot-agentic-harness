@@ -459,8 +459,7 @@ class AnthropicAdapter extends LLMAdapter:
 	const API_VERSION := "2023-06-01" ## The anthropic-version header every request carries.
 	const CACHE_TTL_DEFAULT := 300 ## Anthropic's default prompt-cache lifetime (the 5-minute tier).
 	const CACHE_TTL_LONG := 3600 ## The only other lifetime the API offers: the 1-hour tier, requested as ttl "1h" at 2x write cost instead of 1.25x (worth it from about three reuses).
-	const CHAT_MAX_TOKENS := 64000 ## Fallback max_tokens for a model whose cap no sweep has reported yet; /v1/messages requires the field, and the chat path streams, so a large value can't hit a transport timeout.
-	const COMPLETION_MAX_TOKENS := 8192 ## Cap for the one-shot completion path (title generation) — short-form work that never needs the chat path's headroom.
+	# The fallback chat max_tokens (for a model whose cap no sweep has reported yet — /v1/messages requires the field, and the chat path streams, so a large value can't hit a transport timeout) and the one-shot completion cap are user-configurable — see GDLLMTunables' gdllm/network section.
 
 	static var _output_caps: Dictionary = {} ## Per-model output cap (max_tokens) as /v1/models reported it, captured by parse_models; static so the caps outlive the per-request adapter instances.
 
@@ -530,15 +529,15 @@ class AnthropicAdapter extends LLMAdapter:
 				if entry is Dictionary and entry.has("id"):
 					var id := String(entry["id"])
 					names.append(id)
-					# Each entry reports the model's own output cap; carry it so chat requests send the model's true limit instead of a guessed constant (models capped below CHAT_MAX_TOKENS, e.g. Opus 4.1's 32K, 400 on the constant).
+					# Each entry reports the model's own output cap; carry it so chat requests send the model's true limit instead of a guessed constant (models capped below GDLLMTunables.ANTHROPIC_MAX_TOKENS_FALLBACK, e.g. Opus 4.1's 32K, 400 on the constant).
 					var cap: Variant = entry.get("max_tokens")
 					if (cap is float or cap is int) and int(cap) > 0:
 						_output_caps[id] = int(cap)
 		return names
 
-	## The max_tokens for a chat request on `model`: the cap /v1/models reported for it, or CHAT_MAX_TOKENS when no sweep has seen the model.
+	## The max_tokens for a chat request on `model`: the cap /v1/models reported for it, or GDLLMTunables.ANTHROPIC_MAX_TOKENS_FALLBACK when no sweep has seen the model.
 	func _chat_max_tokens(model: String) -> int:
-		return int(_output_caps.get(model, CHAT_MAX_TOKENS))
+		return int(_output_caps.get(model, GDLLMTunables.geti(GDLLMTunables.ANTHROPIC_MAX_TOKENS_FALLBACK)))
 
 	## The single-model retrieve endpoint; its entry carries the same fields as the list the sweep reads.
 	func context_probe(model: String) -> Dictionary:
@@ -553,7 +552,7 @@ class AnthropicAdapter extends LLMAdapter:
 		return 0
 
 	func completion_request(model: String, system_prompt: String, prompt: String) -> Dictionary:
-		var body := {"model": model, "max_tokens": COMPLETION_MAX_TOKENS, "messages": [{"role": "user", "content": prompt}]}
+		var body := {"model": model, "max_tokens": GDLLMTunables.geti(GDLLMTunables.ANTHROPIC_COMPLETION_MAX_TOKENS), "messages": [{"role": "user", "content": prompt}]}
 		if system_prompt != "":
 			body["system"] = system_prompt
 		return {"path": "/v1/messages", "body": body}

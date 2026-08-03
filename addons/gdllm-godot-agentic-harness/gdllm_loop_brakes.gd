@@ -2,7 +2,7 @@
 class_name GDLLMLoopBrakes extends RefCounted
 ## The tool-loop brakes one agentic run carries — the main chat holds one per turn (reset on each user send) and every fresh-context subagent one per run, because the transcript evidence that motivated them (ignored stubs, ping-pong rounds, marathon streaks) applies to any model driving a tool loop. Three tiers, gentlest first: an exact re-run has its identical body withheld behind the duplicate nudge (process_result), rounds ping-ponging A→B→A→B with repeat evidence get the oscillation nudge appended (oscillation_nudge), and a runaway — withheld stubs piling up (take_escalation) or one tool looping past its break point (track_consecutive_use) — tells the owner to stop the loop and ask the model for a progress summary. The owner shapes the stop (the chat's red redirect turn, a subagent's interrupted answer); the brakes only keep the ledgers and name the moment.
 
-const WITHHELD_ESCALATION_THRESHOLD: int = 4 ## Withheld-duplicate firings in one run past which the gentle stubs have provably failed and the owner should stop for a progress summary (see take_escalation) — transcript-observed 29 ignored stubs in one turn, six as immediate re-repeats.
+# The withheld-duplicate escalation threshold (see take_escalation) is user-configurable — see GDLLMTunables' gdllm/agents section; transcript-observed 29 ignored stubs in one turn, six as immediate re-repeats, motivated its default.
 ## Stand-in for the withhold stub when a duplicate read serves an edit_file recovery (see _duplicate_serves_recovery); kept here rather than in GDLLMTools because re-serving the body is loop policy, not tool policy.
 const EDIT_RETRY_SERVE_NOTE := "\n\nNote: this result is identical to your earlier read, but it is served in full because your edit_file old_string for this file was not found — copy the exact text (tabs included) from THIS result."
 ## Appended to a mutating tool's re-served identical refusal: a refusal names the exact fix, so withholding its repeat buries that fix behind a stub the moment the model most needs it (transcript-observed 2026-07-19: the stub hid a not-found refusal's closest-region quote from the very retry the refusal asked for).
@@ -21,7 +21,7 @@ var _round_repeat_history: Array[bool] = [] ## Whether each of those rounds re-r
 var _call_results: Dictionary = {} ## The run's completed immediate calls, "name|args" -> result content; an identical call returning identical content has its body withheld and replaced by the duplicate-call nudge (see _repetition_note), unless the duplicate serves an edit_file recovery (see _duplicate_serves_recovery). A successful mutation drops the touched file's other entries (see _invalidate_touched_duplicates).
 var _call_paths: Dictionary = {} ## Each recorded call's lowercased file basename ("" for pathless calls), keyed like _call_results, so a mutation can drop a touched file's entries without re-parsing signatures (see _invalidate_touched_duplicates).
 var _edit_retry_paths: Dictionary = {} ## Lowercased basenames of files whose edit_file old_string was not found this run (basename -> true); each grants one duplicate re-read served in full instead of withheld (see _note_edit_not_found and _duplicate_serves_recovery).
-var _withheld_count: int = 0 ## Duplicate firings this run — withheld stubs plus re-served mutation repeats, which are the same ignored-warning evidence (see process_result); at WITHHELD_ESCALATION_THRESHOLD the owner should stop the loop (see take_escalation).
+var _withheld_count: int = 0 ## Duplicate firings this run — withheld stubs plus re-served mutation repeats, which are the same ignored-warning evidence (see process_result); at GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD the owner should stop the loop (see take_escalation).
 
 
 ## Fold one immediate call's raw result through the duplicate brakes and return {"content": what to serve, "repeated": whether the call re-ran an identical earlier call to an identical result — the no-progress evidence oscillation_nudge takes}. A repeat's body is withheld: the identical content already sits at the earlier call, so the nudge stands in for it rather than re-serving it — unless the duplicate is the one re-read granted after an edit_file old_string miss, which serves in full behind EDIT_RETRY_SERVE_NOTE and never counts toward escalation (withholding it would pit the two harness messages against each other, a transcript-observed dead end), or the repeat is a mutating tool's, which serves in full behind a repeat note and still counts (the re-run hit disk again, so the stub would hide a refusal's fix or a real second application). Deferred-subagent calls must not pass through here — re-running a delegation is nondeterministic by design.
@@ -77,9 +77,9 @@ func track_consecutive_use(used_tools: Dictionary, progressed := false) -> Strin
 	return tool_name if limit >= 0 and _streak_count >= limit else ""
 
 
-## The withheld-duplicate count once it has crossed WITHHELD_ESCALATION_THRESHOLD — piling stubs mean the loop the gentler brakes provably didn't stop, so the owner should stop it and ask for a progress summary — or 0 while they still might work. Crossing resets the counter, so a loop continuing after its summary gets a fresh window rather than an instant re-trip.
+## The withheld-duplicate count once it has crossed GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD — piling stubs mean the loop the gentler brakes provably didn't stop, so the owner should stop it and ask for a progress summary — or 0 while they still might work. Crossing resets the counter, so a loop continuing after its summary gets a fresh window rather than an instant re-trip.
 func take_escalation() -> int:
-	if _withheld_count < WITHHELD_ESCALATION_THRESHOLD:
+	if _withheld_count < GDLLMTunables.geti(GDLLMTunables.WITHHELD_ESCALATION_THRESHOLD):
 		return 0
 	var repeats := _withheld_count
 	_withheld_count = 0

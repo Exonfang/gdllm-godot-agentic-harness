@@ -5,16 +5,7 @@ class_name GDLLMTilemap extends RefCounted
 ## Naming rides the same principle: a TileSet's sources carry their resource_name or their texture's file name, which recovers exactly the meaning gameplay scripts encode as bare integers.
 ## Every method is static — this is a namespace, not an instance.
 
-## Cell area past which a grid render is withheld and the `rect` window named instead, since a grid is roughly one character per cell.
-const MAX_GRID_CELLS := 4000
-## Layer names listed before the empty-layer line collapses to a count.
-const MAX_LAYERS_LISTED := 24
-## Sources listed per TileSet before the rest collapse to a count.
-const MAX_SOURCES_LISTED := 40
-## Per-source entries on one layer's tiles line before the rest collapse to a count.
-const MAX_SOURCES_PER_LINE := 12
-## Scene paths listed for one scenes-collection source before the rest collapse to a count.
-const MAX_SCENE_TILES_LISTED := 12
+# The grid-area, layer, source, and scene-tile listing caps this file renders under are user-configurable — see GDLLMTunables' gdllm/tool_output section.
 ## Grid symbols assigned to sources in ascending id order; sources past the palette share "?" with a legend note.
 const GRID_SYMBOLS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"
 ## The three describe_tileset sections `kind` selects between.
@@ -29,12 +20,7 @@ const KIND_ALIASES := {
 const TILE_SHAPE_NAMES: Array[String] = ["square", "isometric", "half-offset square", "hexagon"]
 ## TileSet terrain-set modes as words, indexed by the enum.
 const TERRAIN_MODE_NAMES: Array[String] = ["match corners and sides", "match corners", "match sides"]
-## Explicit cells per edit_tilemap set/erase call — a bulk shape belongs to fill/replace, and arguments are permanent history.
-const MAX_SET_CELLS := 200
-## Rect area cap for edit_tilemap's fill/erase/terrain rects.
-const MAX_FILL_AREA := 10000
-## Terrain cells per edit_tilemap call — each is an engine matching step.
-const MAX_TERRAIN_CELLS := 200
+# The per-call edit guards (explicit cells, fill area, terrain cells) are user-configurable — see GDLLMTunables' gdllm/tool_runtime section.
 ## The one action spec each edit_tilemap call carries.
 const EDIT_ACTION_KEYS: Array[String] = ["cells", "fill", "replace", "erase", "terrain"]
 
@@ -324,15 +310,15 @@ static func match_layer(layers: Array, query: String) -> Dictionary:
 ## `with_markers` rides the empty-layer overview line, where a hidden or disabled layer is often the whole answer to "why don't I see my tiles"; error listings stay bare.
 static func _layer_name_list(layers: Array, with_markers := false) -> String:
 	var names := PackedStringArray()
-	for record: Dictionary in layers.slice(0, MAX_LAYERS_LISTED):
+	for record: Dictionary in layers.slice(0, GDLLMTunables.geti(GDLLMTunables.TILEMAP_LAYERS_LISTED_CAP)):
 		var name := "\"%s\"" % String(record["path"])
 		if with_markers and bool(record["hidden"]):
 			name += " [hidden]"
 		if with_markers and bool(record["disabled"]):
 			name += " [disabled]"
 		names.append(name)
-	if layers.size() > MAX_LAYERS_LISTED:
-		names.append("… %d more — describe_scene_file lists every layer node" % (layers.size() - MAX_LAYERS_LISTED))
+	if layers.size() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_LAYERS_LISTED_CAP):
+		names.append("… %d more — describe_scene_file lists every layer node" % (layers.size() - GDLLMTunables.geti(GDLLMTunables.TILEMAP_LAYERS_LISTED_CAP)))
 	return ", ".join(names)
 
 
@@ -373,10 +359,10 @@ static func _tiles_line(decoded: Dictionary, names: Dictionary, tile_set: Varian
 	var ids: Array = (decoded["by_source"] as Dictionary).keys()
 	ids.sort()
 	var parts := PackedStringArray()
-	for sid: int in ids.slice(0, MAX_SOURCES_PER_LINE):
+	for sid: int in ids.slice(0, GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_PER_LINE_CAP)):
 		parts.append("%d× %s" % [int(decoded["by_source"][sid]), source_label(sid, names)])
-	if ids.size() > MAX_SOURCES_PER_LINE:
-		parts.append("+%d more source(s) — pass \"layer\" to zoom this layer's full legend" % (ids.size() - MAX_SOURCES_PER_LINE))
+	if ids.size() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_PER_LINE_CAP):
+		parts.append("+%d more source(s) — pass \"layer\" to zoom this layer's full legend" % (ids.size() - GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_PER_LINE_CAP)))
 	var line := "tiles: " + ", ".join(parts)
 	if int(decoded["alt_count"]) > 0:
 		line += "; %d flipped/alternative cell(s)" % int(decoded["alt_count"])
@@ -456,8 +442,8 @@ static func _compose_zoom(origin: String, record: Dictionary, window: Rect2i, ha
 	var used: Rect2i = decoded["rect"]
 	var view := window if has_window else used
 	lines.append("")
-	if view.get_area() > MAX_GRID_CELLS:
-		lines.append("The grid spans %d×%d = %d cells, past the %d-cell view cap — pass \"rect\": [x, y, width, height] (in cells; the used rect is %s) to window it. The counts above cover the whole layer." % [view.size.x, view.size.y, view.get_area(), MAX_GRID_CELLS, _rect_span(used)])
+	if view.get_area() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_GRID_CELL_CAP):
+		lines.append("The grid spans %d×%d = %d cells, past the %d-cell view cap — pass \"rect\": [x, y, width, height] (in cells; the used rect is %s) to window it. The counts above cover the whole layer." % [view.size.x, view.size.y, view.get_area(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_GRID_CELL_CAP), _rect_span(used)])
 		return "\n".join(PackedStringArray(lines))
 	var window_note := " (window %s of used rect %s)" % [_rect_span(view), _rect_span(used)] if has_window else ""
 	lines.append("Grid%s — columns are x %d..%d left to right, rows are y %d..%d top to bottom (y grows downward, as on screen); \".\" = empty:" % [window_note, view.position.x, view.position.x + view.size.x - 1, view.position.y, view.position.y + view.size.y - 1])
@@ -518,9 +504,9 @@ static func _append_sources(lines: Array, tile_set: TileSet, filter: String) -> 
 	if entries.is_empty():
 		lines.append("Sources: none" if filter == "" else "Sources: none matching the filter (of %d)." % tile_set.get_source_count())
 		return 0
-	var note := "" if entries.size() <= MAX_SOURCES_LISTED else " (%d of %d shown — pass a \"filter\" substring to narrow)" % [MAX_SOURCES_LISTED, entries.size()]
+	var note := "" if entries.size() <= GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_LISTED_CAP) else " (%d of %d shown — pass a \"filter\" substring to narrow)" % [GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_LISTED_CAP), entries.size()]
 	lines.append("Sources (%d)%s:" % [entries.size(), note])
-	for entry: String in entries.slice(0, MAX_SOURCES_LISTED):
+	for entry: String in entries.slice(0, GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_LISTED_CAP)):
 		lines.append("  " + entry)
 	return entries.size()
 
@@ -540,11 +526,11 @@ static func _source_entry(sid: int, name: String, source: TileSetSource) -> Stri
 	if source is TileSetScenesCollectionSource:
 		var scenes := source as TileSetScenesCollectionSource
 		var paths := PackedStringArray()
-		for t in mini(scenes.get_scene_tiles_count(), MAX_SCENE_TILES_LISTED):
+		for t in mini(scenes.get_scene_tiles_count(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_SCENE_TILES_LISTED_CAP)):
 			var packed := scenes.get_scene_tile_scene(scenes.get_scene_tile_id(t))
 			paths.append(packed.resource_path if packed != null else "(empty)")
-		if scenes.get_scene_tiles_count() > MAX_SCENE_TILES_LISTED:
-			paths.append("… %d more — read_file this TileSet's .tres for the rest" % (scenes.get_scene_tiles_count() - MAX_SCENE_TILES_LISTED))
+		if scenes.get_scene_tiles_count() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_SCENE_TILES_LISTED_CAP):
+			paths.append("… %d more — read_file this TileSet's .tres for the rest" % (scenes.get_scene_tiles_count() - GDLLMTunables.geti(GDLLMTunables.TILEMAP_SCENE_TILES_LISTED_CAP)))
 		return "%s — scene collection, %d scene(s): %s" % [label, scenes.get_scene_tiles_count(), ", ".join(paths)]
 	return "%s — %s" % [label, source.get_class()]
 
@@ -657,11 +643,11 @@ static func resolve_source(tile_set: Variant, value: Variant, names: Dictionary)
 
 static func _source_id_list(tile_set: TileSet, names: Dictionary) -> String:
 	var parts := PackedStringArray()
-	for i in mini(tile_set.get_source_count(), MAX_SOURCES_LISTED):
+	for i in mini(tile_set.get_source_count(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_LISTED_CAP)):
 		parts.append(source_label(tile_set.get_source_id(i), names))
 	# A disambiguation list that silently ends is a completeness claim — the name the caller wanted may be exactly the one past the cap.
-	if tile_set.get_source_count() > MAX_SOURCES_LISTED:
-		parts.append("… %d more — describe_tileset with a \"filter\" substring lists the rest" % (tile_set.get_source_count() - MAX_SOURCES_LISTED))
+	if tile_set.get_source_count() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_LISTED_CAP):
+		parts.append("… %d more — describe_tileset with a \"filter\" substring lists the rest" % (tile_set.get_source_count() - GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_LISTED_CAP)))
 	return ", ".join(parts)
 
 
@@ -778,10 +764,10 @@ static func _atlas_usage_note(data: PackedByteArray, sid: int) -> String:
 
 static func _atlas_tile_list(atlas: TileSetAtlasSource) -> String:
 	var parts := PackedStringArray()
-	for t in mini(atlas.get_tiles_count(), MAX_SOURCES_PER_LINE):
+	for t in mini(atlas.get_tiles_count(), GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_PER_LINE_CAP)):
 		parts.append(str(atlas.get_tile_id(t)))
-	if atlas.get_tiles_count() > MAX_SOURCES_PER_LINE:
-		parts.append("… %d more — read_file this TileSet's .tres with \"full\": true lists every tile" % (atlas.get_tiles_count() - MAX_SOURCES_PER_LINE))
+	if atlas.get_tiles_count() > GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_PER_LINE_CAP):
+		parts.append("… %d more — read_file this TileSet's .tres with \"full\": true lists every tile" % (atlas.get_tiles_count() - GDLLMTunables.geti(GDLLMTunables.TILEMAP_SOURCES_PER_LINE_CAP)))
 	return ", ".join(parts)
 
 

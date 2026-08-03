@@ -2,12 +2,7 @@
 class_name GDLLMConsole extends RefCounted
 ## Engine-truth access to the editor's Output console and the debugger's Errors tab, read from the editor's own panels — the same widgets the user is looking at, and the only place a running game's prints and errors land in this process (the game is a separate process whose output arrives over the debugger, never through any API this plugin could hook). Panels are located by class fingerprint rather than stored node paths, so a dock rearrangement can't silently point these at the wrong widget, and a panel that can't be found refuses honestly instead of answering with an empty console. Every method is static — this is a namespace, not an instance.
 
-const DEFAULT_OUTPUT_LINES := 40
-const DEFAULT_ERROR_LIMIT := 10
-## Longest single relayed line; the remainder is elided with a count so one runaway line can't flood the context.
-const MAX_LINE_CHARS := 400
-## Most detail rows (engine error, source line, stack frames) relayed per error entry before the remainder collapses to a count.
-const MAX_ERROR_DETAIL_ROWS := 12
+# The default line tail, error-entry count, per-line clip, and error-detail rows this file relays are user-configurable — see GDLLMTunables' gdllm/tool_output section.
 ## The panel's message-type filter buttons in 4.7's MessageType order, by the EditorSettings keys their states persist under: a type toggled off is dropped from the panel's text entirely, so a read that didn't disclose it would pass a silently gutted console off as the whole log — probe-measured on a real setup whose console hid every error this way.
 const OUTPUT_FILTER_SETTINGS := [[1, "Errors"], [3, "Warnings"], [0, "Standard Messages"], [4, "Editor Messages"], [2, "Rich Standard Messages"]]
 
@@ -104,7 +99,7 @@ static func format_output(text: String, lines: int, filter: String) -> String:
 	if all.is_empty():
 		return "The Output console is currently empty — nothing has been printed since it was last cleared."
 	# An explicit ask is honored uncapped — the whole panel if asked — matching the search_files contract; only the DEFAULT stays small.
-	var cap := lines if lines > 0 else DEFAULT_OUTPUT_LINES
+	var cap := lines if lines > 0 else GDLLMTunables.geti(GDLLMTunables.CONSOLE_OUTPUT_LINES)
 	var pool: Array = all
 	if filter != "":
 		var needle := filter.to_lower()
@@ -123,7 +118,7 @@ static func format_errors(entries: Array, limit: int, filter: String) -> String:
 	if entries.is_empty():
 		return "The debugger's error history is empty: no errors or warnings have been recorded from running the project (nothing has run, or the user cleared it). Errors raised inside the editor itself land in the Output console instead — read_output shows those."
 	# Same contract as format_output: an explicit ask is honored uncapped.
-	var cap := limit if limit > 0 else DEFAULT_ERROR_LIMIT
+	var cap := limit if limit > 0 else GDLLMTunables.geti(GDLLMTunables.CONSOLE_ERROR_ENTRIES)
 	var errors := 0
 	for entry: Dictionary in entries:
 		if String(entry["kind"]) == "error":
@@ -222,10 +217,10 @@ static func _errors_header(total: int, errors: int, matched: int, shown: int, fi
 static func _format_entry(entry: Dictionary) -> String:
 	var rows: Array = ["[%s] %s: %s" % [entry["time"], String(entry["kind"]).to_upper(), _clip_line(String(entry["title"]))]]
 	var detail: Array = entry["detail"]
-	for i in mini(detail.size(), MAX_ERROR_DETAIL_ROWS):
+	for i in mini(detail.size(), GDLLMTunables.geti(GDLLMTunables.CONSOLE_ERROR_DETAIL_ROWS)):
 		rows.append("  %s" % _clip_line(String(detail[i])))
-	if detail.size() > MAX_ERROR_DETAIL_ROWS:
-		rows.append("  (+%d more detail rows)" % (detail.size() - MAX_ERROR_DETAIL_ROWS))
+	if detail.size() > GDLLMTunables.geti(GDLLMTunables.CONSOLE_ERROR_DETAIL_ROWS):
+		rows.append("  (+%d more detail rows)" % (detail.size() - GDLLMTunables.geti(GDLLMTunables.CONSOLE_ERROR_DETAIL_ROWS)))
 	return "\n".join(PackedStringArray(rows))
 
 
@@ -235,9 +230,9 @@ static func _entry_text(entry_v: Variant) -> String:
 
 
 static func _clip_line(line: String) -> String:
-	if line.length() <= MAX_LINE_CHARS:
+	if line.length() <= GDLLMTunables.geti(GDLLMTunables.CONSOLE_LINE_MAX_CHARS):
 		return line
-	return "%s… (+%d more chars)" % [line.left(MAX_LINE_CHARS), line.length() - MAX_LINE_CHARS]
+	return "%s… (+%d more chars)" % [line.left(GDLLMTunables.geti(GDLLMTunables.CONSOLE_LINE_MAX_CHARS)), line.length() - GDLLMTunables.geti(GDLLMTunables.CONSOLE_LINE_MAX_CHARS)]
 
 
 ## Every node of engine class `cls` under `root`, matched by get_class because the editor's panel classes are internal C++ types no script can name; internal children are walked too, since the editor builds its panels with them.

@@ -82,8 +82,6 @@ While this harness is ready-to-use as is, there are a few additional features I'
 - Support for vision-capable models. (The harness currently has no way to "see" beyond inspecting the game.)
 - First-class tools supporting GridMap
 - First-class tools supporting mesh/geometry authoring
-- Additional editor settings
-  - Configurable magic/arbitrary number choices.
 - Session feedback and note system (e.g. flagging a session as good output, bad output, or adding session notes)
 - First-class support for additional inference providers.
 

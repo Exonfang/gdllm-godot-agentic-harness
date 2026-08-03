@@ -18,10 +18,8 @@ signal cache_boundary(session_id: String, reason: String, retired: PackedStringA
 
 const REDIRECT_REFLECTION_CLAUSE := " It's been asked to summarize its progress — its summary follows below." ## Closes a redirect notice whose reflection request actually went out; the callers supply only the WHY, so the outcome is stated where it is known (see _redirect_notice_texts).
 const REDIRECT_ABANDONED_CLAUSE := " It was asked to summarize its progress, but that request was interrupted before it could be sent, so no summary follows." ## The counterpart clause for a redirect abandoned between the guard firing and the send — the turn was still cut short, so the notice stands with the outcome corrected.
-const MAX_SELECTED_NODE_ATTACHMENTS: int = 20 ## How many selected nodes one send will attach. Every selected node is now honored (see _selected_scene_nodes), so a "select every child" in a big container would otherwise fuse a whole subtree into one message; the overflow is stated on every attached body rather than dropped quietly (see GDLLMTools.format_attachment_scene).
+# The selected-node attachment cap (every selected node is honored — see _selected_scene_nodes — so a "select every child" in a big container would otherwise fuse a whole subtree into one message; the overflow is stated on every attached body rather than dropped quietly, see GDLLMTools.format_attachment_scene) and the context meter's warning/danger thresholds are user-configurable — see GDLLMTunables' gdllm/context section.
 const SUBAGENT_INDENT_STEP: int = 14 ## px of left indent per nesting level, so a nested subagent's steps sit visibly inside their parent's
-const CONTEXT_WARN_SHARE := 0.5 ## Share of the model's context window that turns the meter orange.
-const CONTEXT_DANGER_SHARE := 0.8 ## Share that turns the meter red.
 const MESSAGE_SEPARATION: int = 6 ## gap between messages in log
 const INPUT_RESIZE_RESERVE := 170.0 ## px of panel an input-height drag can never claim — header, model and attach rows, and a sliver of log — so the drag can't push the dock's minimum height past its slot.
 const AUTOSCROLL_STICK_EPSILON := 2.0 ## px of slack when deciding "parked at the bottom"; absorbs rounding between the int scroll value and the float scrollbar range
@@ -56,7 +54,7 @@ const WIPE_BLOCK := "█" ## solid block (U+2588) shown at the wipe's leading ed
 const HEADER_FONT_SIZE: int = 12 ## small font for the sticky session-stats header
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-const REPLAY_FRAME_BUDGET_MS: int = 8 ## ms of history rendering per frame during a replay; the rest yields to the editor, so a long restored session backfills over several frames instead of hanging one (see _replay_history).
+# The per-frame replay rendering budget (the rest yields to the editor, so a long restored session backfills over several frames instead of hanging one — see _replay_history) is user-configurable — see GDLLMTunables' gdllm/interface section.
 
 ## Compaction pass 2 — anchored summarization (see _run_summary_pass). The bridge is the summary message's opening as the model receives it, framing the replacement so the model builds on the summarized work instead of re-deriving it.
 const SUMMARY_BRIDGE := "[Context summary] The conversation before this message was compacted: this summary now stands in for every earlier message. Treat it as the reliable record of that history, build on the work it describes without redoing it, and rely on the messages that follow it verbatim."
@@ -68,12 +66,7 @@ const SUMMARY_TEMPLATE := "Write the summary using exactly these numbered sectio
 const SUMMARY_FOCUS_BRIDGE := "[Focused context summary] At the user's request the conversation before this message was compacted into this one summary, focused on: %s\nNothing earlier is in context any more — this summary is the whole record of what came before it, deliberately weighted toward that focus, so detail outside the focus was condensed or dropped. Treat it as the reliable record of that work and build on it without redoing it; where continuing needs something it does not carry, say so plainly instead of guessing."
 ## The focus instruction appended to a focused compaction's summarization request (see _summary_prompt), %s carrying the user's focus text. The nine sections stay whatever the focus is — a focused summary that reshaped the template would be a different artifact every run — the focus only decides where the detail goes.
 const SUMMARY_FOCUS_INSTRUCTION := "The user asked for this summary to focus on:\n%s\n\nKeep every numbered section, and weight the detail toward that focus: expand what bears on it — exact strings, decisions, current state, open threads — and condense what does not to the minimum that keeps the record accurate. Never drop a section and never pad one; where nothing bears on the focus, keep what little the transcript holds."
-const SUMMARY_MIN_HEAD_TOKENS: int = 4000 ## Smallest head worth a summarization request; below it the pass reports itself skipped rather than spend a model call to reclaim less than the call costs. Waived for a focused run, whose point is what the model carries rather than how much.
-const SUMMARY_BREAKER_LIMIT: int = 3 ## Consecutive summarization failures on one model before the pass suspends itself — the circuit breaker against burning tokens on a model that keeps failing to produce a usable summary.
-const SUMMARY_TARGET_RESERVE_PERCENT: int = 25 ## Share of a manual compaction's token target — after the request overhead no pass can reclaim comes off it (see _run_summary_pass) — held back for the summary message itself when the target sizes the split; the tail budget is what's left, since the compacted context is that overhead plus the summary plus the tail.
-const SUMMARY_OUTPUT_RESERVE_TOKENS: int = 4000 ## Window room the fit guard holds back for the summary the model must still have space to write, on top of the request carrying the head.
-const SUMMARY_FIT_ATTEMPTS: int = 3 ## Times the fit guard may resize the split before giving up — the first resize is proportional and normally lands, the rest cover a head whose messages resist an even cut.
-const SUMMARY_FIT_MARGIN: float = 0.9 ## Safety factor on each fit-guard resize, so a retry lands inside the window instead of on its line.
+# The summarization pass's sizing knobs — the smallest head worth a request (waived for a focused run, whose point is what the model carries rather than how much), the window room held back for the summary the model must still write, the failure circuit breaker, the fit guard's attempt count and resize margin, and the share of a manual target reserved for the summary message (see _run_summary_pass) — are user-configurable — see GDLLMTunables' gdllm/compaction section.
 
 ## Live-caption verbs for the tools whose runs are long enough to watch (see _show_live_tool_caption); anything unnamed falls back to "running…".
 const LIVE_TOOL_VERBS := {
@@ -215,7 +208,7 @@ var _attach_node_check: Button ## Attaches the node selected in the editor's Sce
 var _enable_tools_check: Button ## Gates tool calling; when off, requests carry no tools and the model can only chat
 var _make_changes_check: Button ## Gates mutating tools; when off, tools that modify the project are hidden from the catalog and refused if called anyway
 var _delete_files_check: Button ## Gates destructive tools the same way; shown only while Make changes is on, since deleting is a stricter tier of editing
-var _context_label: Label ## The "~est+rep/max" context meter — a live chars/4 estimate of what the next send would append, the last request's reported prompt tokens, and the model's maximum context window (see _update_context_label) — sharing the response notice's flexible slot in the attach row and yielding to it while the notice is lit. Deliberately a passive readout: manual compaction got its own button beside the jump arrows instead (_compact_button), so the meter is never a click target.
+var _context_label: Label ## The "~est+rep/max" context meter — a live chars-per-token estimate of what the next send would append, the last request's reported prompt tokens, and the model's maximum context window (see _update_context_label) — sharing the response notice's flexible slot in the attach row and yielding to it while the notice is lit. Deliberately a passive readout: manual compaction got its own button beside the jump arrows instead (_compact_button), so the meter is never a click target.
 var _context_probe_attempted := "" ## The qualified id the last context-window probe asked about, successful or not. reapply_source re-applies the model on every editor-settings write, so without this latch a failing probe would re-fire per write; a repeat attempt for the same id waits for a deliberate model change instead.
 var _response_notice: Label ## "Response generated!" caption beside the ↓ jump button: lit when a reply lands while the user is scrolled up — the log never moves under them — and cleared once the bottom comes into view (see _set_response_notice).
 var _jump_button: Button ## The attach row's ↓ toggle: pressed mirrors _stick_to_bottom (lit while the view follows the bottom), and pressing it while detached is the deliberate jump back to the latest (see _on_jump_button_toggled).
@@ -269,7 +262,7 @@ func _build_ui() -> void:
 	_stats_header.modulate = Color(1, 1, 1, 0.55)
 	_stats_header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_stats_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_stats_header.tooltip_text = "Cumulative token usage across every request this session, subagent threads included with their share broken out and background task runs (title generation) counted too. Endpoint-reported counts are preferred; a request whose provider reports no usage contributes the plugin's chars/4 estimate of the traffic actually exchanged instead, and any estimated share is flagged with ~ and an est label — (reported + N% est) names the estimated percentage of a mixed total. Context is the session's current context size — the newest request's prompt + reply, which is what the next request re-sends since the whole history rides along — main thread only, with the same reported-first preference; a compaction that commits a summary clears it until the next request reports the smaller context. The manage window breaks the estimated and reported sums apart per session. Updates as the model replies; a running subagent's tokens land when its round commits."
+	_stats_header.tooltip_text = "Cumulative token usage across every request this session, subagent threads included with their share broken out and background task runs (title generation) counted too. Endpoint-reported counts are preferred; a request whose provider reports no usage contributes the plugin's chars-per-token estimate of the traffic actually exchanged instead, and any estimated share is flagged with ~ and an est label — (reported + N% est) names the estimated percentage of a mixed total. Context is the session's current context size — the newest request's prompt + reply, which is what the next request re-sends since the whole history rides along — main thread only, with the same reported-first preference; a compaction that commits a summary clears it until the next request reports the smaller context. The manage window breaks the estimated and reported sums apart per session. Updates as the model replies; a running subagent's tokens land when its round commits."
 	if _mono_font != null:
 		_stats_header.add_theme_font_override("font", _mono_font)
 	_stats_header.add_theme_font_size_override("font_size", HEADER_FONT_SIZE)
@@ -597,7 +590,7 @@ func _maybe_start_replay() -> void:
 		_replay_history()
 
 
-## Render every message in _history into the (assumed empty) log, each turn matching its live layout: stored trace, then response, tool-call turns as their call and result disclosures. Renders in REPLAY_FRAME_BUDGET_MS slices, yielding between them — a long history rendered in one frame hangs the editor at boot — with the send path locked until the tail lands so a new message can't interleave with the backfill. Ends with a follow-only scroll, respecting a user who scrolled up mid-backfill.
+## Render every message in _history into the (assumed empty) log, each turn matching its live layout: stored trace, then response, tool-call turns as their call and result disclosures. Renders in GDLLMTunables.REPLAY_FRAME_BUDGET_MS slices, yielding between them — a long history rendered in one frame hangs the editor at boot — with the send path locked until the tail lands so a new message can't interleave with the backfill. Ends with a follow-only scroll, respecting a user who scrolled up mid-backfill.
 func _replay_history() -> void:
 	_needs_replay = false
 	_replay_generation += 1
@@ -605,14 +598,14 @@ func _replay_history() -> void:
 	_send_button.disabled = true # unlocked when the backfill completes; a superseding pass re-locks and owns the unlock
 	_log_target = _message_list # a rebuild always targets the main log, never a stale redirect panel
 	var prev_model := "" # last assistant turn's model, so a change between turns replays as a "Changed model to X" marker
-	var deadline := Time.get_ticks_msec() + REPLAY_FRAME_BUDGET_MS
+	var deadline := Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.REPLAY_FRAME_BUDGET_MS)
 	for i in _history.size():
 		if Time.get_ticks_msec() >= deadline:
 			await get_tree().process_frame
 			# A rebuild superseded this pass while it yielded (its clear freed our rows); the new pass owns the log now.
 			if generation != _replay_generation or not is_instance_valid(_message_list):
 				return
-			deadline = Time.get_ticks_msec() + REPLAY_FRAME_BUDGET_MS
+			deadline = Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.REPLAY_FRAME_BUDGET_MS)
 		var msg: Dictionary = _history[i]
 		var role := String(msg.get("role", ""))
 		# A background run persisted display-only — the dock's title generation, or a compaction pass's summarization; replay its panel where it ran.
@@ -775,7 +768,7 @@ func _history_request_chars() -> int:
 	return chars + _request_span_chars(start, _history.size(), _history.size())
 
 
-## The conversation's own share of a prediction, in tokens. What a prediction holds beyond it — system prompt, tool schemas, the chars/4 gap an engine-reported count reveals — is the overhead no compaction pass can reclaim, which is how _run_manual_compaction sizes a token target's deduction (see _run_summary_pass).
+## The conversation's own share of a prediction, in tokens. What a prediction holds beyond it — system prompt, tool schemas, the chars-per-token gap an engine-reported count reveals — is the overhead no compaction pass can reclaim, which is how _run_manual_compaction sizes a token target's deduction (see _run_summary_pass).
 func _history_estimate_tokens() -> int:
 	return LLMClient.estimate_tokens(_history_request_chars())
 
@@ -889,7 +882,7 @@ static func _est_share_label(eff_total: int, rep_total: int) -> String:
 	return "%d%%" % roundi(share)
 
 
-## Token usage summed from the per-request stats stored in `history`, keeping the endpoint's reported counts (rep_) apart from the client's chars/4 estimates (est_): each split covers the cumulative prompt and reply tokens across every main-thread request (background Tasks-Model runs included via their display-only entries) plus the same split for every subagent thread's requests, alongside `context` — the NEWEST main-thread request's context (prompt + reply), which is the session's current context size, since every request re-sends the whole history. The newest rather than the largest: compaction shrinks the history, so a pre-compaction peak describes a context that no longer exists, and a committed summary clears the figure until the first request after it reports — the same anchor rule the attach row's meter reads its reported base by, so header and meter never disagree. The eff_ sums blend the two with the same per-side rule `context` uses — a request's reported figure when the endpoint sent one, its estimate otherwise — and est_fallback_used says whether any estimate actually contributed, so a caller showing one headline number can label it honestly. Static so the dock's manage table can compute the same numbers straight from a stored record's history.
+## Token usage summed from the per-request stats stored in `history`, keeping the endpoint's reported counts (rep_) apart from the client's chars-per-token estimates (est_): each split covers the cumulative prompt and reply tokens across every main-thread request (background Tasks-Model runs included via their display-only entries) plus the same split for every subagent thread's requests, alongside `context` — the NEWEST main-thread request's context (prompt + reply), which is the session's current context size, since every request re-sends the whole history. The newest rather than the largest: compaction shrinks the history, so a pre-compaction peak describes a context that no longer exists, and a committed summary clears the figure until the first request after it reports — the same anchor rule the attach row's meter reads its reported base by, so header and meter never disagree. The eff_ sums blend the two with the same per-side rule `context` uses — a request's reported figure when the endpoint sent one, its estimate otherwise — and est_fallback_used says whether any estimate actually contributed, so a caller showing one headline number can label it honestly. Static so the dock's manage table can compute the same numbers straight from a stored record's history.
 static func token_usage(history: Array) -> Dictionary:
 	var rep_in := 0
 	var rep_out := 0
@@ -958,7 +951,7 @@ static func token_usage(history: Array) -> Dictionary:
 	}
 
 
-## Repaint the sticky header: "Created <date> at <time> · <n> msgs · reported <in> in / <out> out". The current context size is deliberately absent — the attach row's meter carries it. One headline figure, reported-first: a request whose provider sent no usage contributes its chars/4 estimate instead, and any estimated share is flagged — a session with no reported counts at all reads "est ~", a mixed one "~ ... (reported + N% est)" with the estimated share of the total — so an estimate is never passed off as an endpoint figure.
+## Repaint the sticky header: "Created <date> at <time> · <n> msgs · reported <in> in / <out> out". The current context size is deliberately absent — the attach row's meter carries it. One headline figure, reported-first: a request whose provider sent no usage contributes its chars-per-token estimate instead, and any estimated share is flagged — a session with no reported counts at all reads "est ~", a mixed one "~ ... (reported + N% est)" with the estimated share of the total — so an estimate is never passed off as an endpoint figure.
 func _update_stats_header() -> void:
 	if not is_instance_valid(_stats_header):
 		return
@@ -1060,13 +1053,13 @@ func _clear_downshift_notice() -> void:
 	_downshift_notice = null
 
 
-## The disclosure a prediction owes about where its reported base came from, merged onto the notice it feeds: a base measured by a model this session has since switched away from is still the truest reading available (a neighbouring tokenizer beats chars/4), so it is labelled rather than discarded — every other estimate in this plugin says what it is, and a count quoted against a window the provider that produced it never saw should too. Empty for the ordinary same-model case.
+## The disclosure a prediction owes about where its reported base came from, merged onto the notice it feeds: a base measured by a model this session has since switched away from is still the truest reading available (a neighbouring tokenizer beats chars-per-token), so it is labelled rather than discarded — every other estimate in this plugin says what it is, and a count quoted against a window the provider that produced it never saw should too. Empty for the ordinary same-model case.
 static func _prediction_basis(prediction: Dictionary) -> Dictionary:
 	var base_model := String(prediction.get("base_model", ""))
 	return {} if base_model == "" else {"measured_on": base_model}
 
 
-## Repaint the attach row's context meter as the coming request's prediction: "~pending+reported/max" — a live chars/4 estimate of what the next send would append, the last request's reported prompt tokens, and the model's maximum window. Until a request has reported usage the single "~pending/max" figure estimates the whole coming request (system prompt and any unreported history included), so a fresh chat still reads honestly. Orange once the predicted total passes CONTEXT_WARN_SHARE of the window, red past CONTEXT_DANGER_SHARE; an unknown window shows ? and never colors, since there's no threshold to judge against. While the compaction debug override is active the right side reads "!threshold(real window)" and the colors judge against the threshold, so the meter plainly behaves — and looks — like the debug window is in force.
+## Repaint the attach row's context meter as the coming request's prediction: "~pending+reported/max" — a live chars-per-token estimate of what the next send would append, the last request's reported prompt tokens, and the model's maximum window. Until a request has reported usage the single "~pending/max" figure estimates the whole coming request (system prompt and any unreported history included), so a fresh chat still reads honestly. Orange once the predicted total passes the configured warning percent of the window (GDLLMTunables.CONTEXT_METER_WARNING_PERCENT), red past the danger percent; an unknown window shows ? and never colors, since there's no threshold to judge against. While the compaction debug override is active the right side reads "!threshold(real window)" and the colors judge against the threshold, so the meter plainly behaves — and looks — like the debug window is in force.
 func _update_context_label() -> void:
 	if not is_instance_valid(_context_label):
 		return
@@ -1088,9 +1081,9 @@ func _update_context_label() -> void:
 	var color := GDLLMColors.color(GDLLMColors.STATUS_CAPTION)
 	if predicted > 0 and limit > 0:
 		var share := float(predicted) / float(limit)
-		if share >= CONTEXT_DANGER_SHARE:
+		if share >= (GDLLMTunables.geti(GDLLMTunables.CONTEXT_METER_DANGER_PERCENT) / 100.0):
 			color = GDLLMColors.color(GDLLMColors.ERROR_CAPTION)
-		elif share >= CONTEXT_WARN_SHARE:
+		elif share >= (GDLLMTunables.geti(GDLLMTunables.CONTEXT_METER_WARNING_PERCENT) / 100.0):
 			color = GDLLMColors.color(GDLLMColors.WARNING_CAPTION)
 	_context_label.modulate = color
 	var window_long := "%s tokens, reported by the source's API and cached" % _comma(window) if window > 0 else "unknown — this source's API reports no context window"
@@ -1102,10 +1095,10 @@ func _update_context_label() -> void:
 			trigger_note = " Debug override active: automatic compaction triggers as soon as the prediction reaches the %s-token threshold — the buffer is enforced to 0 while the override is set (Editor Settings → Gdllm → Compaction)." % _comma(debug_window)
 		else:
 			trigger_note = " Automatic compaction triggers when the prediction plus the %s-token buffer reaches the window (Editor Settings → Gdllm → Compaction)." % _comma(GDLLMSettings.get_compaction_buffer_tokens())
-	_context_label.tooltip_text = "Predicted next prompt: ~%s tokens — a chars/4 estimate of your pending message and toggled attachments (~%s)%s — against this model's maximum context window (%s). Orange past %d%% of the window, red past %d%%.%s" % [_comma(predicted), _comma(pending), " plus the last request's reported prompt tokens (%s)" % _comma(reported) if reported > 0 else ", covering the whole first request since nothing has been reported yet", window_long, roundi(CONTEXT_WARN_SHARE * 100), roundi(CONTEXT_DANGER_SHARE * 100), trigger_note]
+	_context_label.tooltip_text = "Predicted next prompt: ~%s tokens — a chars-per-token estimate of your pending message and toggled attachments (~%s)%s — against this model's maximum context window (%s). Orange past %d%% of the window, red past %d%%.%s" % [_comma(predicted), _comma(pending), " plus the last request's reported prompt tokens (%s)" % _comma(reported) if reported > 0 else ", covering the whole first request since nothing has been reported yet", window_long, GDLLMTunables.geti(GDLLMTunables.CONTEXT_METER_WARNING_PERCENT), GDLLMTunables.geti(GDLLMTunables.CONTEXT_METER_DANGER_PERCENT), trigger_note]
 
 
-## The newest assistant turn's reported prompt-token count, scanning past turns whose provider sent no usage — every request re-sends the whole history, so the newest reported figure is the truest reading. 0 when nothing has reported yet — or when a committed summary postdates the newest report, whose count then describes a context that no longer exists; the whole-request estimate stands in until the first post-compaction report lands. The chars/4 estimates otherwise never stand in, since the meter shows engine truth or nothing.
+## The newest assistant turn's reported prompt-token count, scanning past turns whose provider sent no usage — every request re-sends the whole history, so the newest reported figure is the truest reading. 0 when nothing has reported yet — or when a committed summary postdates the newest report, whose count then describes a context that no longer exists; the whole-request estimate stands in until the first post-compaction report lands. The chars-per-token estimates otherwise never stand in, since the meter shows engine truth or nothing.
 func _last_reported_tokens_in() -> int:
 	var anchor := _latest_summary_index(_history.size())
 	for i in range(_history.size() - 1, -1, -1):
@@ -1118,7 +1111,7 @@ func _last_reported_tokens_in() -> int:
 	return 0
 
 
-## chars/4 estimate of what the next send would append beyond `reported`'s coverage: the draft message plus any toggled attachment — and, while nothing has been reported, the system prompt and re-sent history too, so the estimate spans the whole coming request instead of silently omitting its largest parts.
+## chars-per-token estimate of what the next send would append beyond `reported`'s coverage: the draft message plus any toggled attachment — and, while nothing has been reported, the system prompt and re-sent history too, so the estimate spans the whole coming request instead of silently omitting its largest parts.
 func _pending_estimate_tokens(reported: int) -> int:
 	var chars := _input.text.length() if is_instance_valid(_input) else 0
 	if is_instance_valid(_include_script_check) and _include_script_check.button_pressed:
@@ -1629,7 +1622,7 @@ func _on_send_pressed() -> void:
 	_send_chat_request(_history_for_request(), _build_request_tools())
 
 
-## The incremental next-prompt prediction shared by the automatic trigger and a manual compaction: the newest reported prompt + output counts plus a chars/4 estimate of every model-visible part appended since. Returns {"base", "reported", "estimated"}; base -1 means no usable reported base exists — nothing has reported usage yet, or the newest report predates a committed summary and describes a context that no longer exists — with reported 0 and the estimate spanning the whole coming request (the meter's pre-first-report rule), which lets a manual run still show an honest figure where the automatic trigger stays silent.
+## The incremental next-prompt prediction shared by the automatic trigger and a manual compaction: the newest reported prompt + output counts plus a chars-per-token estimate of every model-visible part appended since. Returns {"base", "reported", "estimated"}; base -1 means no usable reported base exists — nothing has reported usage yet, or the newest report predates a committed summary and describes a context that no longer exists — with reported 0 and the estimate spanning the whole coming request (the meter's pre-first-report rule), which lets a manual run still show an honest figure where the automatic trigger stays silent.
 func _predict_next_prompt() -> Dictionary:
 	var base := -1
 	for i in range(_history.size() - 1, -1, -1):
@@ -1649,7 +1642,7 @@ func _predict_next_prompt() -> Dictionary:
 		chars += _request_message_chars(_history[base], _history.size(), base > _echo_boundary(_history.size()))
 	# Everything model-visible appended after the base — tool results, later replies, the pending user message — is the delta the base's counts don't cover; _request_span_chars sizes each as the send will carry it, prune stamps and provider echo included.
 	chars += _request_span_chars(base + 1, _history.size(), _history.size())
-	# A base stamped with a model this session has since left was counted by a different provider's tokenizer against a different window; the figure still stands (it beats a chars/4 guess), but whatever quotes it has to say so — see _prediction_basis.
+	# A base stamped with a model this session has since left was counted by a different provider's tokenizer against a different window; the figure still stands (it beats a chars-per-token guess), but whatever quotes it has to say so — see _prediction_basis.
 	var base_model := String(_history[base].get("model", ""))
 	var out := {"base": base, "reported": reported, "estimated": LLMClient.estimate_tokens(chars)}
 	if base_model != "" and base_model != _qualified_model:
@@ -1657,7 +1650,7 @@ func _predict_next_prompt() -> Dictionary:
 	return out
 
 
-## Evaluate the automatic-compaction trigger for the NEXT chat request, whatever kind — called before every send point (the user's message, each tool-round continuation, a loop-summary redirect), because the truncation risk it guards against rides every request in a growing session, and the wild data shows most growth lands mid-turn through tool results. The predictor is incremental (see _predict_next_prompt): the newest reported prompt + output counts plus a chars/4 estimate of every model-visible part appended since — its error is bounded by the delta, not the prompt, which is what lets a fixed buffer (GDLLMSettings.COMPACTION_BUFFER) cover it. When prediction + buffer reaches the model's window — or the debug threshold standing in for it while the compaction debugging tools enforce one (the buffer then reads as 0, so the trigger fires exactly at the set figure), letting the feature be exercised without a genuinely full context — the trigger is disclosed in the log and persisted, a debug-tripped one labeled as such (goal 2), and the compaction passes run in least-destructive-first order, each recorded as a step on the same entry: tool-result pruning first (see _prune_tool_results), then — only for whatever shortfall remains, and only while its own Enable Summarization Pass setting is on (off is disclosed on the event instead) — anchored summarization (see _run_summary_pass), which suspends the send while its model call runs. A request still predicted past the window itself — compaction off entirely, or every enabled pass spent — posts the persisted red over-window warning (see _maybe_warn_over_window), which is why the prediction is computed even with the master switch off. The PASSES stay disarmed until a request has reported usage (the session's opening request has no base, so an estimate-only prediction would be a guess to spend a model call and destroy history on), while the window is unknown (no threshold to judge against), and between a committed summary and the first report after it (the stale base's count describes a context the summary already replaced — re-firing on it would loop the compactor against itself). The WARNING is not held back with them wherever a window is known: an estimate-only prediction past the window still posts, flagged as an estimate, because the costs are not symmetric — a false warning is visible and self-corrects on the next report, while a silent truncation is neither, and the summary-then-keep-growing path would otherwise run a whole tool loop unwatched. Returns false only when a Stop cancelled the pass mid-summarization, telling the send point to abort instead of dispatching a request the user just interrupted.
+## Evaluate the automatic-compaction trigger for the NEXT chat request, whatever kind — called before every send point (the user's message, each tool-round continuation, a loop-summary redirect), because the truncation risk it guards against rides every request in a growing session, and the wild data shows most growth lands mid-turn through tool results. The predictor is incremental (see _predict_next_prompt): the newest reported prompt + output counts plus a chars-per-token estimate of every model-visible part appended since — its error is bounded by the delta, not the prompt, which is what lets a fixed buffer (GDLLMSettings.COMPACTION_BUFFER) cover it. When prediction + buffer reaches the model's window — or the debug threshold standing in for it while the compaction debugging tools enforce one (the buffer then reads as 0, so the trigger fires exactly at the set figure), letting the feature be exercised without a genuinely full context — the trigger is disclosed in the log and persisted, a debug-tripped one labeled as such (goal 2), and the compaction passes run in least-destructive-first order, each recorded as a step on the same entry: tool-result pruning first (see _prune_tool_results), then — only for whatever shortfall remains, and only while its own Enable Summarization Pass setting is on (off is disclosed on the event instead) — anchored summarization (see _run_summary_pass), which suspends the send while its model call runs. A request still predicted past the window itself — compaction off entirely, or every enabled pass spent — posts the persisted red over-window warning (see _maybe_warn_over_window), which is why the prediction is computed even with the master switch off. The PASSES stay disarmed until a request has reported usage (the session's opening request has no base, so an estimate-only prediction would be a guess to spend a model call and destroy history on), while the window is unknown (no threshold to judge against), and between a committed summary and the first report after it (the stale base's count describes a context the summary already replaced — re-firing on it would loop the compactor against itself). The WARNING is not held back with them wherever a window is known: an estimate-only prediction past the window still posts, flagged as an estimate, because the costs are not symmetric — a false warning is visible and self-corrects on the next report, while a silent truncation is neither, and the summary-then-keep-growing path would otherwise run a whole tool loop unwatched. Returns false only when a Stop cancelled the pass mid-summarization, telling the send point to abort instead of dispatching a request the user just interrupted.
 func _maybe_trigger_compaction() -> bool:
 	var prediction := _predict_next_prompt()
 	var reported := int(prediction["reported"])
@@ -1746,7 +1739,7 @@ func _manual_pass_defs() -> Array:
 		{
 			"id": "prune",
 			"title": "Prune old tool results",
-			"description": "Replaces old tool-result outputs with a short marker in the model's view; errored results and the newest %d call/result pairs stay, and the size floor automatic pruning respects is waived here." % GDLLMTools.PRUNE_KEEP_RECENT_PAIRS,
+			"description": "Replaces old tool-result outputs with a short marker in the model's view; errored results and the newest %d call/result pairs stay, and the size floor automatic pruning respects is waived here." % GDLLMTunables.geti(GDLLMTunables.PRUNE_KEEP_RECENT_PAIRS),
 			"default": true,
 		},
 		{
@@ -1889,7 +1882,7 @@ func _run_manual_compaction() -> void:
 	var prediction := _predict_next_prompt()
 	var reported := int(prediction["reported"])
 	var estimated := int(prediction["estimated"])
-	# What the coming request carries outside the conversation — system prompt, tool schemas, the chars/4 gap the reported count reveals — measured before any pass commits, because a committed prune shrinks the history estimate while the reported base stays stale-high, which would misread the prune's own savings as overhead.
+	# What the coming request carries outside the conversation — system prompt, tool schemas, the chars-per-token gap the reported count reveals — measured before any pass commits, because a committed prune shrinks the history estimate while the reported base stays stale-high, which would misread the prune's own savings as overhead.
 	var overhead := maxi(0, reported + estimated - _history_estimate_tokens())
 	var window := GDLLMContexts.window_for(_qualified_model)
 	var debug_window := GDLLMSettings.get_compaction_debug_override()
@@ -1916,7 +1909,7 @@ func _run_manual_compaction() -> void:
 	if focus != "":
 		# A focus replaces the passes outright rather than joining them: the size arithmetic they answer to has nothing to say about which history the user wants the model carrying, so none of it gates this run.
 		_append_note(entry, "A focus was given, so the pruning and size-gated passes were skipped: the whole conversation is being summarized around it instead.")
-		await _run_summary_pass(entry, 0, 0, 0, focus)
+		await _run_summary_pass(entry, 0, 0, 0, focus, true)
 		_flush_compaction_steps(entry)
 	elif target > 0 and need <= 0:
 		# The user asked for a size the conversation is already at: reclaiming anyway would drop history the target never asked to lose.
@@ -1934,7 +1927,7 @@ func _run_manual_compaction() -> void:
 				var reached := ("brought the prediction to ~%s tokens, at or under the %s-token target" % [_tokens_3sig(reported + estimated - prune_saved), _tokens_3sig(target)]) if target > 0 else "reclaimed enough on its own"
 				_append_note(entry, "Tool-result pruning %s, so summarization was not needed and did not run." % reached)
 			else:
-				await _run_summary_pass(entry, maxi(0, need - prune_saved), target, overhead)
+				await _run_summary_pass(entry, maxi(0, need - prune_saved), target, overhead, "", true)
 				_flush_compaction_steps(entry)
 		else:
 			_append_note(entry, "The summarization pass was left unchecked in the confirmation, so it did not run.")
@@ -1955,7 +1948,7 @@ func _run_manual_compaction() -> void:
 	_refresh_downshift_notice()
 
 
-## Disclose on a compaction event that the base it acted on predates a model switch: the count is one provider's tokenizer reading, judged here against another provider's window. The pass still runs on it — a measurement from a neighbouring tokenizer beats a chars/4 guess, and after a downshift erring toward compacting is the safe direction — so this labels the figure rather than withholding it, the same treatment the estimate-only flag gives a prediction with no reported base at all.
+## Disclose on a compaction event that the base it acted on predates a model switch: the count is one provider's tokenizer reading, judged here against another provider's window. The pass still runs on it — a measurement from a neighbouring tokenizer beats a chars-per-token guess, and after a downshift erring toward compacting is the safe direction — so this labels the figure rather than withholding it, the same treatment the estimate-only flag gives a prediction with no reported base at all.
 static func _note_cross_model_base(entry: Dictionary, prediction: Dictionary, model: String) -> void:
 	var base_model := String(prediction.get("base_model", ""))
 	if base_model == "":
@@ -1988,7 +1981,7 @@ func _close_compaction_event(entry: Dictionary, event_index: int) -> void:
 	_compaction_panel_body = null
 
 
-## Post the persisted red over-window warning when the coming request is predicted past the model's window itself and no enabled compaction pass got it back under — the provider would reject the request or silently truncate it (the exact failure automatic compaction exists to prevent), so the user is pointed at the disabled switch or at a clean session. The advice names the strongest lever available (see _over_window_advice). `estimate_only` marks a prediction built without a reported base, which the notice discloses rather than quoting a chars/4 guess as confidently as a measurement. Fires once per overflow (_over_window_warned), re-arming as soon as a prediction lands back under the window, so a persisting overflow doesn't repost every send (goal 2 without nagging).
+## Post the persisted red over-window warning when the coming request is predicted past the model's window itself and no enabled compaction pass got it back under — the provider would reject the request or silently truncate it (the exact failure automatic compaction exists to prevent), so the user is pointed at the disabled switch or at a clean session. The advice names the strongest lever available (see _over_window_advice). `estimate_only` marks a prediction built without a reported base, which the notice discloses rather than quoting a chars-per-token guess as confidently as a measurement. Fires once per overflow (_over_window_warned), re-arming as soon as a prediction lands back under the window, so a persisting overflow doesn't repost every send (goal 2 without nagging).
 func _maybe_warn_over_window(predicted: int, window: int, debug: bool, estimate_only: bool = false, basis: Dictionary = {}) -> void:
 	if predicted < window:
 		_over_window_warned = false
@@ -2013,10 +2006,10 @@ func _maybe_warn_over_window(predicted: int, window: int, debug: bool, estimate_
 	history_changed.emit(session_id)
 
 
-## The remedy the over-window warning names, resolved at warn time so the persisted notice reads the same live and on reload. `only_pending_message` marks the one case the compaction ladder cannot help — the conversation holds nothing but the message going out, so the size is that message and its attachments rather than history any pass could reclaim, and pointing at the pruning thresholds would be advice that cannot work. `needed_tokens` marks the other cause with its own remedy, a model switch: it outranks the settings ladder because no setting changed — the ceiling did — and its two levers are immediate, compacting now or picking a model that fits. Otherwise the strongest disabled lever wins: the master switch, then the summarization pass, then a breaker-suspended one (`summary_suspended` — enabled in the settings yet unable to run, whose lever is the model switch that re-arms it), else the thresholds. Settings arrive as arguments rather than being read here, so the choice is pure and testable.
+## The remedy the over-window warning names, resolved at warn time so the persisted notice reads the same live and on reload. `only_pending_message` marks the one case the compaction ladder cannot help — the conversation holds nothing but the message going out, so the size is that message and its attachments rather than history any pass could reclaim, and pointing at the pruning thresholds would be advice that cannot work. `needed_tokens` marks the other cause with its own remedy, a model switch: it outranks the settings ladder because no setting changed — the ceiling did — and its two levers are immediate, compacting now or picking a model that fits. Otherwise the strongest disabled lever wins: the master switch, then the summarization pass, then a breaker-suspended one (`summary_suspended` — enabled in the settings yet unable to run automatically, whose levers are a manual Compact, which bypasses the suspension and re-arms it on success, and the model switch), else the thresholds. Settings arrive as arguments rather than being read here, so the choice is pure and testable.
 static func _over_window_advice(only_pending_message: bool, auto_enabled: bool, summarization_enabled: bool, needed_tokens: int = 0, summary_suspended: bool = false) -> String:
 	if needed_tokens > 0:
-		return "Compact this conversation now (the ⚡ button beside the jump arrows), or switch to a model whose context window is at least ~%s tokens." % _tokens_3sig(needed_tokens)
+		return "Compact this conversation now (the Compact context button beside the jump arrows, in the bottom row), or switch to a model whose context window is at least ~%s tokens." % _tokens_3sig(needed_tokens)
 	if only_pending_message:
 		return "Shorten the message, or untoggle the attached script or selection — this request carries no earlier conversation for compaction to reclaim."
 	if not auto_enabled:
@@ -2024,7 +2017,7 @@ static func _over_window_advice(only_pending_message: bool, auto_enabled: bool, 
 	if not summarization_enabled:
 		return "Enable the summarization pass (Editor Settings → Gdllm → Compaction), or start a clean session for new work."
 	if summary_suspended:
-		return "Switch models to re-arm the summarization pass — it is suspended for this session after repeated failures on this one — or start a clean session for new work."
+		return "Compact manually (the Compact context button beside the jump arrows, in the bottom row) — a manual pass runs despite the suspension and re-arms automatic summarization if it succeeds — or switch models to re-arm it; the pass is suspended for this session after repeated failures on this model."
 	return "Start a clean session for new work, or lower the pruning thresholds so compaction can reclaim more (Editor Settings → Gdllm → Compaction)."
 
 
@@ -2048,8 +2041,8 @@ static func _stall_advice(summarization_enabled: bool, summary_suspended: bool) 
 	if not summarization_enabled:
 		return "Enable the summarization pass (Editor Settings → Gdllm → Compaction), or start a clean session for new work — pruning alone has nothing left to reclaim."
 	if summary_suspended:
-		return "Switch models to re-arm summarization — it is suspended for this session after repeated failures on this one — or start a clean session for new work."
-	return "Start a clean session for new work, or run a focused compaction (the ⚡ Compact button's focus field) — nothing is left to prune and no summarization split can act on this conversation's shape."
+		return "Compact manually (the Compact context button in the bottom row) — a manual pass runs despite the suspension and re-arms summarization if it succeeds — or switch models to re-arm it; the pass is suspended for this session after repeated failures on this model. A clean session for new work also sidesteps it."
+	return "Start a clean session for new work, or run a focused compaction (the bottom row's Compact context button, focus field) — nothing is left to prune and no summarization split can act on this conversation's shape."
 
 
 ## The over-window latch as the stored history records it, so a reload mid-overflow doesn't post a second warning for an overflow already warned about. Walking newest-first, the first decisive record wins: a standing warning keeps the latch set, while anything that plausibly changed the picture re-arms it — a committed pass, or a report landing under the window (live, the latch re-arms on any prediction under the window; predictions aren't stored, so the reported count is the nearest recorded stand-in, erring toward re-arming — a rare duplicate warning is visible and cheap where a suppressed real one is neither).
@@ -2100,7 +2093,7 @@ func _prune_tool_results(entry: Dictionary, event_index: int, manual: bool = fal
 	var min_recovery := GDLLMSettings.get_prune_min_recovery_tokens()
 	if chosen.is_empty() or saved < min_recovery:
 		if chosen.is_empty():
-			entry["note"] = "Tool-result pruning found no eligible results — errored or cancelled results, guarded tools, results a committed summary already replaced, and the newest %d call/result pairs are exempt — so nothing was pruned." % GDLLMTools.PRUNE_KEEP_RECENT_PAIRS
+			entry["note"] = "Tool-result pruning found no eligible results — errored or cancelled results, guarded tools, results a committed summary already replaced, and the newest %d call/result pairs are exempt — so nothing was pruned." % GDLLMTunables.geti(GDLLMTunables.PRUNE_KEEP_RECENT_PAIRS)
 		else:
 			entry["note"] = "Tool-result pruning could reclaim only ~%s tokens across %d eligible result%s, under the %s-token minimum recovery (Editor Settings → Gdllm → Compaction), so nothing was pruned." % [_tokens_3sig(saved), chosen.size(), "" if chosen.size() == 1 else "s", _tokens_k(min_recovery)]
 		return 0
@@ -2129,7 +2122,7 @@ func _prune_selection(limit: int) -> Dictionary:
 		if String(_history[i].get("role", "")) == "tool":
 			tool_indices.append(i)
 	# The newest pairs are the in-flight turn's working set; everything older is fair game.
-	tool_indices.resize(maxi(0, tool_indices.size() - GDLLMTools.PRUNE_KEEP_RECENT_PAIRS))
+	tool_indices.resize(maxi(0, tool_indices.size() - GDLLMTunables.geti(GDLLMTunables.PRUNE_KEEP_RECENT_PAIRS)))
 	var stamp_tokens := LLMClient.estimate_tokens(GDLLMTools.PRUNED_RESULT_STAMP.length())
 	var chosen: Array[int] = []
 	var details := PackedStringArray()
@@ -2166,13 +2159,13 @@ func _summary_would_run() -> bool:
 	var split := _summary_split_index(GDLLMSettings.get_compaction_tail_percent())
 	if split < 0:
 		return false
-	return LLMClient.estimate_tokens(_summary_head_chars(split)) >= SUMMARY_MIN_HEAD_TOKENS
+	return LLMClient.estimate_tokens(_summary_head_chars(split)) >= GDLLMTunables.geti(GDLLMTunables.SUMMARY_MIN_HEAD_TOKENS)
 
 
 ## Whether the summarization breaker currently suspends the pass for this session's model (see _run_summary_pass; re-armed by a model switch or a success).
 func _summary_breaker_suspended() -> bool:
 	var breaker: Dictionary = _record.get("summary_breaker", {}) if _record.get("summary_breaker") is Dictionary else {}
-	return String(breaker.get("model", "")) == _qualified_model and int(breaker.get("count", 0)) >= SUMMARY_BREAKER_LIMIT
+	return String(breaker.get("model", "")) == _qualified_model and int(breaker.get("count", 0)) >= GDLLMTunables.geti(GDLLMTunables.SUMMARY_FAILURE_BREAKER)
 
 
 ## Append `text` to the compaction entry's note without clobbering an earlier pass's reason — the panel renders the note as the event's own explanation, and two passes may each have one.
@@ -2181,22 +2174,25 @@ static func _append_note(entry: Dictionary, text: String) -> void:
 	entry["note"] = text if note == "" else note + " " + text
 
 
-## Compaction pass 2 — anchored summarization, run only when pruning left a shortfall (`_need` names it for the record; the reclaim itself is set by the split, not the target — summarizing is all-or-nothing per head). The model-visible conversation splits at a turn boundary — a user message or an assistant turn opening a tool round, never between a tool call and its result — so the newest verbatim_recent_tail_percent stays verbatim; everything older — the head — is serialized and handed to this session's own model (same model and effort; the clean context is the point, so no Tasks-Model swap), which writes a structured summary, merging any previous summary forward (the head opens with it, so each compaction updates one anchored summary instead of re-deriving history). The committed summary is APPENDED like every other record — history stays strictly append-only — carrying the split index it replaces up to; the swap happens only at request build, where the summary opens the request as a user message followed by the verbatim tail from that split (see _history_for_request), and every past turn's Inspect model context row keeps reconstructing exactly what that turn's request carried. Failure rails: an empty, errored, truncated, or not-actually-smaller summary commits nothing, and SUMMARY_BREAKER_LIMIT consecutive failures on one model suspend the pass (the breaker re-arms on a model switch or a success). The run itself is fully visible: a live orange panel while it streams, settled in place when it ends from the persisted task record — the exact request, reply, thinking, and usage. Committing is a whole-prefix rewrite, so it crosses a cache boundary — schema retirement rides the same rewrite for free.
+## Compaction pass 2 — anchored summarization, run only when pruning left a shortfall (`_need` names it for the record; the reclaim itself is set by the split, not the target — summarizing is all-or-nothing per head). The model-visible conversation splits at a turn boundary — a user message or an assistant turn opening a tool round, never between a tool call and its result — so the newest verbatim_recent_tail_percent stays verbatim; everything older — the head — is serialized and handed to this session's own model (same model and effort; the clean context is the point, so no Tasks-Model swap), which writes a structured summary, merging any previous summary forward (the head opens with it, so each compaction updates one anchored summary instead of re-deriving history). The committed summary is APPENDED like every other record — history stays strictly append-only — carrying the split index it replaces up to; the swap happens only at request build, where the summary opens the request as a user message followed by the verbatim tail from that split (see _history_for_request), and every past turn's Inspect model context row keeps reconstructing exactly what that turn's request carried. Failure rails: an empty, errored, truncated, or not-actually-smaller summary commits nothing, and GDLLMTunables.SUMMARY_FAILURE_BREAKER consecutive failures on one model suspend the pass (the breaker re-arms on a model switch or a success). The run itself is fully visible: a live orange panel while it streams, settled in place when it ends from the persisted task record — the exact request, reply, thinking, and usage. Committing is a whole-prefix rewrite, so it crosses a cache boundary — schema retirement rides the same rewrite for free.
 ##
-## A non-empty `focus` runs the pass in FOCUSED mode instead (the manual dialog's focus field — see _run_manual_compaction): the split is the end of history rather than a percentage or a target, so the head is the whole model-visible conversation and no verbatim tail survives, and the summarization request carries the user's focus so the detail lands where they asked. Only the fit guard may pull that split back, and only because the alternative is a request too big to send — when it does, the messages it left verbatim are disclosed on the event and the summary's bridge stops claiming to be the whole record. Two rails soften for a focused run because its point is *what* the model carries rather than how much: the SUMMARY_MIN_HEAD_TOKENS floor is waived, and a summary no smaller than the history it replaces commits with that stated rather than counting as a failure.
-func _run_summary_pass(entry: Dictionary, _need: int, target: int = 0, target_overhead: int = 0, focus: String = "") -> void:
+## A non-empty `focus` runs the pass in FOCUSED mode instead (the manual dialog's focus field — see _run_manual_compaction): the split is the end of history rather than a percentage or a target, so the head is the whole model-visible conversation and no verbatim tail survives, and the summarization request carries the user's focus so the detail lands where they asked. Only the fit guard may pull that split back, and only because the alternative is a request too big to send — when it does, the messages it left verbatim are disclosed on the event and the summary's bridge stops claiming to be the whole record. Two rails soften for a focused run because its point is *what* the model carries rather than how much: the GDLLMTunables.SUMMARY_MIN_HEAD_TOKENS floor is waived, and a summary no smaller than the history it replaces commits with that stated rather than counting as a failure.
+func _run_summary_pass(entry: Dictionary, _need: int, target: int = 0, target_overhead: int = 0, focus: String = "", manual: bool = false) -> void:
 	var breaker: Dictionary = _record.get("summary_breaker", {}) if _record.get("summary_breaker") is Dictionary else {}
 	if _summary_breaker_suspended():
-		_append_note(entry, "Summarization stayed suspended after %d consecutive failed attempts on %s; switching model (or a successful pass) re-arms it." % [int(breaker.get("count", 0)), _qualified_model])
-		return
+		# A manual Compact bypasses the suspension — an explicit request needs no protection from itself (the prune-threshold precedent), and it is also the only road back: the automatic pass can never run here, so without the bypass nothing but a model switch could ever produce the success that re-arms it.
+		if not manual:
+			_append_note(entry, "Summarization stayed suspended after %d consecutive failed attempts on %s; switching model re-arms it, and a manual Compact still runs (a successful one re-arms automatic passes too)." % [int(breaker.get("count", 0)), _qualified_model])
+			return
+		_append_note(entry, "The summarization suspension (%d consecutive failed attempts on %s) was bypassed for this manual request; if this pass succeeds, automatic summarization re-arms." % [int(breaker.get("count", 0)), _qualified_model])
 	var tail_percent := GDLLMSettings.get_compaction_tail_percent()
-	# A manual target sizes the split in place of the percentage — but it names the whole request, so the caller-measured overhead the passes can't touch (system prompt, tool schemas) comes off it first, then SUMMARY_TARGET_RESERVE_PERCENT of the remainder is held back for the summary standing in for the head, and the verbatim tail gets what is left.
+	# A manual target sizes the split in place of the percentage — but it names the whole request, so the caller-measured overhead the passes can't touch (system prompt, tool schemas) comes off it first, then GDLLMTunables.SUMMARY_TARGET_RESERVE_PERCENT of the remainder is held back for the summary standing in for the head, and the verbatim tail gets what is left.
 	var history_target := maxi(0, target - target_overhead)
-	var tail_budget_tokens := maxi(1, history_target * (100 - SUMMARY_TARGET_RESERVE_PERCENT) / 100) if target > 0 else 0
+	var tail_budget_tokens := maxi(1, history_target * (100 - GDLLMTunables.geti(GDLLMTunables.SUMMARY_TARGET_RESERVE_PERCENT)) / 100) if target > 0 else 0
 	if target > 0 and history_target <= 0:
 		_append_note(entry, "The %s-token target sits at or under the ~%s tokens this request carries outside the conversation (system prompt, tool schemas), which no pass can reclaim — summarization is keeping the smallest verbatim tail a legal split allows instead." % [_tokens_3sig(target), _tokens_3sig(target_overhead)])
 	# A focused run replaces the whole model-visible conversation, so its split is simply the end of history — there is no tail to size and no boundary to walk to, since the tail is empty.
-	var split := _history.size() if focus != "" else _summary_split_index(tail_percent, (tail_budget_tokens * 4) if target > 0 else -1)
+	var split := _history.size() if focus != "" else _summary_split_index(tail_percent, LLMClient.estimate_chars(tail_budget_tokens) if target > 0 else -1)
 	if split < 0:
 		if target > 0:
 			_append_note(entry, "Summarization skipped: even compacting toward the %s-token target, no split point leaves a complete older turn to summarize ahead of the verbatim tail." % _tokens_3sig(target))
@@ -2213,14 +2209,14 @@ func _run_summary_pass(entry: Dictionary, _need: int, target: int = 0, target_ov
 	# The summarization request must itself fit the model it runs on. The head is by construction most of a context that just outgrew the window, so on a large session the request can be born too big — and sending it anyway would fail and burn a breaker strike on a session whose only problem is its size, eventually suspending the pass exactly where it is needed most. Resize the split instead. Judged against the real window, never the debug threshold standing in for it at the trigger: a deliberately tiny fake window would block the pass rather than exercise it.
 	var window := GDLLMContexts.window_for(_qualified_model)
 	var shrunk := false
-	for attempt in SUMMARY_FIT_ATTEMPTS:
-		if window <= 0 or _summary_request_tokens(prompt) + SUMMARY_OUTPUT_RESERVE_TOKENS <= window:
+	for attempt in GDLLMTunables.geti(GDLLMTunables.SUMMARY_FIT_ATTEMPTS):
+		if window <= 0 or _summary_request_tokens(prompt) + GDLLMTunables.geti(GDLLMTunables.SUMMARY_OUTPUT_RESERVE_TOKENS) <= window:
 			break
 		# Scale the head down by however far the prompt overshot the room left for it; the transcript tracks the head closely enough that one proportional step normally lands.
-		var room := maxi(0, (window - SUMMARY_OUTPUT_RESERVE_TOKENS) * 4 - SUMMARY_SYSTEM_PROMPT.length())
-		var cap := int(_summary_head_chars(split) * (float(room) / maxf(1.0, float(prompt.length()))) * SUMMARY_FIT_MARGIN)
+		var room := maxi(0, LLMClient.estimate_chars(window - GDLLMTunables.geti(GDLLMTunables.SUMMARY_OUTPUT_RESERVE_TOKENS)) - SUMMARY_SYSTEM_PROMPT.length())
+		var cap := int(_summary_head_chars(split) * (float(room) / maxf(1.0, float(prompt.length()))) * (GDLLMTunables.geti(GDLLMTunables.SUMMARY_FIT_MARGIN_PERCENT) / 100.0))
 		# A focused run asked for no tail at all, so its resize budgets one of zero chars: the walk then keeps the smallest verbatim tail the head ceiling leaves room for.
-		var budget := 0 if focus != "" else ((tail_budget_tokens * 4) if target > 0 else -1)
+		var budget := 0 if focus != "" else (LLMClient.estimate_chars(tail_budget_tokens) if target > 0 else -1)
 		split = _summary_split_index(tail_percent, budget, cap)
 		if split < 0:
 			break
@@ -2228,19 +2224,19 @@ func _run_summary_pass(entry: Dictionary, _need: int, target: int = 0, target_ov
 		whole = false
 		head = _summary_head(split)
 		prompt = _summary_prompt(head, focus, whole)
-	if split < 0 or (window > 0 and _summary_request_tokens(prompt) + SUMMARY_OUTPUT_RESERVE_TOKENS > window):
+	if split < 0 or (window > 0 and _summary_request_tokens(prompt) + GDLLMTunables.geti(GDLLMTunables.SUMMARY_OUTPUT_RESERVE_TOKENS) > window):
 		if focus != "":
 			_append_note(entry, "Focused compaction skipped: even leaving the newest messages verbatim, no split makes the summarization request itself fit this model's %s-token window, so it would have failed rather than summarized anything. Compact normally first (prune, or summarize by the tail percentage) and then run the focus, or start a clean session." % _tokens_3sig(window))
 		else:
 			_append_note(entry, "Summarization skipped: no split leaves a head small enough for the summarization request itself to fit this model's %s-token window, so the request would have failed rather than reclaimed anything. Starting a clean session, or a smaller tail percentage, is the way out." % _tokens_3sig(window))
 		return
 	var head_tokens := LLMClient.estimate_tokens(_summary_head_chars(split))
-	if head_tokens < SUMMARY_MIN_HEAD_TOKENS and focus == "":
+	if head_tokens < GDLLMTunables.geti(GDLLMTunables.SUMMARY_MIN_HEAD_TOKENS) and focus == "":
 		# The resized head landing under the floor must say so, or the note reads as nonsense beside a settings page asking for a far larger head.
 		if shrunk:
-			_append_note(entry, "Summarization skipped: fitting its own request into this model's %s-token window left only ~%s tokens of older history to summarize, under the %s-token floor a summarization request must be worth." % [_tokens_3sig(window), _tokens_3sig(head_tokens), _tokens_k(SUMMARY_MIN_HEAD_TOKENS)])
+			_append_note(entry, "Summarization skipped: fitting its own request into this model's %s-token window left only ~%s tokens of older history to summarize, under the %s-token floor a summarization request must be worth." % [_tokens_3sig(window), _tokens_3sig(head_tokens), _tokens_k(GDLLMTunables.geti(GDLLMTunables.SUMMARY_MIN_HEAD_TOKENS))])
 		else:
-			_append_note(entry, "Summarization skipped: the older history before the verbatim tail is only ~%s tokens, under the %s-token floor a summarization request must be worth." % [_tokens_3sig(head_tokens), _tokens_k(SUMMARY_MIN_HEAD_TOKENS)])
+			_append_note(entry, "Summarization skipped: the older history before the verbatim tail is only ~%s tokens, under the %s-token floor a summarization request must be worth." % [_tokens_3sig(head_tokens), _tokens_k(GDLLMTunables.geti(GDLLMTunables.SUMMARY_MIN_HEAD_TOKENS))])
 		return
 	if shrunk and focus != "":
 		_append_note(entry, "The whole conversation would not fit one summarization request on this model's %s-token window, so the newest messages stay verbatim behind the focused summary instead of being folded into it: ~%s tokens of history are being summarized." % [_tokens_3sig(window), _tokens_3sig(head_tokens)])
@@ -2287,8 +2283,8 @@ func _run_summary_pass(entry: Dictionary, _need: int, target: int = 0, target_ov
 	if failure != "":
 		var count := int(breaker.get("count", 0)) + 1 if String(breaker.get("model", "")) == _qualified_model else 1
 		_record["summary_breaker"] = {"model": _qualified_model, "count": count}
-		var suspended := " Summarization is now suspended for this session on this model." if count >= SUMMARY_BREAKER_LIMIT else ""
-		_append_note(entry, "Summarization failed (attempt %d of %d): %s. Nothing was replaced.%s" % [count, SUMMARY_BREAKER_LIMIT, failure, suspended])
+		var suspended := " Summarization is now suspended for this session on this model." if count >= GDLLMTunables.geti(GDLLMTunables.SUMMARY_FAILURE_BREAKER) else ""
+		_append_note(entry, "Summarization failed (attempt %d of %d): %s. Nothing was replaced.%s" % [count, GDLLMTunables.geti(GDLLMTunables.SUMMARY_FAILURE_BREAKER), failure, suspended])
 		task.merge(_compaction_task_entry(data, "Failed: %s." % failure, true, seconds, collected), true)
 		_settle_compaction_run(task)
 		return
@@ -3041,7 +3037,7 @@ func _open_compaction_panel(entry: Dictionary) -> VBoxContainer:
 		# A 0 buffer (the debug override enforces one, and a user can set one) drops the buffer clause rather than citing a "0k-token buffer".
 		var reach := ("with the %s-token buffer that reaches the %s" % [_tokens_k(buffer), window_label]) if buffer > 0 else ("that alone reaches the %s" % window_label)
 		header.text = "⚡ Context compaction triggered — the next prompt predicts ~%s tokens (%s reported + ~%s new); %s, so ~%s tokens must be reclaimed." % [_tokens_3sig(reported + estimated), _tokens_k(reported), _tokens_3sig(estimated), reach, _tokens_3sig(need)]
-		header.tooltip_text = "Prediction: the newest request's reported prompt + output tokens, plus a chars/4 estimate of everything appended to the conversation since (tool results, replies, your message). Evaluated before every request — user sends and tool-loop continuations alike. The buffer is set in Editor Settings → Gdllm → Compaction; unchecking Enable Automatic Context Compaction there turns this trigger off." + (" A debug-enforced threshold (Compaction settings, debugging tools) stood in for the model's real context window here." if bool(entry.get("debug", false)) else "")
+		header.tooltip_text = "Prediction: the newest request's reported prompt + output tokens, plus a chars-per-token estimate of everything appended to the conversation since (tool results, replies, your message). Evaluated before every request — user sends and tool-loop continuations alike. The buffer is set in Editor Settings → Gdllm → Compaction; unchecking Enable Automatic Context Compaction there turns this trigger off." + (" A debug-enforced threshold (Compaction settings, debugging tools) stood in for the model's real context window here." if bool(entry.get("debug", false)) else "")
 	body.add_child(header)
 	return body
 
@@ -3144,7 +3140,7 @@ func _add_over_window_notice(entry: Dictionary, scroll: bool = true) -> void:
 	_apply_caption_style(notice, GDLLMColors.color(GDLLMColors.ERROR_CAPTION))
 	var window_label := ("%s-token debug-enforced threshold" % _tokens_k(int(entry.get("window", 0)))) if bool(entry.get("debug", false)) else ("%s-token context window" % _tokens_k(int(entry.get("window", 0))))
 	# Where the figure came from, when it isn't the usual reported count plus its delta: an estimate carries more error, so the warning says so rather than presenting a guess with the same confidence as a measurement.
-	var basis := " No reported count covers this context yet — a session's first request, or the send right after a compaction — so the figure is a chars/4 estimate of the whole request rather than a reported count plus its delta." if bool(entry.get("estimate_only", false)) else ""
+	var basis := " No reported count covers this context yet — a session's first request, or the send right after a compaction — so the figure is a chars-per-token estimate of the whole request rather than a reported count plus its delta." if bool(entry.get("estimate_only", false)) else ""
 	# A count reported by the model this session has since left is still the truest reading, but it was never measured against this window — the notice attributes it rather than quoting it as the current provider's own.
 	var measured_on := String(entry.get("measured_on", ""))
 	if measured_on != "":
@@ -3849,7 +3845,7 @@ func _make_footer_label(text: String) -> Label:
 	return footer
 
 
-## Compact "Source · model · reported 1234 in / 567 out · gen 45.2 tps · prompt 852 tps" summary; "" when there's nothing to show. Reported-first like the session header: the chars/4 estimate shows only for the side(s) this request's endpoint left uncounted — "est ~" when it reported nothing, "~ ... (reported + N% est)" with the estimated share when one side fell back. Leads with the turn's model so a multi-source chat shows who answered. `seconds` is the client-measured generation wall-clock, the fallback throughput basis for providers that report usage but no timing (see the inferred-tps comments below).
+## Compact "Source · model · reported 1234 in / 567 out · gen 45.2 tps · prompt 852 tps" summary; "" when there's nothing to show. Reported-first like the session header: the chars-per-token estimate shows only for the side(s) this request's endpoint left uncounted — "est ~" when it reported nothing, "~ ... (reported + N% est)" with the estimated share when one side fell back. Leads with the turn's model so a multi-source chat shows who answered. `seconds` is the client-measured generation wall-clock, the fallback throughput basis for providers that report usage but no timing (see the inferred-tps comments below).
 func _format_stats(stats: Dictionary, seconds: float = 0.0, model: String = "") -> String:
 	var parts: Array[String] = []
 	if model != "":
@@ -4214,8 +4210,8 @@ func _show_turn_context(history_index: int, precompaction_event: int = -1) -> vo
 	full_messages.append_array(messages)
 	var adapter := LLMAdapter.for_kind(String(resolved.get("kind", GDLLMSources.KIND_OLLAMA)))
 	var body := adapter.build_chat_body(String(resolved.get("model", "")), full_messages, tools, String(entry.get("effort", "")), _cache_cold_gap_seconds())
-	# Size the compact wire form, not the tab-indented display copy, at the usual ~4 chars/token rough ratio.
-	var token_line := "~%s tokens (chars/4 estimate of this reconstruction)" % _comma(int(JSON.stringify(body).length() / 4.0))
+	# Size the compact wire form, not the tab-indented display copy, at the configured chars-per-token ratio.
+	var token_line := "~%s tokens (chars-per-token estimate of this reconstruction)" % _comma(LLMClient.estimate_tokens(JSON.stringify(body).length()))
 	var stats: Dictionary = entry.get("stats", {})
 	# The turn's stored counts sit beside the reconstruction so a drift between them is visible: est was measured on the payload actually sent, reported is the endpoint's own figure.
 	if int(stats.get("est_tokens_in", 0)) > 0:
@@ -5090,7 +5086,7 @@ func _selected_node_attachments() -> Array[Dictionary]:
 		# An unsaved scene has no path any argument could name, so no honest call can be claimed; the fused fallback carries it instead.
 		return out
 	var nodes := _selected_scene_nodes()
-	var attached := mini(nodes.size(), MAX_SELECTED_NODE_ATTACHMENTS)
+	var attached := mini(nodes.size(), GDLLMTunables.geti(GDLLMTunables.MAX_ATTACHED_SCENE_NODES))
 	for i in attached:
 		var node := nodes[i]
 		var node_path := "." if node == root else String(root.get_path_to(node))
@@ -5113,7 +5109,7 @@ func _selected_node_context() -> String:
 		return ""
 	# The same cap the tool-call path applies, or the fused fallback — reached with tools off, where nothing else bounds it — would fuse an unbounded subtree into the message from one "select all children"; the shortfall is stated so a capped fuse never reads as the whole selection.
 	var nodes := _selected_scene_nodes()
-	var attached := mini(nodes.size(), MAX_SELECTED_NODE_ATTACHMENTS)
+	var attached := mini(nodes.size(), GDLLMTunables.geti(GDLLMTunables.MAX_ATTACHED_SCENE_NODES))
 	var blocks: PackedStringArray = []
 	for i in attached:
 		var node_path := "." if nodes[i] == root else String(root.get_path_to(nodes[i]))

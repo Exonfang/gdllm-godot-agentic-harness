@@ -72,10 +72,10 @@ func _test_empty_and_foreign_entries() -> void:
 
 func _test_over_window_advice() -> void:
 	# The estimate-only branch wins even with compaction on: no reported base means the figure is a guess, and the message must say so before naming any lever.
-	_check(Subagent._over_window_advice(true, true).contains("chars/4 estimate"), "no reported base is disclosed as an estimate")
-	_check(Subagent._over_window_advice(true, false).contains("chars/4 estimate"), "estimate-only outranks the compaction-off advice")
+	_check(Subagent._over_window_advice(true, true).contains("chars-per-token estimate"), "no reported base is disclosed as an estimate")
+	_check(Subagent._over_window_advice(true, false).contains("chars-per-token estimate"), "estimate-only outranks the compaction-off advice")
 	# Compaction off names the two switches to enable — the guard fires here exactly because the pass could not.
 	_check(Subagent._over_window_advice(false, false).contains("Compaction Within Subagents"), "compaction off points at the within-subagents switch to enable")
-	_check(not Subagent._over_window_advice(false, false).contains("chars/4 estimate"), "a reported base is not called an estimate")
+	_check(not Subagent._over_window_advice(false, false).contains("chars-per-token estimate"), "a reported base is not called an estimate")
 	# Compaction on but still over: the pruning pass ran and could not clear the overflow.
 	_check(Subagent._over_window_advice(false, true).contains("even after compaction"), "a genuine overflow past a run pass says so")

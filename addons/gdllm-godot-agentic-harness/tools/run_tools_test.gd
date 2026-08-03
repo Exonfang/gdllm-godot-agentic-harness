@@ -63,7 +63,7 @@ func _test_entries_delta() -> void:
 func _test_tail_lines() -> void:
 	var tail := Console.tail_lines(["a", "b", "c", "d"], 2)
 	_check(String(tail["text"]) == "c\nd" and int(tail["omitted"]) == 2, "the tail keeps the newest lines and counts the omitted")
-	var long_line := "y".repeat(Console.MAX_LINE_CHARS + 9)
+	var long_line := "y".repeat(GDLLMTunables.geti(GDLLMTunables.CONSOLE_LINE_MAX_CHARS) + 9)
 	var clipped := Console.tail_lines([long_line], 5)
 	_check(String(clipped["text"]).contains("(+9 more chars)"), "a runaway line is clipped with the elided count")
 
@@ -75,10 +75,10 @@ func _test_run_capture_format() -> void:
 	_check(quiet.contains("printed nothing new"), "a silent run says so")
 	_check(quiet.contains("No new errors or warnings"), "a clean run states the absence of new errors")
 	var big: Array = []
-	for i in Console.DEFAULT_OUTPUT_LINES + 5:
+	for i in GDLLMTunables.geti(GDLLMTunables.CONSOLE_OUTPUT_LINES) + 5:
 		big.append("line %d" % i)
 	var capped: String = Tools.format_run_capture({"lines": big, "reset": true, "missing": false}, [], "\n\nNote: hidden things")
-	_check(capped.contains("(%d lines, newest %d shown" % [big.size(), Console.DEFAULT_OUTPUT_LINES]), "a chatty run is capped with the count and the read_output remedy")
+	_check(capped.contains("(%d lines, newest %d shown" % [big.size(), GDLLMTunables.geti(GDLLMTunables.CONSOLE_OUTPUT_LINES)]), "a chatty run is capped with the count and the read_output remedy")
 	_check(capped.contains("read_output has the full console"), "the cap names where the rest lives")
 	_check(capped.contains("cleared as the run started"), "a cleared-on-play panel is disclosed on the capture")
 	_check(capped.contains("Note: hidden things"), "the panel's view-controls rider rides the capture")
@@ -96,7 +96,7 @@ func _test_run_capture_format() -> void:
 func _test_script_run_format() -> void:
 	var killed: String = Tools.format_script_run("res://x.gd", {"ok": false, "why": "hung", "output": "tick\n", "exit_code": -1, "killed": true}, 7)
 	_check(killed.begins_with("Error:") and killed.contains("7 s timeout") and killed.contains("quit()"), "a timeout kill names the timeout and the quit() remedy")
-	_check(killed.contains("timeout_seconds (up to %d)" % Tools.RUN_SCRIPT_MAX_TIMEOUT), "the kill names the raisable cap")
+	_check(killed.contains("timeout_seconds (up to %d)" % GDLLMTunables.geti(GDLLMTunables.RUN_SCRIPT_MAX_TIMEOUT)), "the kill names the raisable cap")
 	_check(killed.contains("tick"), "output up to the kill is still relayed")
 	var dead: String = Tools.format_script_run("res://x.gd", {"ok": false, "why": "failed to launch", "output": "", "exit_code": -1, "killed": false}, 30)
 	_check(dead.contains("NOT executed"), "a run that never happened is never passed off as one that did")
@@ -108,7 +108,7 @@ func _test_script_run_format() -> void:
 	var wrong_base: String = Tools.format_script_run("res://x.gd", {"ok": true, "why": "", "output": "Script does not inherit from SceneTree or MainLoop\n", "exit_code": 1, "killed": false}, 30)
 	_check(wrong_base.contains("extends SceneTree"), "the engine's wrong-base refusal is translated into the fix")
 	var big: Array = []
-	for i in Tools.RUN_SCRIPT_OUTPUT_LINES + 3:
+	for i in GDLLMTunables.geti(GDLLMTunables.RUN_SCRIPT_OUTPUT_LINES) + 3:
 		big.append("row %d" % i)
 	var capped: String = Tools.format_script_run("res://x.gd", {"ok": true, "why": "", "output": "\n".join(big), "exit_code": 0, "killed": false}, 30)
 	_check(capped.contains("only a re-run can reprint it"), "a capped subprocess tail admits the drop is unrecoverable")

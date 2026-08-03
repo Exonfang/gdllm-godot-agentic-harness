@@ -5,8 +5,7 @@ class_name GDLLMEditorState extends RefCounted
 ## The undo side is READ-ONLY by contract — nothing here (or anywhere in the addon) calls undo() or redo(); a revert is the user's to make.
 ## Every method is static — this is a namespace, not an instance.
 
-## The most entries one list in the selection report prints before collapsing to a counted remainder, matching GDLLMTools' universal suggestion-list cap.
-const MAX_LIST_ENTRIES := 12
+# The per-list entry cap in the selection report shares the universal suggestion-list cap, user-configurable — see GDLLMTunables' gdllm/tool_output section.
 
 
 ## Snapshot of what the user has focused across the editor's surfaces, as the plain data format_selection renders; editor-only.
@@ -50,13 +49,13 @@ static func format_selection(state: Dictionary) -> String:
 			others.append(String(path).get_file())
 	var scene_line := "Active scene: %s" % (active if active != "" else "none open")
 	if not others.is_empty():
-		scene_line += "; other open tabs: %s" % _capped_list(others, MAX_LIST_ENTRIES)
+		scene_line += "; other open tabs: %s" % _capped_list(others, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
 	lines.append(scene_line + ".")
 	var nodes: Array = state.get("selected_nodes", [])
 	if nodes.is_empty():
 		lines.append("Selected nodes: none.")
 	else:
-		lines.append("Selected nodes (%d): %s." % [nodes.size(), _capped_list(nodes, MAX_LIST_ENTRIES)])
+		lines.append("Selected nodes (%d): %s." % [nodes.size(), _capped_list(nodes, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))])
 	var script_path := String(state.get("script_path", ""))
 	if script_path == "":
 		lines.append("Script editor: no script open.")
@@ -127,7 +126,7 @@ static func _filesystem_line(state: Dictionary) -> String:
 		return "FileSystem dock: nothing selected%s." % (" (browsing %s)" % current if current != "" else "")
 	if fs.size() == 1:
 		return "FileSystem dock: %s selected." % String(fs[0])
-	return "FileSystem dock: %d selected — %s." % [fs.size(), _capped_list(fs, MAX_LIST_ENTRIES)]
+	return "FileSystem dock: %d selected — %s." % [fs.size(), _capped_list(fs, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))]
 
 
 ## Comma-join capped at `cap` entries with a counted remainder — the shared list shape of the selection report.

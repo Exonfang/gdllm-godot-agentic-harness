@@ -475,8 +475,9 @@ func _sanitize_title(raw: String) -> String:
 	while not title.is_empty() and title[title.length() - 1] in [".", ",", ";", ":", "!", "?"]:
 		title = title.substr(0, title.length() - 1)
 	title = title.strip_edges()
-	if title.length() > 48:
-		title = title.substr(0, 48).strip_edges() + "…"
+	var max_chars := GDLLMTunables.geti(GDLLMTunables.SESSION_TITLE_MAX_CHARS)
+	if title.length() > max_chars:
+		title = title.substr(0, max_chars).strip_edges() + "…"
 	return title
 
 
@@ -566,7 +567,7 @@ func _start_source_fetch(source: Dictionary) -> Dictionary:
 	return {"source_id": String(source.get("id", "")), "source_name": String(source.get("name", source.get("id", ""))), "probe": probe, "box": box}
 
 
-## Await one started fetch's result, free its throwaway client, and return the bare model names — empty on any failure or timeout, so the sweep never stalls. fetch_models always resolves within LLMClient.TAGS_TIMEOUT, so awaiting the signal is enough; the box covers an emit that already fired (synchronously, or while an earlier source was being awaited).
+## Await one started fetch's result, free its throwaway client, and return the bare model names — empty on any failure or timeout, so the sweep never stalls. fetch_models always resolves within the configured model-fetch timeout (GDLLMTunables.MODEL_FETCH_TIMEOUT), so awaiting the signal is enough; the box covers an emit that already fired (synchronously, or while an earlier source was being awaited).
 func _finish_source_fetch(handle: Dictionary) -> PackedStringArray:
 	var box: Array = handle["box"]
 	var probe: LLMClient = handle["probe"]
@@ -1214,7 +1215,7 @@ func _ensure_manage_dialog() -> void:
 	_manage_tree.set_column_title(1, "Created")
 	_manage_tree.set_column_title(2, "Last message")
 	_manage_tree.set_column_title(3, "Model") # the model(s) stamped on the most assistant turns; ties share the cell
-	_manage_tree.set_column_title(4, "Est In") # cumulative prompt tokens estimated from the payloads actually sent (chars/4), subagent threads included
+	_manage_tree.set_column_title(4, "Est In") # cumulative prompt tokens estimated from the payloads actually sent (chars-per-token), subagent threads included
 	_manage_tree.set_column_title(5, "Est Out") # cumulative reply tokens estimated from the streamed replies, same coverage
 	_manage_tree.set_column_title(6, "Rep In") # cumulative prompt tokens the endpoints themselves reported, same coverage
 	_manage_tree.set_column_title(7, "Rep Out") # cumulative reply tokens the endpoints themselves reported, same coverage
@@ -1239,7 +1240,7 @@ func _ensure_manage_dialog() -> void:
 	content.add_child(_manage_tree)
 
 	_manage_totals = Label.new()
-	_manage_totals.tooltip_text = "Tokens in/out summed across every session in the table, subagent threads included — estimated (chars/4 of the traffic actually exchanged) and endpoint-reported counts kept apart."
+	_manage_totals.tooltip_text = "Tokens in/out summed across every session in the table, subagent threads included — estimated (chars-per-token of the traffic actually exchanged) and endpoint-reported counts kept apart."
 	content.add_child(_manage_totals)
 
 	_manage_dialog.add_child(content)
@@ -1264,7 +1265,7 @@ func _refresh_manage_list() -> void:
 		var model := _dominant_models(record.get("history", []))
 		item.set_text(3, String(model["text"]))
 		item.set_tooltip_text(3, String(model["tooltip"]))
-		# Token columns derive from the record's stored per-request stats — the same sums the session header shows (see GDLLMChatSession.token_usage) — with the plugin's chars/4 estimates and the endpoints' own reported counts in separate columns.
+		# Token columns derive from the record's stored per-request stats — the same sums the session header shows (see GDLLMChatSession.token_usage) — with the plugin's chars-per-token estimates and the endpoints' own reported counts in separate columns.
 		var usage := GDLLMChatSession.token_usage(record.get("history", []))
 		var est_in := int(usage["est_in"]) + int(usage["subagent_est_in"])
 		var est_out := int(usage["est_out"]) + int(usage["subagent_est_out"])
@@ -1276,9 +1277,9 @@ func _refresh_manage_list() -> void:
 		total_rep_in += rep_in
 		total_rep_out += rep_out
 		item.set_text(4, "~%s" % _abbrev_tokens(est_in) if est_in > 0 else "—")
-		item.set_tooltip_text(4, "Cumulative prompt tokens estimated (chars/4) from the request payloads actually sent this session, subagent threads included: %s. Sessions saved before the estimates existed show —." % _comma(est_in))
+		item.set_tooltip_text(4, "Cumulative prompt tokens estimated (chars-per-token) from the request payloads actually sent this session, subagent threads included: %s. Sessions saved before the estimates existed show —." % _comma(est_in))
 		item.set_text(5, "~%s" % _abbrev_tokens(est_out) if est_out > 0 else "—")
-		item.set_tooltip_text(5, "Cumulative reply tokens estimated (chars/4) from the replies streamed back this session, subagent threads included: %s. Sessions saved before the estimates existed show —." % _comma(est_out))
+		item.set_tooltip_text(5, "Cumulative reply tokens estimated (chars-per-token) from the replies streamed back this session, subagent threads included: %s. Sessions saved before the estimates existed show —." % _comma(est_out))
 		item.set_text(6, _abbrev_tokens(rep_in) if rep_in > 0 else "—")
 		item.set_tooltip_text(6, "Cumulative prompt tokens the endpoints themselves reported across every request this session, subagent threads included: %s. Providers that report no usage show —." % _comma(rep_in))
 		item.set_text(7, _abbrev_tokens(rep_out) if rep_out > 0 else "—")
