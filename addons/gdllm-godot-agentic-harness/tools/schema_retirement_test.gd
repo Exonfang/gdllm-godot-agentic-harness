@@ -61,7 +61,7 @@ func _test_retirement_candidates() -> void:
 	var retired: PackedStringArray = Tools.schema_retirement_candidates(active, last_used, 5)
 	_check(retired == PackedStringArray(["edit_file"]), "a tool idle exactly SCHEMA_RETIRE_IDLE_TURNS turns is retired")
 	_check(Tools.schema_retirement_candidates(active, last_used, 4).is_empty(), "a tool one turn short of the threshold is kept")
-	_check(Tools.schema_retirement_candidates({"read_file": true}, {}, Tools.SCHEMA_RETIRE_IDLE_TURNS).has("read_file"), "no recorded use counts as idle forever")
+	_check(Tools.schema_retirement_candidates({"read_file": true}, {}, GDLLMTunables.geti(GDLLMTunables.SCHEMA_RETIRE_IDLE_TURNS)).has("read_file"), "no recorded use counts as idle forever")
 	_check(not Tools.schema_retirement_candidates({"tool_search": true}, {}, 99).has("tool_search"), "tool_search is never a candidate")
 	var multi: PackedStringArray = Tools.schema_retirement_candidates({"write_file": true, "edit_file": true}, {}, 9)
 	_check(multi == PackedStringArray(["edit_file", "write_file"]), "candidates come back sorted for deterministic notices")

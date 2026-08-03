@@ -337,9 +337,9 @@ func _test_output_caps() -> void:
 	body = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-opus-4-8", user_turn, [])
 	_check(int(body.get("max_tokens", 0)) == 128000, "caps are per model, not one shared value")
 	body = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-never-swept", user_turn, [])
-	_check(int(body.get("max_tokens", 0)) == LLMAdapters.AnthropicAdapter.CHAT_MAX_TOKENS, "a model no sweep has seen falls back to the 64K constant")
+	_check(int(body.get("max_tokens", 0)) == GDLLMTunables.geti(GDLLMTunables.ANTHROPIC_MAX_TOKENS_FALLBACK), "a model no sweep has seen falls back to the configured fallback cap")
 	body = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-uncapped-entry", user_turn, [])
-	_check(int(body.get("max_tokens", 0)) == LLMAdapters.AnthropicAdapter.CHAT_MAX_TOKENS, "an entry that reported no max_tokens keeps the fallback")
+	_check(int(body.get("max_tokens", 0)) == GDLLMTunables.geti(GDLLMTunables.ANTHROPIC_MAX_TOKENS_FALLBACK), "an entry that reported no max_tokens keeps the fallback")
 
 
 func _test_ollama_strips_foreign_fields() -> void:

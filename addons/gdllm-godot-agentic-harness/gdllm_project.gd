@@ -4,9 +4,7 @@ class_name GDLLMProject extends RefCounted
 ## Reads are served narrow: an overview (main scene, autoloads, input actions, a changed-settings count) by default, one prefix's worth on a filter, a single value on an exact name — never the whole settings dump.
 ## Writes go through set_setting with per-domain validation (input actions from friendly event specs, autoloads as checked paths, plain settings coerced to their existing type) and save project.godot immediately, since project settings have no unsaved-in-editor state the way scenes do.
 
-const MAX_FILTER_RESULTS := 60
-const MAX_SUGGESTIONS := 12
-const MAX_VALUE_CHARS := 160
+# The filter-result, suggestion, and rendered-value caps this file reports under are user-configurable — see GDLLMTunables' gdllm/tool_output section.
 ## The editor's own default deadzone for a newly added input action.
 const DEFAULT_DEADZONE := 0.5
 
@@ -359,7 +357,7 @@ static func _filtered(filter: String) -> String:
 			matches.append(name)
 	if matches.is_empty():
 		return "No project settings match \"%s\". Filters match anywhere in the slash-separated name (e.g. \"window\" matches display/window/size/viewport_width); try a shorter fragment." % filter
-	var shown: Array[String] = matches if matches.size() <= MAX_FILTER_RESULTS else matches.slice(0, MAX_FILTER_RESULTS)
+	var shown: Array[String] = matches if matches.size() <= GDLLMTunables.geti(GDLLMTunables.PROJECT_FILTER_RESULTS_CAP) else matches.slice(0, GDLLMTunables.geti(GDLLMTunables.PROJECT_FILTER_RESULTS_CAP))
 	var lines: Array = ["%d project settings match \"%s\" (* = differs from the engine default):" % [matches.size(), filter]]
 	for name in shown:
 		lines.append("%s %s = %s" % ["*" if _is_changed(name) else " ", name, _value_text(ProjectSettings.get_setting(name))])
@@ -441,8 +439,8 @@ static func _value_text(value: Variant, whole := false) -> String:
 		rendered = "\"%s\"" % value
 	else:
 		rendered = var_to_str(value).replace("\n", " ")
-	if not whole and rendered.length() > MAX_VALUE_CHARS:
-		rendered = rendered.substr(0, MAX_VALUE_CHARS) + "… (%d chars total — \"setting\" with this name prints it whole)" % rendered.length()
+	if not whole and rendered.length() > GDLLMTunables.geti(GDLLMTunables.BROWSE_VALUE_MAX_CHARS):
+		rendered = rendered.substr(0, GDLLMTunables.geti(GDLLMTunables.BROWSE_VALUE_MAX_CHARS)) + "… (%d chars total — \"setting\" with this name prints it whole)" % rendered.length()
 	return rendered
 
 
@@ -457,7 +455,7 @@ static func _suggestion_note(name: String) -> String:
 	for candidate in _setting_names(""):
 		if candidate.to_lower().contains(tail) and candidate != name:
 			suggestions.append(candidate)
-			if suggestions.size() == MAX_SUGGESTIONS:
+			if suggestions.size() == GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP):
 				break
 	if suggestions.is_empty():
 		return "Use describe_project with a filter to find the right name."

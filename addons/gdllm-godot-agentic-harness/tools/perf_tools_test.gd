@@ -125,17 +125,17 @@ func _test_profiler_scrape() -> void:
 func _test_profile_format() -> void:
 	_check(String(Perf.format_profile([])).contains("shows no captured frame"), "an empty capture is stated, never read as nothing-was-slow")
 	var rows: Array = []
-	for i in Perf.PROFILE_MAX_ROWS + 4:
+	for i in GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_FUNCTION_ROWS) + 4:
 		rows.append({"name": "fn_%d" % i, "time": "1.0 ms", "calls": "10"})
 	var report: String = Perf.format_profile([{"name": "Script Functions", "time": "20 ms", "rows": rows}])
 	_check(report.begins_with("Script Functions — 20 ms:"), "the category header carries its time")
 	_check(report.contains("fn_0 — 1.0 ms (10 calls)"), "rows carry name, time, and calls")
 	_check(report.contains("(+4 more rows — raise \"limit\""), "rows past the cap are counted and the limit lever named")
-	_check(not report.contains("fn_%d" % (Perf.PROFILE_MAX_ROWS + 1)), "capped rows are not relayed")
-	var lifted: String = Perf.format_profile([{"name": "Script Functions", "time": "20 ms", "rows": rows}], Perf.PROFILE_MAX_ROWS + 4)
-	_check(lifted.contains("fn_%d" % (Perf.PROFILE_MAX_ROWS + 3)) and not lifted.contains("more rows"), "an explicit limit lifts the cap in full")
-	var picked: String = Perf.format_profile([{"name": "Script Functions", "time": "20 ms", "rows": rows}], 0, "fn_%d" % (Perf.PROFILE_MAX_ROWS + 2))
-	_check(picked.contains("fn_%d — 1.0 ms" % (Perf.PROFILE_MAX_ROWS + 2)), "a filter reaches a row past the cap")
+	_check(not report.contains("fn_%d" % (GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_FUNCTION_ROWS) + 1)), "capped rows are not relayed")
+	var lifted: String = Perf.format_profile([{"name": "Script Functions", "time": "20 ms", "rows": rows}], GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_FUNCTION_ROWS) + 4)
+	_check(lifted.contains("fn_%d" % (GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_FUNCTION_ROWS) + 3)) and not lifted.contains("more rows"), "an explicit limit lifts the cap in full")
+	var picked: String = Perf.format_profile([{"name": "Script Functions", "time": "20 ms", "rows": rows}], 0, "fn_%d" % (GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_FUNCTION_ROWS) + 2))
+	_check(picked.contains("fn_%d — 1.0 ms" % (GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_FUNCTION_ROWS) + 2)), "a filter reaches a row past the cap")
 	_check(picked.contains("hidden by the filter"), "the filter counts what it hid")
 
 
@@ -207,7 +207,7 @@ func _test_visual_profile() -> void:
 	_check(body.contains("- Render Viewports — CPU 0.02 ms, GPU 0.31 ms"), "a pass carries both its CPU and GPU time")
 	_check(body.contains("  - Render CanvasItems"), "a child pass is indented under its parent")
 	var many: Array = []
-	for i in Perf.VISUAL_MAX_ROWS + 3:
+	for i in GDLLMTunables.geti(GDLLMTunables.PERF_PROFILE_VISUAL_ROWS) + 3:
 		many.append({"depth": 0, "name": "pass_%d" % i, "cpu": "0.1 ms", "gpu": "0.2 ms"})
 	var long_report: String = Perf.format_visual_profile(many)
 	_check(long_report.contains("(+3 deeper rows"), "rows past the cap are counted and pointed at the tab")

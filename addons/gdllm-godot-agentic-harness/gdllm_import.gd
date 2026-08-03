@@ -9,8 +9,7 @@ class_name GDLLMImport extends RefCounted
 
 ## The sidecar extensions folded out of a directory listing: each belongs to the file whose name it extends and carries nothing a listing is ever asked for.
 const SIDECAR_EXTENSIONS := ["import", "uid"]
-## Most import settings rendered before the rest collapse to a count; a texture importer alone declares ~26, and a listing of them is not what a map is for.
-const MAX_LISTED_PARAMS := 40
+# The import-settings listing cap is user-configurable — see GDLLMTunables' gdllm/tool_output section (a texture importer alone declares ~26, and a listing of them is not what a map is for).
 ## The value names behind the numeric import options that are ENUMS, keyed "<importer>/<option>".
 ## Nothing script-reachable carries these, all four candidates probed on 4.7: ClassDB reports ZERO properties for every ResourceImporter* class and none can be instantiated, the documentation cache has the importers' prose but not their value lists, and ProjectSettings holds importer_defaults only for a project that has customized them. So this is a version-pinned table read out of the engine's own PROPERTY_HINT_ENUM hint strings — the same treatment the Output panel's filter keys get — and an option ABSENT from it is passed through with its value unchecked rather than guessed at.
 ## It is keyed by importer as well as option because one name means different things per importer: "compress/mode" is Lossless..Basis Universal for a texture and PCM..Quite OK Audio for a WAV, so a table keyed by option alone would validate an audio file against a texture's values.
@@ -368,8 +367,8 @@ static func _capped_names(order: Array) -> Array:
 	var out: Array[String] = []
 	for key: String in order:
 		out.append(key)
-		if out.size() == MAX_LISTED_PARAMS:
-			out.append("… and %d more (read_file the .import with \"full\": true for all of them)" % (order.size() - MAX_LISTED_PARAMS))
+		if out.size() == GDLLMTunables.geti(GDLLMTunables.IMPORT_PARAMS_LISTED_CAP):
+			out.append("… and %d more (read_file the .import with \"full\": true for all of them)" % (order.size() - GDLLMTunables.geti(GDLLMTunables.IMPORT_PARAMS_LISTED_CAP)))
 			break
 	return out
 

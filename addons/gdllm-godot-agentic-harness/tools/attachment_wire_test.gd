@@ -103,7 +103,7 @@ func _test_attachment_is_ordinary_prune_fodder() -> void:
 	_check(not Array(picked["indices"]).is_empty(), "attachments are eligible for pruning")
 	_check(int(picked["saved"]) > 0, "pruning an attachment reclaims tokens")
 	# The keep-recent window applies to them exactly as to real results — no special casing in either direction.
-	_check(Array(picked["indices"]).size() == 5 - Tools.PRUNE_KEEP_RECENT_PAIRS, "the newest attachment pairs are kept like any tool result")
+	_check(Array(picked["indices"]).size() == 5 - GDLLMTunables.geti(GDLLMTunables.PRUNE_KEEP_RECENT_PAIRS), "the newest attachment pairs are kept like any tool result")
 
 
 func _test_stamp_names_the_remedy() -> void:

@@ -10,8 +10,7 @@ const AGENTS_PREFERRED := [["GDLLM.md", "gdllm.md"], ["AGENTS.md", "agents.md"]]
 ## Where skills live: res://skills/<name>/SKILL.md (directory convention, any capitalization of SKILL.md, the exact spelling winning) or res://skills/<name>.md (flat), top level only.
 const SKILLS_DIR := "res://skills"
 
-## Longest fallback description taken from a skill's first body line when its frontmatter declares none.
-const SKILL_FALLBACK_DESCRIPTION_CHARS := 120
+# The fallback-description length taken from a skill's first body line is user-configurable — see GDLLMTunables' gdllm/tool_output section.
 
 
 # --- AGENTS.md ---
@@ -102,7 +101,7 @@ static func agents_notice_text(event: String, path: String, chars: int, error: S
 	return ""
 
 
-## `chars` as an estimated token figure for the disclosure captions — the same chars/4 rule the context meter uses (LLMClient.estimate_tokens), ~-prefixed because it is an estimate.
+## `chars` as an estimated token figure for the disclosure captions — the same chars-per-token rule the context meter uses (LLMClient.estimate_tokens), ~-prefixed because it is an estimate.
 static func format_tokens(chars: int) -> String:
 	var tokens := LLMClient.estimate_tokens(chars)
 	if tokens < 1000:
@@ -251,13 +250,13 @@ static func find_skill(name: String, skills: Array) -> Dictionary:
 	return {}
 
 
-## The description a skill without one gets: its first non-empty body line, heading marks stripped, truncated to SKILL_FALLBACK_DESCRIPTION_CHARS.
+## The description a skill without one gets: its first non-empty body line, heading marks stripped, truncated to GDLLMTunables.SKILL_FALLBACK_DESCRIPTION_CHARS.
 static func _fallback_description(body: String) -> String:
 	for line in body.split("\n"):
 		var stripped := line.strip_edges().lstrip("# ").strip_edges()
 		if stripped == "":
 			continue
-		if stripped.length() > SKILL_FALLBACK_DESCRIPTION_CHARS:
-			return stripped.substr(0, SKILL_FALLBACK_DESCRIPTION_CHARS - 1).strip_edges() + "…"
+		if stripped.length() > GDLLMTunables.geti(GDLLMTunables.SKILL_FALLBACK_DESCRIPTION_CHARS):
+			return stripped.substr(0, GDLLMTunables.geti(GDLLMTunables.SKILL_FALLBACK_DESCRIPTION_CHARS) - 1).strip_edges() + "…"
 		return stripped
 	return "(no description)"

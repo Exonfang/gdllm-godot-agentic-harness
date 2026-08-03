@@ -4,8 +4,7 @@ class_name GDLLMClasses extends RefCounted
 ## describe_class and describe_member dead-ended on every one of them (wild-measured: Slot three times, Boon, ValueSlider, ProjectileData), so the model fell back to reading whole script files to learn a signature — the narrow-context goal inverted, and on the project's own code rather than the engine's.
 ## Everything here is read off the live GDScript's registered API rather than parsed out of its text, so it reports what the engine actually loaded; bodies and comments stay behind read_file, which the report names.
 
-## Longest rendered constant value before it is clipped; a script's lookup table is a constant like any other and would otherwise flood a browse.
-const MAX_CONSTANT_CHARS := 160
+# The rendered-constant clip this file browses under is user-configurable — see GDLLMTunables' gdllm/tool_output section (a script's lookup table is a constant like any other and would otherwise flood a browse).
 
 
 ## The global-class registry entry for `requested` (case-insensitive), or {} when the project declares no such class_name.
@@ -304,9 +303,9 @@ static func _export_marker(p: Dictionary) -> String:
 ## A constant's value rendered on one line and clipped, so a big table costs a line rather than a page.
 static func _constant_value(value: Variant) -> String:
 	var text := GDLLMTools._format_default(value)
-	if text.length() <= MAX_CONSTANT_CHARS:
+	if text.length() <= GDLLMTunables.geti(GDLLMTunables.BROWSE_VALUE_MAX_CHARS):
 		return text
-	return text.substr(0, MAX_CONSTANT_CHARS) + "… (+%d more chars — read_file for the whole value)" % (text.length() - MAX_CONSTANT_CHARS)
+	return text.substr(0, GDLLMTunables.geti(GDLLMTunables.BROWSE_VALUE_MAX_CHARS)) + "… (+%d more chars — read_file for the whole value)" % (text.length() - GDLLMTunables.geti(GDLLMTunables.BROWSE_VALUE_MAX_CHARS))
 
 
 static func _filtered_out(name: String, filter: String) -> bool:
@@ -340,5 +339,5 @@ static func _unknown_member_message(script: Script, native: String, member: Stri
 	if suggestions.is_empty():
 		return msg + " Call describe_class on %s to see everything it declares, or read_file on %s." % [cls, script.resource_path]
 	suggestions.sort()
-	var note := "" if suggestions.size() <= GDLLMTools.MAX_CLASS_SUGGESTIONS else " (and %d more)" % (suggestions.size() - GDLLMTools.MAX_CLASS_SUGGESTIONS)
-	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, GDLLMTools.MAX_CLASS_SUGGESTIONS)), note]
+	var note := "" if suggestions.size() <= GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP) else " (and %d more)" % (suggestions.size() - GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))
+	return "%s Did you mean: %s%s?" % [msg, ", ".join(suggestions.slice(0, GDLLMTunables.geti(GDLLMTunables.SUGGESTION_LIST_CAP))), note]

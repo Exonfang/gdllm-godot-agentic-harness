@@ -2,8 +2,7 @@
 class_name GDLLMGame extends RefCounted
 ## Editor-side transport for the game-driving tools: sends "gdllm:cmd" requests to the agent autoload inside the running game through the registered GDLLMDebuggerBridge and matches its "gdllm:result" replies back by request id. This class only moves messages and states why it can't — every tool result's prose lives with the tool bodies in GDLLMTools, so a transport failure comes back as a {why_kind, why} pair for the caller to word. Every method is static — this is a namespace, not an instance.
 
-## How long a presence-probe ping may take: long enough for a frame round-trip on a loaded game, short enough that refusing an agent-less run doesn't park the tool loop.
-const PING_TIMEOUT_MS := 600
+# The presence-probe ping budget is user-configurable — see GDLLMTunables' gdllm/tool_runtime section: long enough for a frame round-trip on a loaded game, short enough that refusing an agent-less run doesn't park the tool loop.
 
 ## The registered GDLLMDebuggerBridge, set by the plugin at load, the only scriptable route to EditorDebuggerSession objects.
 static var bridge: EditorDebuggerPlugin = null
@@ -54,7 +53,7 @@ static func command(payload: Dictionary, timeout_ms: int) -> Dictionary:
 	if chosen_id < 0:
 		# The hello can be lost to an editor reload mid-run, so probe before refusing; a real agent answers a ping inside the probe window.
 		var probe_id := int(live[0][0])
-		var pong := await _roundtrip(_sessions[probe_id], {"op": "ping"}, PING_TIMEOUT_MS)
+		var pong := await _roundtrip(_sessions[probe_id], {"op": "ping"}, GDLLMTunables.geti(GDLLMTunables.GAME_PING_TIMEOUT_MS))
 		if not bool(pong["ok"]):
 			return _fail("no_agent")
 		_agents[probe_id] = int((pong["reply"] as Dictionary).get("version", 0))

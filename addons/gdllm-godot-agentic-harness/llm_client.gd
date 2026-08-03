@@ -2,7 +2,7 @@
 class_name LLMClient extends Node
 ## Thin wrapper around an HTTPRequest that talks to the configured LLM endpoint. It owns the HTTPRequest as a child, so freeing this node frees the transport too — just add an instance to the tree (e.g. `add_child(client)`) and free it normally.
 
-signal response_received(text: String, stats: Dictionary) ## `stats` holds the turn's usage/timing counters: tokens_in/out plus durations exactly as the provider reported them (absent when it reported nothing), and est_tokens_in/out — this client's chars/4 estimates of the wire payload sent and the reply that came back, always present (completion requests included). A `truncated: true` flag marks a reply that was cut short, either by the transport (the stream ended without the provider's completion marker — socket drop or keep-alive return) or by the provider itself (an abnormal stop reason on its terminal frame, carried beside the flag as `stop_reason`: "length" for the output-token cap, else the provider's reason verbatim), so the caller can present the partial reply as incomplete rather than finished. For a chat request this fires once, at the end, with the full accumulated reply — unless the turn ended in tool calls, in which case `tool_calls_received` fires instead.
+signal response_received(text: String, stats: Dictionary) ## `stats` holds the turn's usage/timing counters: tokens_in/out plus durations exactly as the provider reported them (absent when it reported nothing), and est_tokens_in/out — this client's chars-per-token estimates of the wire payload sent and the reply that came back, always present (completion requests included). A `truncated: true` flag marks a reply that was cut short, either by the transport (the stream ended without the provider's completion marker — socket drop or keep-alive return) or by the provider itself (an abnormal stop reason on its terminal frame, carried beside the flag as `stop_reason`: "length" for the output-token cap, else the provider's reason verbatim), so the caller can present the partial reply as incomplete rather than finished. For a chat request this fires once, at the end, with the full accumulated reply — unless the turn ended in tool calls, in which case `tool_calls_received` fires instead.
 signal tool_calls_received(tool_calls: Array, content: String, stats: Dictionary) ## The model ended its turn asking to call one or more tools (Ollama's `message.tool_calls`). Fires in place of `response_received`; `content` is any text the model produced alongside the calls. The caller runs the tools, appends the results, and sends again.
 signal thinking_delta(text: String) ## A chunk of the model's reasoning as it streams in (Ollama's `message.thinking`); never emitted for non-thinking models.
 signal generating_started() ## The model has finished reasoning and produced its first content byte; fires once per chat request, before `response_received`.
@@ -10,9 +10,8 @@ signal request_failed(reason: String)
 signal models_received(models: PackedStringArray)
 signal context_window_received(model: String, tokens: int) ## A context-window probe resolved for `model` (the bare name it asked about, echoed so a caller can drop a reply that outlived a model switch): the source's reported maximum context in tokens, or 0 when the probe failed or timed out — an unknown, never an invented figure. Fired at most once per fetch_context_window call.
 
-const STREAM_CONNECT_TIMEOUT := 15.0 ## Seconds to wait for the socket before giving up; only covers name resolution + connect, not the model's own thinking time.
+# The connect and model-fetch timeouts are user-configurable — see GDLLMTunables' gdllm/network section. The fetch timeout is enforced with a SceneTreeTimer, not HTTPRequest.timeout — that internal timer fails to start for a node built in _init, leaving an unreachable host's fetch to hang forever and any sweep awaiting it stuck.
 const BODY_EXCERPT_CHARS := 180 ## How much of an unparseable response body an error message may quote — enough to recognize what answered, short enough that a whole HTML page never lands in the log.
-const TAGS_TIMEOUT := 12.0 ## Seconds a model-list fetch may run before it resolves as empty. Enforced with a SceneTreeTimer, not HTTPRequest.timeout — that internal timer fails to start for a node built in _init, leaving an unreachable host's fetch to hang forever and any sweep awaiting it stuck.
 
 @export var api_base: String = "http://localhost:11434" ## The API endpoint, local or remote.
 @export var model: String = "nemotron-3-nano:30b"
@@ -32,7 +31,7 @@ var _context_pending: bool = false ## True between issuing a probe and its first
 var _context_model: String = "" ## The bare model the pending probe asked about, echoed on the emit.
 var _context_probe_serial: int = 0 ## Bumped per probe; a superseded probe's timeout timer keeps ticking after its request is cancelled, and the serial keeps it from resolving the newer probe as empty.
 var _busy: bool = false
-var _completion_est_in: int = 0 ## chars/4 estimate of the completion request payload (taken in _post), the non-streamed counterpart of _stream_est_in.
+var _completion_est_in: int = 0 ## chars-per-token estimate of the completion request payload (taken in _post), the non-streamed counterpart of _stream_est_in.
 
 ## Streaming chat state. HTTPRequest buffers the whole body, so chat runs on a raw HTTPClient polled from _process instead — that's the only way to read Ollama's NDJSON stream (thinking + content) chunk by chunk.
 var _stream_client: HTTPClient
@@ -47,8 +46,8 @@ var _stream_content: String = "" ## Assistant content accumulated across chunks;
 var _stream_tool_calls: Array = [] ## Tool calls collected from the stream (Ollama emits them whole, not token-by-token); when non-empty at the end, tool_calls_received fires instead of response_received.
 var _stream_generating: bool = false ## generating_started has fired for this request (first content byte seen).
 var _stream_stats: Dictionary = {}
-var _stream_est_in: int = 0 ## chars/4 estimate of the request payload actually sent, taken before streaming starts; the provider-independent counterpart of a reported prompt count.
-var _stream_est_out_chars: int = 0 ## Characters streamed back this request (thinking + content + tool-call JSON); divided by 4 at finish for the reply-side estimate.
+var _stream_est_in: int = 0 ## chars-per-token estimate of the request payload actually sent, taken before streaming starts; the provider-independent counterpart of a reported prompt count.
+var _stream_est_out_chars: int = 0 ## Characters streamed back this request (thinking + content + tool-call JSON); converted at the configured chars-per-token ratio at finish for the reply-side estimate.
 var _stream_done: bool = false ## A chunk reported done:true; finish after the current poll drains.
 var _stream_stop: String = "" ## The done event's canonicalized abnormal stop reason ("" = normal finish; "length" = the output-token cap; else the provider's reason verbatim — see LLMAdapter._canonical_stop).
 var _stream_bad_code: int = 0 ## Non-200 status; _stream_buffer then holds the error body.
@@ -127,12 +126,12 @@ func cancel() -> bool:
 	return false
 
 
-## Fetch installed model names for this source (path/parse set by the adapter); results arrive via `models_received`. Always emits within TAGS_TIMEOUT — an empty list on any failure or timeout, with the cause left on `last_models_error` — so a caller awaiting the signal per source never stalls a sweep.
+## Fetch installed model names for this source (path/parse set by the adapter); results arrive via `models_received`. Always emits within GDLLMTunables.MODEL_FETCH_TIMEOUT — an empty list on any failure or timeout, with the cause left on `last_models_error` — so a caller awaiting the signal per source never stalls a sweep.
 func fetch_models() -> void:
 	last_models_error = ""
 	_tags_pending = true
 	# The deadline is armed before anything can suspend, and through the main loop rather than get_tree() because this node may not be in the tree yet — it must cover the tree_entered wait below as well as an unreachable host that never sends a RST, or a fetch stuck on either would break the always-emits promise.
-	(Engine.get_main_loop() as SceneTree).create_timer(TAGS_TIMEOUT).timeout.connect(_on_tags_timeout)
+	(Engine.get_main_loop() as SceneTree).create_timer(GDLLMTunables.getf(GDLLMTunables.MODEL_FETCH_TIMEOUT)).timeout.connect(_on_tags_timeout)
 	# request() needs the transport inside the scene tree; when called during setup (right after add_child) it isn't yet, so wait for it.
 	if not _tags_http_request.is_inside_tree():
 		await _tags_http_request.tree_entered
@@ -148,12 +147,12 @@ func fetch_models() -> void:
 		_emit_models(PackedStringArray())
 
 
-## Give up on a model-list fetch that outran TAGS_TIMEOUT: cancel the socket and resolve the fetch as empty. No-op once a response (or error) already resolved it.
+## Give up on a model-list fetch that outran GDLLMTunables.MODEL_FETCH_TIMEOUT: cancel the socket and resolve the fetch as empty. No-op once a response (or error) already resolved it.
 func _on_tags_timeout() -> void:
 	if not _tags_pending:
 		return
-	last_models_error = "no response within %ss" % TAGS_TIMEOUT
-	push_warning("LLMClient: model list fetch timed out after %ss" % TAGS_TIMEOUT)
+	last_models_error = "no response within %ss" % GDLLMTunables.getf(GDLLMTunables.MODEL_FETCH_TIMEOUT)
+	push_warning("LLMClient: model list fetch timed out after %ss" % GDLLMTunables.getf(GDLLMTunables.MODEL_FETCH_TIMEOUT))
 	_tags_http_request.cancel_request()
 	_emit_models(PackedStringArray())
 
@@ -201,7 +200,7 @@ func _emit_models(names: PackedStringArray) -> void:
 	models_received.emit(names)
 
 
-## Ask this source for the configured model's maximum context window (Ollama's /api/show, Anthropic's /v1/models/{id}, an OpenAI-compatible /v1/models list read for a vendor window field — see LLMAdapter.context_probe) and resolve via context_window_received within TAGS_TIMEOUT: the reported window, or 0 on any failure (an OpenAI-compatible server carrying no such field resolves to 0, an honest unknown). Returns false without emitting when this source's API offers no probe at all or the transport isn't in the tree yet, so the caller shows an honest unknown instead of waiting; a newer probe supersedes a pending one, which then never emits — its reply would describe a model the caller already left.
+## Ask this source for the configured model's maximum context window (Ollama's /api/show, Anthropic's /v1/models/{id}, an OpenAI-compatible /v1/models list read for a vendor window field — see LLMAdapter.context_probe) and resolve via context_window_received within GDLLMTunables.MODEL_FETCH_TIMEOUT: the reported window, or 0 on any failure (an OpenAI-compatible server carrying no such field resolves to 0, an honest unknown). Returns false without emitting when this source's API offers no probe at all or the transport isn't in the tree yet, so the caller shows an honest unknown instead of waiting; a newer probe supersedes a pending one, which then never emits — its reply would describe a model the caller already left.
 func fetch_context_window() -> bool:
 	var adapter := _make_adapter()
 	var probe := adapter.context_probe(model)
@@ -214,7 +213,7 @@ func fetch_context_window() -> bool:
 	_context_pending = true
 	_context_model = model
 	# Armed through the main loop for the same reason as the model-list deadline: HTTPRequest's own timeout can't be trusted here, and an unreachable host that never RSTs would otherwise hang the probe forever.
-	(Engine.get_main_loop() as SceneTree).create_timer(TAGS_TIMEOUT).timeout.connect(_on_context_timeout.bind(_context_probe_serial))
+	(Engine.get_main_loop() as SceneTree).create_timer(GDLLMTunables.getf(GDLLMTunables.MODEL_FETCH_TIMEOUT)).timeout.connect(_on_context_timeout.bind(_context_probe_serial))
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	headers.append_array(adapter.auth_headers(api_key))
 	var body: Dictionary = probe.get("body", {})
@@ -225,11 +224,11 @@ func fetch_context_window() -> bool:
 	return true
 
 
-## Give up on a probe that outran TAGS_TIMEOUT, resolving it as unknown. No-op once a response resolved it or a newer probe superseded it (the serial check — cancelling the old request doesn't stop this timer).
+## Give up on a probe that outran GDLLMTunables.MODEL_FETCH_TIMEOUT, resolving it as unknown. No-op once a response resolved it or a newer probe superseded it (the serial check — cancelling the old request doesn't stop this timer).
 func _on_context_timeout(serial: int) -> void:
 	if serial != _context_probe_serial or not _context_pending:
 		return
-	push_warning("LLMClient: context-window probe timed out after %ss" % TAGS_TIMEOUT)
+	push_warning("LLMClient: context-window probe timed out after %ss" % GDLLMTunables.getf(GDLLMTunables.MODEL_FETCH_TIMEOUT))
 	_context_http_request.cancel_request()
 	_emit_context_window(0)
 
@@ -320,8 +319,8 @@ func _process(delta: float) -> void:
 		HTTPClient.STATUS_RESOLVING, HTTPClient.STATUS_CONNECTING:
 			# Only the pre-request phase is time-boxed; once the model is replying it may think for as long as it likes.
 			_stream_connect_elapsed += delta
-			if _stream_connect_elapsed > STREAM_CONNECT_TIMEOUT:
-				_fail_stream(_endpoint_failure("it didn't answer within %ss" % STREAM_CONNECT_TIMEOUT))
+			if _stream_connect_elapsed > GDLLMTunables.getf(GDLLMTunables.STREAM_CONNECT_TIMEOUT):
+				_fail_stream(_endpoint_failure("it didn't answer within %ss" % GDLLMTunables.getf(GDLLMTunables.STREAM_CONNECT_TIMEOUT)))
 		HTTPClient.STATUS_REQUESTING:
 			pass # request in flight; waiting on the response headers
 		HTTPClient.STATUS_CONNECTED:
@@ -455,9 +454,14 @@ func _stream_final_stats() -> Dictionary:
 	return stats
 
 
-## chars/4 token estimate, the plugin-wide rule of thumb (see the context inspector's reconstruction line); 0 stays 0 so absent traffic never shows a phantom count. Public so the chat's context meter and compaction trigger estimate with the same rule the stats do.
+## The plugin-wide chars-per-token estimate (see the context inspector's reconstruction line), on the user-configurable ratio in GDLLMTunables; 0 stays 0 so absent traffic never shows a phantom count. Public so the chat's context meter and compaction trigger estimate with the same rule the stats do — every token estimate must route through here or the sizer and the meter disagree.
 static func estimate_tokens(chars: int) -> int:
-	return int(ceil(chars / 4.0))
+	return int(ceil(chars / GDLLMTunables.getf(GDLLMTunables.CHARS_PER_TOKEN)))
+
+
+## The inverse estimate — how many characters a token budget is worth on the same user-configured ratio — for the compaction sizers that turn token targets into character splits.
+static func estimate_chars(tokens: int) -> int:
+	return int(tokens * GDLLMTunables.getf(GDLLMTunables.CHARS_PER_TOKEN))
 
 
 ## Abort a stream (transport/connect failure) and report `reason`.
