@@ -28,6 +28,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 - Integrated engine documentation, pulling from the same cached data the in-editor documentation browser uses.
 - Respects `AGENTS.md`. `GDLLM.md` optionally overrides any `AGENTS.md` file if present.
 - Supports user-defined `/skills/`, dynamically added for appropriate tasks, similar to most other harnesses.
+- Contains tool calls within user and project directories for increased safety. (User configurable via editor setting in GDLLM > Agents)
 - Anthropic-like cache boundary aware compaction. Cache TTL is configurable per model and provider, auto-retires idle tools and loudly emits the boundary so the user can choose to compact manually if they prefer.
 - Supports agents spawning subagents.
 - Session history management.
