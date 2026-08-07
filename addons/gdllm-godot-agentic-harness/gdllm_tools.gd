@@ -1030,7 +1030,7 @@ const REGISTRY := {
 	},
 	"edit_file": {
 		"summary": "Edit an existing project text file by exact-string replacement — swap one uniquely-matching snippet for another (or every occurrence with replace_all); refused until you have seen the file's real text, and a .gd edit is parse-checked with any errors it introduced reported for immediate fixing.",
-		"description": "Edit an existing UTF-8 text file in the project by exact-string replacement: `old_string` is found verbatim in the file and replaced with `new_string`. You must have SEEN the file's real text first: a file you have not read this session — via read_file, read_function, or search_files excerpts (a long-file map or a search overview shows shape, not text, and does not count) — is refused until you do. The match must be EXACT — every character, including indentation (a .gd here is tab-indented), trailing spaces, and line breaks — so copy the text to replace straight from a read_file or read_function result rather than retyping it (search_files excerpts carry \"  12: \" line-number prefixes that are NOT part of the file). By default `old_string` must match exactly ONE place: if it matches nothing exactly, a whitespace-tolerant fallback compares whole lines — a UNIQUE spot differing from your text only in whitespace is edited anyway, with new_string's indentation adjusted to the file's and the result disclosing exactly what landed — and failing that you are told it wasn't found, with the actual cause named when detectable (an old_string copied from a version of the file your own write already replaced is called out as stale). If it matches several places you get the count and are asked to add surrounding lines until it's unique — or set `replace_all` true to change every occurrence at once (useful for renaming a symbol). Keep `old_string` as small as it can be while still unique; you do not resend the whole file. When the edited file is a GDScript (.gd), the change is validated after writing by launching the engine headlessly: a parse/compile check and this addon's own style lint, each compared against the file's pre-edit state so only problems your edit introduced are reported. The edit is KEPT either way: one that introduces parse/compile errors leaves the file BROKEN on disk and the errors come back with their line numbers — fixing them immediately, with further edit_file calls against the text you just wrote, is then your top priority before any other work. New style-lint problems also keep the edit and come back as follow-ups to clean up. A .gdshader is validated the same way by the engine's own shading-language compiler (no style lint — that guide is GDScript's), so a broken shader is reported here rather than surfacing only when the user runs the game; note the shader compiler stops at the FIRST error, so re-check after fixing one. A .tscn or .tres is validated the same way by a headless load check, and an edit that stops the file loading is likewise kept, reported, and yours to fix at once; a .tscn that still loads is additionally checked for stored properties and node types the engine doesn't know — those load silently and are DROPPED when the scene is instantiated, so any this edit introduced come back as a warning to fix. Serialized scene/resource text must be copied verbatim from read_file (on a .tscn that means \"full\" set to true or a line range — the default saved-tree view is not text), never reconstructed from a describe_scene or describe_scene_file view. To change a PROPERTY of a .tres/.res — including one the file does not list yet, such as a shader uniform just added — prefer edit_resource, which sets it by name against the resource's real type instead of by hand-editing serialized text. A clean open scene has its tab reloaded after the edit so the editor shows the new state; a scene open with unsaved live edits is left alone, and the editor's own external-change handling resolves the conflict. The result is compact: a confirmation and a short excerpt of the changed region with a line of context on each side, never the whole file. After a successful edit the editor's filesystem is refreshed and, if the file is open in the script editor, it is reloaded there in place — unless the user has unsaved changes in it, in which case Godot prompts them to resolve the conflict as usual. Only files under res:// can be edited; binary files are refused. Never write a uid:// value you invented: UIDs are engine-assigned, an invented one can never resolve, and an edit introducing one is refused — reference dependencies by res:// path, or use the real uid a tool result reported (a write_file/create_resource confirmation, list_dependencies, or a read of the target).",
+		"description": "Edit an existing UTF-8 text file in the project by exact-string replacement: `old_string` is found verbatim in the file and replaced with `new_string`. You must have SEEN the file's real text first: a file you have not read this session — via read_file, read_function, or search_files excerpts (a long-file map or a search overview shows shape, not text, and does not count) — is refused until you do. The match must be EXACT — every character, including indentation (a .gd here is tab-indented), trailing spaces, and line breaks — so copy the text to replace straight from a read_file or read_function result rather than retyping it (search_files excerpts carry \"  12: \" line-number prefixes that are NOT part of the file). By default `old_string` must match exactly ONE place: if it matches nothing exactly, a whitespace-tolerant fallback compares whole lines — a UNIQUE spot differing from your text only in whitespace is edited anyway, with new_string's indentation adjusted to the file's and the result disclosing exactly what landed — and failing that you are told it wasn't found, with the actual cause named when detectable (an old_string copied from a version of the file your own write already replaced is called out as stale). If it matches several places you get the count and are asked to add surrounding lines until it's unique — or set `replace_all` true to change every occurrence at once (useful for renaming a symbol). Keep `old_string` as small as it can be while still unique; you do not resend the whole file. When the edited file is a GDScript (.gd), the change is validated after writing by launching the engine headlessly: a parse/compile check and this addon's own style lint, each compared against the file's pre-edit state so only problems your edit introduced are reported. The edit is KEPT either way: one that introduces parse/compile errors leaves the file BROKEN on disk and the errors come back with their line numbers — fixing them immediately, with further edit_file calls against the text you just wrote, is then your top priority before any other work. New style-lint problems also keep the edit and come back as follow-ups to clean up. A .gdshader is validated the same way by the engine's own shading-language compiler (no style lint — that guide is GDScript's), so a broken shader is reported here rather than surfacing only when the user runs the game; note the shader compiler stops at the FIRST error, so re-check after fixing one. A .tscn or .tres is validated the same way by a headless load check, and an edit that stops the file loading is likewise kept, reported, and yours to fix at once; a .tscn that still loads is additionally checked for stored properties and node types the engine doesn't know — those load silently and are DROPPED when the scene is instantiated, so any this edit introduced come back as a warning to fix. Serialized scene/resource text must be copied verbatim from read_file (on a .tscn that means \"full\" set to true or a line range — the default saved-tree view is not text), never reconstructed from a describe_scene or describe_scene_file view. To change a PROPERTY of a .tres/.res — including one the file does not list yet, such as a shader uniform just added — prefer edit_resource, which sets it by name against the resource's real type instead of by hand-editing serialized text. A clean open scene has its tab reloaded after the edit so the editor shows the new state; a scene open with unsaved live edits is left alone, and the editor's own external-change handling resolves the conflict. The result is compact: a confirmation and a short excerpt of the changed region with a line of context on each side, never the whole file. After a successful edit the editor's filesystem is refreshed and, if the file is open in the script editor, it is reloaded there in place — unless the user has unsaved changes in it, in which case Godot prompts them to resolve the conflict as usual. Binary files are refused; the project's user:// data files are editable too, disclosed as unvalidated where the engine's checks can't ground a verdict. Never write a uid:// value you invented: UIDs are engine-assigned, an invented one can never resolve, and an edit introducing one into a project (res://) file is refused — reference dependencies by res:// path, or use the real uid a tool result reported (a write_file/create_resource confirmation, list_dependencies, or a read of the target). The uid machinery is a project-tree service: an edit landing on a user:// or outside file keeps its text exactly as sent, unvetted. The critical stores (project.godot, .godot, .git, the plugin's session records under user://gdllm) are never edited.",
 		"max_consecutive_uses": -1,
 		"mutating": true,
 		"parameters": {
@@ -1086,7 +1086,7 @@ const REGISTRY := {
 	},
 	"write_file": {
 		"summary": "Write a text file into the project — create a new one (directories included) or completely REPLACE an existing one with the given content; a .gd is parse-checked headlessly and any errors in the content are reported for immediate fixing.",
-		"description": "Write a UTF-8 text file into the project at `path` with exactly the given `content`, creating any missing directories along the way. Use it for a genuinely new file — a new script, a config, documentation — or to REPLACE an existing file wholesale: a file already at `path` is overwritten with `content`, so only ever send a COMPLETE file, never a fragment. To change part of an existing file use edit_file instead, which edits by exact replacement and keeps the rest intact. Two safety refusals return without touching disk: overwriting an existing file you have NOT read this session is refused (read it first to confirm you mean it, since the write replaces the whole file — and a file whose read came back with \"<... elided>\" packed-array markers stays refused even after reading, because a rewrite built from that view would destroy the real data behind the markers; change such a file with edit_file, or re-read it with read_file full:true, which returns the payloads verbatim and re-grounds the wholesale write), and creating a NEW file whose name already belongs to a file elsewhere in the project is refused (you most likely meant that existing file) — set `force` true to override either once you are sure. For a new saved resource prefer create_resource, which validates properties against the resource's real type rather than writing raw text. When the written file is a GDScript (.gd) or a .gdshader it is validated afterward by launching the engine headlessly, exactly like edit_file — the engine's parser for a script, its shading-language compiler for a shader: the file is KEPT either way, and content with parse/compile errors leaves it BROKEN on disk with the errors returned line-numbered — the file then holds exactly what you sent, and fixing those errors with edit_file calls (no need to resend everything) is your top priority before any other work. Style-lint problems likewise keep the file and come back in the result as follow-ups (scripts only — the style guide is GDScript's). The editor's filesystem is refreshed afterward so the new file appears immediately. Only paths under res:// can be written, and the path must carry the file's extension. A new .gd, .gdshader or .gdshaderinc is assigned its uid and .uid sidecar on creation (those three carry their uid in a sidecar rather than in the file), and the confirmation for any of them, or for a .tscn/.tres, reports the file's real uid — the one to use in preloads. Never write a uid:// value you invented: UIDs are engine-assigned, an invented one can never resolve, and content introducing one is refused — reference dependencies by res:// path, or use the real uid a tool result reported.",
+		"description": "Write a UTF-8 text file into the project at `path` with exactly the given `content`, creating any missing directories along the way. Use it for a genuinely new file — a new script, a config, documentation — or to REPLACE an existing file wholesale: a file already at `path` is overwritten with `content`, so only ever send a COMPLETE file, never a fragment. To change part of an existing file use edit_file instead, which edits by exact replacement and keeps the rest intact. Two safety refusals return without touching disk: overwriting an existing file you have NOT read this session is refused (read it first to confirm you mean it, since the write replaces the whole file — and a file whose read came back with \"<... elided>\" packed-array markers stays refused even after reading, because a rewrite built from that view would destroy the real data behind the markers; change such a file with edit_file, or re-read it with read_file full:true, which returns the payloads verbatim and re-grounds the wholesale write), and creating a NEW file whose name already belongs to a file elsewhere in the project is refused (you most likely meant that existing file) — set `force` true to override either once you are sure. For a new saved resource prefer create_resource, which validates properties against the resource's real type rather than writing raw text. When the written file is a GDScript (.gd) or a .gdshader it is validated afterward by launching the engine headlessly, exactly like edit_file — the engine's parser for a script, its shading-language compiler for a shader: the file is KEPT either way, and content with parse/compile errors leaves it BROKEN on disk with the errors returned line-numbered — the file then holds exactly what you sent, and fixing those errors with edit_file calls (no need to resend everything) is your top priority before any other work. Style-lint problems likewise keep the file and come back in the result as follow-ups (scripts only — the style guide is GDScript's). The editor's filesystem is refreshed afterward so the new file appears immediately. The project's user:// data directory is writable too (without the project-tree uid and validation services), and the path must carry the file's extension. A new .gd, .gdshader or .gdshaderinc is assigned its uid and .uid sidecar on creation (those three carry their uid in a sidecar rather than in the file), and the confirmation for any of them, or for a .tscn/.tres, reports the file's real uid — the one to use in preloads. That whole uid machinery is a project-tree service: a user:// or outside destination gets no uid and no vetting, its content lands exactly as sent, and the confirmation names no uid to preload by. Never write a uid:// value you invented: UIDs are engine-assigned, an invented one can never resolve, and content introducing one into a res:// destination is refused — reference dependencies by res:// path, or use the real uid a tool result reported. The containment fence judges the destination like every other tool path, and the critical stores (project.godot, .godot, .git, the plugin's session records under user://gdllm) are never written into, even with force.",
 		"max_consecutive_uses": -1,
 		"mutating": true,
 		"parameters": {
@@ -1110,7 +1110,7 @@ const REGISTRY := {
 	},
 	"move_file": {
 		"summary": "Move ONE project file to a new res:// location inside the project — its .uid/.import sidecars travel with it so uid:// references keep resolving; refused while other files still reference its old path by literal text unless force is true.",
-		"description": "Move ONE existing file to a new location inside the project. The destination in `to` is either a full res:// file path or a directory to move the file into unchanged — an existing directory, or a new one ending in \"/\", created with any missing parents. Both endpoints are contained: source and destination must each land under res://, so a move can never carry a file INTO the project from outside or OUT of the project from inside — \"..\" segments, user:// paths, and paths reaching their target through a symbolic link are refused at either end, and the critical project stores (project.godot, the .godot editor cache, the .git history) are refused as source and destination alike; force overrides none of this. Moves never overwrite: an existing file at the destination refuses the move (delete_file it first if replacing it is truly intended). The file's identity travels with it — a .uid or .import sidecar moves alongside and the engine's uid registry is retargeted on the spot, so references that go through the file's uid (an [ext_resource] carrying uid=, a preload(\"uid://...\")) keep resolving after the move; a moved .import additionally has its own source-path entry rewritten, disclosed, and the editor re-imports the asset on its next scan. References by literal res:// path do NOT survive: before anything moves, the project is scanned the same way delete_file's scan looks, and if any file still references the old path by text the move is REFUSED and they are listed — update them first (edit_file for scripts and scenes, set_project_setting for autoloads and other settings), or pass force true to move anyway, knowingly breaking them; the same list then comes back as a warning on the result. Files referencing only by uid never block the move and are counted in the result — any recorded path= fallback text in them goes stale until the editor next saves them, but the uid keeps them loading. The usual honest limit applies: a path assembled dynamically in code can't be seen, so a clean scan is strong evidence, not proof. A scene currently open in the editor is refused (its open tab would re-save the file at the old path), and a moved script open in the script editor is disclosed so it can be reopened from the new path. To only change the file's name in place, rename_file is the convenience form of this same operation.",
+		"description": "Move ONE existing file to a new location inside the project. The destination in `to` is either a full res:// file path or a directory to move the file into unchanged — an existing directory, or a new one ending in \"/\", created with any missing parents. Both endpoints are fenced (outside the project and its user:// directory only with the user's \"Allow Tool Calls Outside Project Or User Directories\" setting on), a move keeps a file in its own tree — res:// files among res:// locations, user:// data files among user:// — unless that setting is on, and the critical stores (project.godot, the .godot editor cache, the .git state, the plugin's session records under user://gdllm) are refused as source and destination alike whatever it says (judged on the path as spelled — a path through the user's own symlinks is taken at face value); force overrides none of this. Moves never overwrite: an existing file at the destination refuses the move (delete_file it first if replacing it is truly intended). The file's identity travels with it — a .uid or .import sidecar moves alongside and the engine's uid registry is retargeted on the spot, so references that go through the file's uid (an [ext_resource] carrying uid=, a preload(\"uid://...\")) keep resolving after the move; a moved .import additionally has its own source-path entry rewritten, disclosed, and the editor re-imports the asset on its next scan. References by literal res:// path do NOT survive: before anything moves, the project is scanned the same way delete_file's scan looks, and if any file still references the old path by text the move is REFUSED and they are listed — update them first (edit_file for scripts and scenes, set_project_setting for autoloads and other settings), or pass force true to move anyway, knowingly breaking them; the same list then comes back as a warning on the result. Files referencing only by uid never block the move and are counted in the result — any recorded path= fallback text in them goes stale until the editor next saves them, but the uid keeps them loading. The usual honest limit applies: a path assembled dynamically in code can't be seen, so a clean scan is strong evidence, not proof. A scene currently open in the editor is refused (its open tab would re-save the file at the old path), and a moved script open in the script editor is disclosed so it can be reopened from the new path. To only change the file's name in place, rename_file is the convenience form of this same operation.",
 		"max_consecutive_uses": -1,
 		"mutating": true,
 		"parameters": {
@@ -1122,7 +1122,7 @@ const REGISTRY := {
 				},
 				"to": {
 					"type": "string",
-					"description": "The destination inside the project: a full res:// file path (\"res://actors/enemy.gd\"), or a directory to move the file into unchanged — an existing one, or a new one ending in \"/\" (\"res://actors/\"), created with any missing parents. Must stay under res://; a move never leaves or enters the project.",
+					"description": "The destination inside the project: a full res:// file path (\"res://actors/enemy.gd\"), or a directory to move the file into unchanged — an existing one, or a new one ending in \"/\" (\"res://actors/\"), created with any missing parents. The containment fence judges it like every other path, and it must stay in the source's own tree (a res:// file moves to a res:// destination).",
 				},
 				"force": {
 					"type": "boolean",
@@ -1134,7 +1134,7 @@ const REGISTRY := {
 	},
 	"rename_file": {
 		"summary": "Rename ONE project file in place — move_file constrained to the file's own directory, with the same sidecar travel, uid preservation, and literal-path reference refusal.",
-		"description": "Rename ONE existing file where it stands: the file keeps its directory and takes the bare `new_name`. This is the same operation as move_file constrained to the file's own directory, and every one of its rules applies unchanged: the file must live under res:// (never a \"..\" escape, a user:// path, one reached through a symbolic link, or a critical project store), renames never overwrite an existing file, a .uid or .import sidecar is renamed alongside and the engine's uid registry retargeted so uid:// references keep resolving, and a file still referenced by its literal old path in other files REFUSES the rename with the referencing files listed — update them first, or pass force true to rename anyway, knowingly breaking them (the list comes back as a warning). Changing the extension is allowed but disclosed loudly, since the editor decides what a file IS by its extension. To change the file's directory use move_file instead.",
+		"description": "Rename ONE existing file where it stands: the file keeps its directory and takes the bare `new_name`. This is the same operation as move_file constrained to the file's own directory, and every one of its rules applies unchanged: the containment fence and the critical-store refusals judge the file the same way, renames never overwrite an existing file, a .uid or .import sidecar is renamed alongside and the engine's uid registry retargeted so uid:// references keep resolving, and a file still referenced by its literal old path in other files REFUSES the rename with the referencing files listed — update them first, or pass force true to rename anyway, knowingly breaking them (the list comes back as a warning). Changing the extension is allowed but disclosed loudly, since the editor decides what a file IS by its extension. To change the file's directory use move_file instead.",
 		"max_consecutive_uses": -1,
 		"mutating": true,
 		"parameters": {
@@ -1158,7 +1158,7 @@ const REGISTRY := {
 	},
 	"copy_file": {
 		"summary": "Duplicate ONE project file at a new res:// path, bytes and all — the only way to copy a BINARY asset (a texture, a sound, any other imported file); the copy is given a FRESH uid instead of the source's and keeps the source's import settings.",
-		"description": "Duplicate ONE existing file to a new path inside the project, byte for byte — the only way to copy a BINARY asset (a .png, .wav, .ogg, a .res), whose bytes no text tool can reproduce, and the same operation as the FileSystem dock's Duplicate. The destination in `to` is either a full res:// file path including the new file's name, or a directory to copy the file into under its own name — an existing directory, or a new one ending in \"/\", created with any missing parents. The copy never carries the source's identity: a uid in a .tscn/.tres header is rewritten to a freshly engine-generated one, a .uid sidecar (for a .gd, .gdshader, .gdshaderinc) is minted new rather than copied, and a copied .import gets a fresh uid and its own source path — two files sharing one uid means every uid:// reference resolves to only one of them, so this is not optional and the result names the new uid. An imported asset's .import sidecar IS copied, so the duplicate keeps the source's import settings (filter, mipmaps, compression) instead of falling back to defaults; the editor re-imports the copy on its next filesystem scan. Both endpoints are contained the way move_file's are: source and destination must each land under res://, so \"..\" segments, user:// paths, paths reaching their target through a symbolic link, hidden directories, and the critical project stores (project.godot, the .godot editor cache, the .git history) are refused at either end. Copies never overwrite: an existing file at the destination refuses the copy, so calling this a second time with the same arguments duplicates nothing — choose a different name, or delete_file the existing file first if replacing it is truly intended. Copying a .gd that declares a global class_name leaves two files claiming that class, which the engine rejects; the result says so and the copy's declaration must be changed at once. Nothing else in the project is touched — a copy adds a file rather than moving or removing one, so no existing reference can break and no file needs updating afterwards.",
+		"description": "Duplicate ONE existing file to a new path inside the project, byte for byte — the only way to copy a BINARY asset (a .png, .wav, .ogg, a .res), whose bytes no text tool can reproduce, and the same operation as the FileSystem dock's Duplicate. The destination in `to` is either a full res:// file path including the new file's name, or a directory to copy the file into under its own name — an existing directory, or a new one ending in \"/\", created with any missing parents. The copy never carries the source's identity: a uid in a .tscn/.tres header is rewritten to a freshly engine-generated one, a .uid sidecar (for a .gd, .gdshader, .gdshaderinc) is minted new rather than copied, and a copied .import gets a fresh uid and its own source path — two files sharing one uid means every uid:// reference resolves to only one of them, so for a res:// copy this is not optional and the result names the new uid. Identity only exists to the editor's project scan, so a copy landing on user:// or (fence dropped) outside keeps the source's bytes verbatim — uid text included, disclosed as inert in the result. An imported asset's .import sidecar IS copied, so the duplicate keeps the source's import settings (filter, mipmaps, compression) instead of falling back to defaults; the editor re-imports the copy on its next filesystem scan. Both endpoints are fenced the way move_file's are: a path landing outside the project and its user:// directory is refused unless the user's \"Allow Tool Calls Outside Project Or User Directories\" setting is on, a copy keeps a file in its own tree (res:// to res://, user:// to user://) unless that setting is on, and the critical stores (project.godot, the .godot editor cache, the .git state, the plugin's session records under user://gdllm) are refused at either end regardless, with hidden directories refused inside the project trees. Copies never overwrite: an existing file at the destination refuses the copy, so calling this a second time with the same arguments duplicates nothing — choose a different name, or delete_file the existing file first if replacing it is truly intended. Copying a .gd that declares a global class_name leaves two files claiming that class, which the engine rejects; the result says so and the copy's declaration must be changed at once. Nothing else in the project is touched — a copy adds a file rather than moving or removing one, so no existing reference can break and no file needs updating afterwards.",
 		"max_consecutive_uses": -1,
 		"mutating": true,
 		"parameters": {
@@ -1178,7 +1178,7 @@ const REGISTRY := {
 	},
 	"delete_file": {
 		"summary": "Delete ONE project file — moved to the system trash (recoverable) with its .uid/.import sidecars; refused while other files still reference it unless force is true.",
-		"description": "Delete ONE existing file from the project. The file is moved to the system trash when the platform provides one, so the user can still recover it; only when no trash is available is it permanently removed, and the result says which happened. A .uid or .import sidecar accompanying the file is removed with it. Before anything is deleted the whole project is scanned for references, the same way list_dependencies' reverse mode looks: scenes and resources through engine dependency records (which see UID-based and binary references), scripts and project.godot by literal text match, plus — for a .gd with a global class_name — whole-word mentions of that name. If anything still references the file the deletion is REFUSED and the referencing files are listed: update them first, or pass force true to delete anyway, knowingly breaking them — the same list then comes back as a warning on the result. The usual honest limit applies: a path assembled dynamically in code can't be seen, so a clean scan is strong evidence, not proof. Only files under res:// can be deleted, one per call; directories are refused, a path that escapes the project (\"..\" segments, a user:// path, or one reaching its target through a symbolic link) is refused before anything else, and the critical project files — project.godot, the .godot editor cache, the .git store — are refused even with force. This tool exists only while BOTH the user's \"Make changes\" and \"Delete files\" toggles are on.",
+		"description": "Delete ONE existing file from the project. The file is moved to the system trash when the platform provides one, so the user can still recover it; only when no trash is available is it permanently removed, and the result says which happened. A .uid or .import sidecar accompanying the file is removed with it. Before anything is deleted the whole project is scanned for references, the same way list_dependencies' reverse mode looks: scenes and resources through engine dependency records (which see UID-based and binary references), scripts and project.godot by literal text match, plus — for a .gd with a global class_name — whole-word mentions of that name. If anything still references the file the deletion is REFUSED and the referencing files are listed: update them first, or pass force true to delete anyway, knowingly breaking them — the same list then comes back as a warning on the result. The usual honest limit applies: a path assembled dynamically in code can't be seen, so a clean scan is strong evidence, not proof. One file per call; directories are refused, a path landing outside the project and its user:// directory is refused before anything else unless the user's \"Allow Tool Calls Outside Project Or User Directories\" setting is on, and the critical files — project.godot, the .godot editor cache, the .git state, the plugin's session records under user://gdllm — are refused even with force and whatever that setting says (judged, like every guard here, on the path as spelled — a path through the user's own symlinks is taken at face value). This tool exists only while BOTH the user's \"Make changes\" and \"Delete files\" toggles are on.",
 		"max_consecutive_uses": -1,
 		"mutating": true,
 		"destructive": true,
@@ -1577,6 +1577,8 @@ static var _fallback_ledger := SessionLedger.new()
 static var _mutation_busy := false ## a whole edit_file/write_file run is in flight; a second mutation interleaving could clobber its validation window
 static var _baseline_paths: Dictionary = {} ## files whose on-disk text is temporarily the PRE-edit original while a validation baseline runs, by resolved path
 static var _scan_count := 0 ## whole-project scans running on worker threads; a mutation must not start while one reads the tree
+static var _case_probe_cache: Dictionary = {} ## per-root verdicts of _root_case_insensitive, probed once per session per root
+static var _fs_case_override: Variant = null ## the headless tests exercise both platforms' compare behavior on one machine by forcing every verdict; null probes the actual volume
 static var _live_check_pids: Dictionary = {} ## validation subprocesses currently running, so Stop can kill them instead of waiting them out
 static var _check_epoch := 0 ## advances on cancel_running_checks; validators capture it on entry and bail once it moves
 static var _game_run: Dictionary = {} ## the play session run_game started and still owns ({"scene", "started_ms", "output_base", "errors_base"}); emptied when the run ends, and an editor reload wipes it, so stop_game refuses any run it can't prove it started
@@ -1610,6 +1612,9 @@ static func _catalog(allow_changes: bool = false, allow_delete: bool = false, ac
 		lines.append("Tools that modify the project (files, resources, scenes) or run its code also exist but are hidden because the user's \"Make changes\" toggle is off; if a task needs to change or run something, ask the user to turn on Make changes.")
 	if hidden_destructive > 0:
 		lines.append("Tools that DELETE project files also exist but are hidden because the user's \"Delete files\" toggle is off; if a task truly needs a deletion, ask the user to turn on Delete files (next to Make changes).")
+	# Stated only while ON — the catalog's per-tool summaries all say "the project", and transcripts show a model refusing an outside read the dropped fence would have served, never trying the tool. The default fenced state needs no line: absence of permission is what every summary already describes.
+	if GDLLMSettings.is_outside_tool_calls_allowed():
+		lines.append("The user's \"Allow Tool Calls Outside Project Or User Directories\" setting is ON: the file tools also reach absolute OS paths outside the project. An outside path must be spelled exactly — no name search runs out there.")
 	return "\n".join(lines)
 
 
@@ -2096,7 +2101,8 @@ static func _run_hook_action(action: String, args: Dictionary, result: Dictionar
 ## The check_script hook action: after a tool touches a .gd or .gdshader, compile-check it and report only when errors exist, so a clean file costs the context nothing while a broken one is flagged before the model builds on it. A call that itself failed is skipped — its own error is the story.
 static func _check_script_hook(args: Dictionary, result: Dictionary, ledger: SessionLedger) -> String:
 	var resolved := _resolve_file_path(_arg_string(args, FILE_PATH_KEYS))
-	if resolved == "" or not CHECKABLE_SOURCE_EXTENSIONS.has(resolved.get_extension().to_lower()):
+	# Project-tree only (see _project_side): a user:// or fence-dropped outside script compiles against ITS OWN project's classes and autoloads, so a verdict issued from this project's context would be ungroundable — the same reason the edit/write validation skips such files.
+	if resolved == "" or not _project_side(resolved) or not CHECKABLE_SOURCE_EXTENSIONS.has(resolved.get_extension().to_lower()):
 		return ""
 	if String(result.get("content", "")).begins_with("Error:"):
 		return ""
@@ -2124,7 +2130,8 @@ static func _check_script_hook(args: Dictionary, result: Dictionary, ledger: Ses
 ## The check_dependents hook action: after a successful edit_file/write_file changes a .gd's top-level class_name or extends, name the files that build on it — the break is invisible locally, since this file validates clean while dependents fail with "Could not find base class". The dependent set is found textually (like list_dependencies' reverse mode) rather than by parse-checking each dependent, because the editor refreshes its global class cache asynchronously after the write, and a headless recheck racing that refresh would pass on the stale cache and miss the break. Silent when nothing changed or nothing depends on the file, so the common write costs the context nothing.
 static func _check_dependents_hook(args: Dictionary, result: Dictionary, ledger: SessionLedger) -> String:
 	var resolved := _resolve_file_path(_arg_string(args, FILE_PATH_KEYS))
-	if resolved == "" or resolved.get_extension().to_lower() != "gd":
+	# Project-tree only (see _project_side): dependents are project files by definition, and only a project script's class_name binds anything.
+	if resolved == "" or not _project_side(resolved) or resolved.get_extension().to_lower() != "gd":
 		return ""
 	var content := String(result.get("content", ""))
 	# A failed call changed nothing, and a file left broken is its own louder story — dependents can wait until it parses again.
@@ -2359,21 +2366,75 @@ static func _arg_bool(args: Dictionary, keys: Array) -> bool:
 			if value is bool:
 				return value
 			if value is String:
-				return String(value).strip_edges().to_lower() in ["true", "1", "yes", "y"]
+				var trimmed := String(value).strip_edges().to_lower()
+				if trimmed in ["true", "1", "yes", "y"]:
+					return true
+				# A stringified number ("1.0") carries the truthiness its bare form would.
+				return trimmed.is_valid_float() and trimmed.to_float() != 0.0
 			if value is int or value is float:
 				return float(value) != 0.0
 	return false
 
 
-## An integer argument, read from the first of `keys` present in `args`; accepts a real number or a model's numeric string, else `fallback`.
+## Whether `value` names an integer in any spelling a model produces: an int, a WHOLE float (every JSON number arrives as one — JSON has no integer type), or a numeric string whose value is whole ("6", "6.0"). "6.5" and overflow spellings like 1e19 are refused in every form — raw float and string alike — so their corrective message survives instead of silently landing on a truncated or wrapped target. The one judgment behind _arg_int and every satellite parser's index/count argument, so no tool refuses in one spelling a number it accepts in another.
+static func is_integer_like(value: Variant) -> bool:
+	if value is int:
+		return true
+	if value is float:
+		return _whole_int_float(value)
+	if value is String:
+		var trimmed := String(value).strip_edges()
+		if trimmed.is_valid_int():
+			return true
+		return trimmed.is_valid_float() and _whole_int_float(trimmed.to_float())
+	return false
+
+
+## The integer an integer-like value names; `fallback` for anything is_integer_like refuses. An integer-spelled string parses exactly (the float route would lose precision past 2^53).
+static func integer_like(value: Variant, fallback: int = 0) -> int:
+	if value is int:
+		return value
+	if value is float:
+		return int(value) if _whole_int_float(value) else fallback
+	if value is String:
+		var trimmed := String(value).strip_edges()
+		if trimmed.is_valid_int():
+			return int(trimmed)
+		if trimmed.is_valid_float() and _whole_int_float(trimmed.to_float()):
+			return int(trimmed.to_float())
+	return fallback
+
+
+## is_integer_like narrowed for arguments where a String also names something — a tile source, a track path: a string reads as an index only spelled as a plain integer ("2"), so a name like "2.0" (a texture-basename source name, a track path) keeps resolving as the name it is.
+static func is_index_like(value: Variant) -> bool:
+	if value is String:
+		return String(value).strip_edges().is_valid_int()
+	return is_integer_like(value)
+
+
+## Whether `f` is a whole float an int can hold — finite, integral, and safely inside int64 range. The guard every whole-float→int widening consults, so "1e19" and inf spellings keep their refusals instead of overflowing into garbage; the conservative bound costs nothing, since no real index or count lives near int64's edge.
+static func _whole_int_float(f: float) -> bool:
+	return is_finite(f) and f == floorf(f) and absf(f) < 9.0e18
+
+
+## The float counterpart of is_integer_like, for parsers whose target is a real number rather than an index.
+static func is_number_like(value: Variant) -> bool:
+	return value is int or value is float or (value is String and String(value).strip_edges().is_valid_float())
+
+
+static func number_like(value: Variant, fallback: float = 0.0) -> float:
+	if value is int or value is float:
+		return float(value)
+	if value is String and String(value).strip_edges().is_valid_float():
+		return String(value).strip_edges().to_float()
+	return fallback
+
+
+## An integer argument, read from the first of `keys` present in `args`; accepts any integer-like spelling (see is_integer_like), else `fallback`.
 static func _arg_int(args: Dictionary, keys: Array, fallback: int) -> int:
 	for key in keys:
-		if args.has(key):
-			var value: Variant = args[key]
-			if value is int or value is float:
-				return int(value)
-			if value is String and String(value).strip_edges().is_valid_int():
-				return int(String(value).strip_edges())
+		if args.has(key) and is_integer_like(args[key]):
+			return integer_like(args[key])
 	return fallback
 
 
@@ -2738,6 +2799,13 @@ static func _list_directory(args: Dictionary) -> String:
 	var requested := _arg_string(args, DIR_PATH_KEYS)
 	var dir_path := "res://" if requested == "" else _resolve_dir_path(requested)
 	if dir_path == "":
+		var fence := _outside_path_guard(requested)
+		if fence != "":
+			return fence
+		# The same outside-location honesty as _file_not_found's: a fence-dropped absolute directory that doesn't exist is missing AT ITS OWN LOCATION — wild-observed, the in-project search below answered one with "no directory found matching ... in the project" and the model spiraled re-asking.
+		var canon := String(_sanitize_path(requested)["path"])
+		if _is_os_absolute(canon):
+			return "Error: nothing exists at %s. That is an OUTSIDE path, where a directory is only found spelled exactly — no name search runs there. Check the spelling, or list its parent (list_directory {\"path\": \"%s\"}) to see what is really there." % [canon, canon.get_base_dir()]
 		# Reached with 0 or 2+ name matches (a unique bare name resolved above), or a pathed guess whose leaf exists elsewhere — name the candidates rather than letting "no directory found" read as "does not exist anywhere".
 		var twins := _find_dirs_by_name("res://", requested.trim_prefix("res://").trim_suffix("/").get_file())
 		if twins.size() > 1:
@@ -3201,19 +3269,119 @@ static func _read_function(args: Dictionary, ledger: SessionLedger) -> String:
 	return _resolution_note(requested, resolved) + joined + _elision_note(joined)
 
 
-## Turn a requested path or bare file name into an existing res:// (or user://) file path, or "" if nothing resolves. A uid:// request resolves through the engine's uid registry to wherever the file lives now — GDScript accepts uids everywhere paths go, so the tools must too. An explicit path that exists is used as-is; anything else — including a res:// path whose directories were guessed wrong — falls back to an exact file-name search across the project, which only resolves when the name is UNIQUE, so a name shared by several files fails rather than silently picking one (see _file_not_found for the message that lists them).
+## The one sanitizer every path a tool call names passes through, returning {"path": String, "error": String}. Any spelling — res://, user://, relative, absolute OS, backslashed, ".."-laden — is canonicalized: separators normalized, dots collapsed, and a path landing inside the project or its user:// data directory returned in its res:// or user:// form (an absolute OS spelling of an in-tree location remaps to the scheme form, so every later guard judges the one canonical path). A path landing outside both trees returns the single generic fence refusal while the user's "Allow Tool Calls Outside Project Or User Directories" setting is off, or its globalized absolute form once it is on. Purely lexical, chasing nothing: a symlink or outside reference the USER built into the project keeps working exactly as it does in the editor, and only a call that names an outside location in its own text is caught. "" and uid:// pass through untouched — a uid resolves through the engine's registry, which records only res:// paths.
+static func _sanitize_path(requested: String) -> Dictionary:
+	if requested == "" or requested.begins_with("uid://"):
+		return {"path": requested, "error": ""}
+	var norm := requested.replace("\\", "/")
+	var abs := norm.simplify_path()
+	if not _is_os_absolute(norm):
+		if not norm.begins_with("res://") and not norm.begins_with("user://"):
+			norm = "res://" + norm.trim_prefix("./").trim_prefix("/")
+		abs = ProjectSettings.globalize_path(norm).simplify_path()
+	for scheme: String in ["res://", "user://"]:
+		var root := ProjectSettings.globalize_path(scheme).simplify_path().trim_suffix("/")
+		if not _path_is_or_under(abs, root):
+			continue
+		if abs.length() == root.length():
+			return {"path": scheme, "error": ""}
+		return {"path": scheme + abs.substr(root.length() + 1), "error": ""}
+	if GDLLMSettings.is_outside_tool_calls_allowed():
+		return {"path": abs, "error": ""}
+	return {"path": "", "error": "Error: %s resolves to %s, OUTSIDE the project and its user:// data directory — tool calls only reach files inside those two places. Use an in-project path instead; if reaching outside truly is intended, the user can turn on \"Allow Tool Calls Outside Project Or User Directories\" in Editor Settings under Gdllm → Agents." % [requested, abs]}
+
+
+## _sanitize_path's refusal alone, for the call sites that only ask "is this path allowed at all" — "" when it is.
+static func _outside_path_guard(requested: String) -> String:
+	return String(_sanitize_path(requested)["error"])
+
+
+## Whether `path` is an absolute OS path (POSIX or drive-lettered) rather than a scheme or project-relative one. After _sanitize_path, an absolute path can only mean an outside location with the fence dropped — in-tree absolute spellings were remapped to their scheme form.
+static func _is_os_absolute(path: String) -> bool:
+	var norm := path.replace("\\", "/")
+	return norm.begins_with("/") or norm.substr(1, 2) == ":/"
+
+
+## The tree a sanitized path lives in — "res://", "user://", or "" for a fence-dropped outside path. Move and copy hold both endpoints to one tree unless the fence is dropped (see _cross_tree_guard), since res:// files carry uids, sidecars and editor records that mean nothing elsewhere.
+static func _path_tree(path: String) -> String:
+	if path.begins_with("res://"):
+		return "res://"
+	if path.begins_with("user://"):
+		return "user://"
+	return ""
+
+
+## Refuse a move/copy whose endpoints live in different trees while the fence is up, "" when they share one (or the fence is dropped, where crossing is the point and the uid/sidecar machinery gates itself per endpoint instead). `verb` names the operation so the refusal never calls a copy a move.
+static func _cross_tree_guard(source: String, dest: String, verb: String) -> String:
+	if _path_tree(source) == _path_tree(dest) or GDLLMSettings.is_outside_tool_calls_allowed():
+		return ""
+	return "Error: %s lives in %s but the destination %s is in %s — a %s keeps a file in its own tree: res:// project files among res:// locations, user:// data files among user://. Project files carry uids, sidecars and editor records that mean nothing outside the project. To carry text content across trees, read_file it and write_file it at the destination; if crossing wholesale is truly intended, the user can turn on \"Allow Tool Calls Outside Project Or User Directories\" in Editor Settings under Gdllm → Agents." % [source, _tree_label(_path_tree(source)), dest, _tree_label(_path_tree(dest)), verb]
+
+
+static func _tree_label(tree: String) -> String:
+	return "an outside location" if tree == "" else tree
+
+
+## Whether `abs` is `root` or lies under it, compared the way `root`'s volume resolves names — case-insensitively where it does (see _root_case_insensitive). Both must already be globalized, simplified paths.
+static func _path_is_or_under(abs: String, root: String) -> bool:
+	if _root_case_insensitive(root):
+		abs = abs.to_lower()
+		root = root.to_lower()
+	return abs == root or abs.begins_with(root + "/")
+
+
+## Whether `a` and `b` name the same location the way the filesystem would resolve them — exact, or apart in case alone on a volume that folds it. Any path spelling; both are globalized before comparing.
+static func _paths_equal(a: String, b: String) -> bool:
+	var ga := ProjectSettings.globalize_path(a).simplify_path()
+	var gb := ProjectSettings.globalize_path(b).simplify_path()
+	return _path_is_or_under(ga, gb) and _path_is_or_under(gb, ga)
+
+
+## Whether the volume holding `root` resolves differently-cased spellings to the same entry — probed by re-casing the nearest existing ancestor directory's own name, because the OS name lies both ways: a casefolded ext4 or NTFS mount is case-insensitive on Linux, and a case-sensitive APFS volume is case-sensitive on macOS. A root with no re-caseable existing ancestor (bare drive roots, all-digit paths) keeps the platform default. `root` must already be globalized and simplified.
+static func _root_case_insensitive(root: String) -> bool:
+	if _fs_case_override != null:
+		return bool(_fs_case_override)
+	if _case_probe_cache.has(root):
+		return bool(_case_probe_cache[root])
+	var verdict := OS.get_name() in ["Windows", "macOS"]
+	var probe := root.trim_suffix("/")
+	while true:
+		var leaf := probe.get_file()
+		var flipped := leaf.to_upper() if leaf.to_upper() != leaf else leaf.to_lower()
+		if flipped != leaf and DirAccess.dir_exists_absolute(probe):
+			verdict = DirAccess.dir_exists_absolute(probe.get_base_dir().path_join(flipped))
+			break
+		var parent := probe.get_base_dir()
+		if parent == probe or parent == "":
+			break
+		probe = parent
+	_case_probe_cache[root] = verdict
+	return verdict
+
+
+## Whether `path` lives in the editor's project tree — the only tree where uids, sidecars, import records, engine validation, the automatic check hooks and dock/script-editor refreshes exist. Every project-tree-only service gates on this one predicate, so a new tool site inherits the whole set by asking once.
+static func _project_side(path: String) -> bool:
+	return _path_tree(path) == "res://"
+
+
+## Turn a requested path or bare file name into an existing canonical file path, or "" if nothing resolves. A uid:// request resolves through the engine's uid registry to wherever the file lives now — GDScript accepts uids everywhere paths go, so the tools must too. Every other spelling goes through _sanitize_path first: a fence-refused path resolves to nothing (_file_not_found runs the same fence, so the caller's error names the refusal, not a missing file), and a fence-dropped outside path resolves as itself or not at all — no project search can find it. A sanitized res:// path that exists is used as-is; one that doesn't — including a path whose directories were guessed wrong — falls back to an exact file-name search across the project, which only resolves when the name is UNIQUE, so a name shared by several files fails rather than silently picking one (see _file_not_found for the message that lists them). A user:// path only ever resolves at itself: nothing outside res:// is searched.
 static func _resolve_file_path(path: String) -> String:
 	if path.begins_with("uid://"):
 		var current := _uid_current_path(path)
-		return current if current != "" and FileAccess.file_exists(current) else ""
-	if path.begins_with("res://") or path.begins_with("user://"):
-		if FileAccess.file_exists(path):
-			return path
-		if path.begins_with("user://"):
+		# The registry normally records only res:// paths, but nothing enforces that across sessions — an entry left pointing outside (a fence-dropped move, an older plugin) must not become a hole a uid spelling walks through, so the recorded path faces the same fence every spelled path does — and resolves to its canonical form, so an in-project file recorded under an odd spelling still gets the project-tree services.
+		if current == "" or _outside_path_guard(current) != "" or not FileAccess.file_exists(current):
 			return ""
-	var direct := "res://" + path.trim_prefix("res://").trim_prefix("./").trim_prefix("/")
-	if FileAccess.file_exists(direct):
-		return direct
+		return String(_sanitize_path(current)["path"])
+	var canon := _sanitize_path(path)
+	if String(canon["error"]) != "":
+		return ""
+	var target := String(canon["path"])
+	if _is_os_absolute(target):
+		return target if FileAccess.file_exists(target) else ""
+	if FileAccess.file_exists(target):
+		return target
+	if target.begins_with("user://"):
+		return ""
 	var matches := _find_all_by_name("res://", path.get_file())
 	if matches.size() == 1:
 		return matches[0]
@@ -3233,20 +3401,26 @@ static func _resolution_note(requested: String, resolved: String) -> String:
 		return "Note: %s is %s per the project's uid registry; the res:// path works in any later call.\n\n" % [requested, resolved]
 	if resolved == "res://" + requested.trim_prefix("res://").trim_prefix("./").trim_prefix("/"):
 		return ""
+	# The requested spelling canonicalized to the resolved path — same location, different spelling (an absolute path, backslashes, or ".."s) — so a calm note carries the canonical form rather than the loud second-file warning below, which would be false.
+	if resolved == String(_sanitize_path(requested)["path"]):
+		return "Note: %s and %s are the same location — use the %s spelling in later calls.\n\n" % [requested, resolved, resolved]
 	var trimmed := requested.trim_prefix("./")
 	if not trimmed.begins_with("res://") and not trimmed.contains("/"):
 		return "Note: \"%s\" was resolved by file name to %s, the only file with that name in the project; use that full path in later calls.\n\n" % [requested, resolved]
 	return "IMPORTANT: no file exists at the path you requested (\"%s\") — it was resolved BY FILE NAME to %s, the only file with that name in the project. Use %s in every later call; writing to the path you requested would CREATE A SECOND FILE there, not change this one.\n\n" % [requested, resolved, resolved]
 
 
-## Turn a requested path or bare name into an existing res:// (or user://) directory path, or "" if it isn't a directory. Explicit res://user:// paths are checked as-is; anything else is tried relative to res://, then — for a bare name matching exactly one directory anywhere in the project — resolved by name the way bare file names are (wild-caught: "stress_test" dead-ended and the model told the user a directory that exists doesn't).
+## Turn a requested path or bare name into an existing canonical directory path, or "" if it isn't a directory. Sanitized exactly like _resolve_file_path's paths (fence, canonicalization, outside-as-itself); a bare name matching exactly one directory anywhere in the project resolves by name the way bare file names do (wild-caught: "stress_test" dead-ended and the model told the user a directory that exists doesn't).
 static func _resolve_dir_path(path: String) -> String:
-	if path.begins_with("res://") or path.begins_with("user://"):
-		return path if DirAccess.dir_exists_absolute(path) else ""
+	var canon := _sanitize_path(path)
+	if String(canon["error"]) != "":
+		return ""
+	var target := String(canon["path"])
+	if _is_os_absolute(target):
+		return target if DirAccess.dir_exists_absolute(target) else ""
+	if DirAccess.dir_exists_absolute(target):
+		return target
 	var name := path.trim_prefix("./").trim_prefix("/").trim_suffix("/")
-	var direct := "res://" + name
-	if DirAccess.dir_exists_absolute(direct):
-		return direct
 	if name != "" and not name.contains("/"):
 		var found := _find_dirs_by_name("res://", name)
 		if found.size() == 1:
@@ -3279,6 +3453,9 @@ static func _find_dirs_by_name(root: String, dir_name: String) -> PackedStringAr
 
 ## Refuse an explicit path into a hidden directory (any leading-dot component), "" when clear. The walk helpers already skip hidden entries, so a typed path is held to the same line rather than opening what no listing would ever surface — wild-measured, a model debugging a broken import listed res://.godot/imported three times at ~64 KB of engine cache names per call.
 static func _hidden_dir_guard(resolved: String) -> String:
+	# In-project policy only: an absolute OS path resolves solely with the outside fence dropped, where the model works wherever the user's account can — judging the user's own ancestors (a ~/.config, a checkout under a dotted directory) as "hidden bookkeeping" would be false there.
+	if not resolved.begins_with("res://") and not resolved.begins_with("user://"):
+		return ""
 	var rel := resolved.trim_prefix("res://").trim_prefix("user://")
 	for part in rel.split("/", false):
 		# "." and ".." are path navigation, not hidden names — wild-caught: a model spelling the project root "res://." was refused as hidden.
@@ -3323,16 +3500,28 @@ static func _find_all_by_name(dir_path: String, file_name: String, loose := fals
 
 
 ## Failure text for a path that didn't resolve. Several files sharing the requested name are listed so the model can retry with a full path instead of guessing directories; with no exact match, near-misses by case/underscores (e.g. a PascalCase class name for a snake_case script) are suggested, then files whose basename merely contains the request or vice versa (see _basename_near_miss); otherwise a plain not-found. `noun` lets a caller name what it was looking for ("scene file", "file or directory").
-static func _file_not_found(requested: String, noun := "file") -> String:
+static func _file_not_found(requested: String, noun := "file", dir_checked := false) -> String:
+	# The fence runs first so a refused outside path is reported as refused, never as missing — the resolvers returned "" for it on the same check.
+	var fence := _outside_path_guard(requested)
+	if fence != "":
+		return fence
 	if requested.begins_with("uid://"):
 		var recorded := _uid_current_path(requested)
 		if recorded != "":
+			# A fence-refused recorded path failed for containment, not absence — the stale-registration message would be a lie about a file that exists.
+			var uid_fence := _outside_path_guard(recorded)
+			if uid_fence != "":
+				return uid_fence
 			return "Error: %s is registered to %s, but that file no longer exists on disk — the uid registration is stale. Search the project for \"%s\" by name to find where it went, or tell the user it was deleted." % [requested, recorded, recorded.get_file()]
 		return "Error: %s is not any file's uid in this project — likely invented (UIDs are engine-assigned, never written by hand) or left over from a deleted file. Use the file's res:// path, or the real uid a tool result reported: write_file/create_resource confirmations carry it, and read_file of a .tscn/.tres header or a script's .uid sidecar shows it." % requested
-	# A DIRECTORY reaching a file tool is not a missing path — it exists, and the caller is one tool away from what it wanted. Wild-observed: read_file on res://resources/augments answered "no file found matching" and left the model to guess a filename, when the folder was right there to list. search_files can't reach this branch: it resolves a directory scope before ever composing a not-found.
-	var as_dir := _resolve_dir_path(requested)
+	# A DIRECTORY reaching a file tool is not a missing path — it exists, and the caller is one tool away from what it wanted. Wild-observed: read_file on res://resources/augments answered "no file found matching" and left the model to guess a filename, when the folder was right there to list. search_files can't reach this branch: it resolves a directory scope before ever composing a not-found, and _unresolved_file_error passes dir_checked having already asked.
+	var as_dir := "" if dir_checked else _resolve_dir_path(requested)
 	if as_dir != "":
 		return "Error: %s is a DIRECTORY, not a %s. Use list_directory ({\"path\": \"%s\"}) to see what is in it, then name one of those files here." % [as_dir, noun, as_dir]
+	# A fence-dropped OS-absolute request that resolved to nothing is missing OUTSIDE the project, where no name search runs — falling through to the in-project search below answered a wild missing-path read with "2 files in the project are named README.md", and the model concluded outside files were unreachable at all.
+	var canon := String(_sanitize_path(requested)["path"])
+	if _is_os_absolute(canon):
+		return "Error: nothing exists at %s. That is an OUTSIDE path, where a %s is only found spelled exactly — no name search runs there. Check the spelling, or list_directory ({\"path\": \"%s\"}) to see what that directory really holds." % [canon, noun, canon.get_base_dir()]
 	var file_name := requested.get_file()
 	var exact := _find_all_by_name("res://", file_name)
 	if exact.size() > 1:
@@ -4687,6 +4876,9 @@ static func _edit_tilemap(args: Dictionary) -> String:
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
 		return _file_not_found(requested, "scene file")
+	var guard := _mutation_target_guard(resolved, "edits")
+	if guard != "":
+		return guard
 	var ext := resolved.get_extension().to_lower()
 	if ext == "scn":
 		return "Error: %s is a binary .scn, whose text cannot be spliced — only .tscn scenes can be tile-edited." % resolved
@@ -4727,6 +4919,10 @@ static func _edit_tilemap(args: Dictionary) -> String:
 	if not _edit_file_write(resolved, String(spliced["text"])):
 		_mutation_busy = false
 		return "Error: %s could not be written — is it read-only or locked by another program? Nothing was changed." % resolved
+	if not _project_side(resolved):
+		# The same policy as edit_file's: a user:// or fence-dropped outside file isn't project code, so the validation run can't ground a verdict — and skipping it also keeps its baseline swap-writes off a file that isn't this project's.
+		_mutation_busy = false
+		return report + "\n\nIt lives outside the project's res:// tree, where the engine's load validation doesn't run, so the write is UNVALIDATED: verify the scene wherever it is used."
 	var res_check: Dictionary = await _edit_file_validate_resource(resolved, text, String(spliced["text"]))
 	_mutation_busy = false
 	_edit_file_refresh_editor(resolved)
@@ -4962,6 +5158,9 @@ static func _edit_animation(args: Dictionary) -> String:
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
 		return _file_not_found(requested)
+	var guard := _mutation_target_guard(resolved, "edits")
+	if guard != "":
+		return guard
 	var ext := resolved.get_extension().to_lower()
 	if ext in ["scn", "res"]:
 		return "Error: %s is a binary file, whose text cannot be spliced — only text .tscn/.tres files can be animation-edited here." % resolved
@@ -5211,6 +5410,10 @@ static func _animation_write(target_file: String, old_text: String, new_text: St
 	if not _edit_file_write(target_file, new_text):
 		_mutation_busy = false
 		return "Error: %s could not be written — is it read-only or locked by another program? Nothing was changed." % target_file
+	if not _project_side(target_file):
+		# The same policy as edit_file's: a user:// or fence-dropped outside file isn't project code, so the validation run can't ground a verdict — and skipping it also keeps its baseline swap-writes off a file that isn't this project's.
+		_mutation_busy = false
+		return report + "\n\nIt lives outside the project's res:// tree, where the engine's load validation doesn't run, so the write is UNVALIDATED: verify the file wherever it is used."
 	var res_check: Dictionary = await _edit_file_validate_resource(target_file, old_text, new_text)
 	_mutation_busy = false
 	_edit_file_refresh_editor(target_file)
@@ -5279,6 +5482,9 @@ static func _edit_resource(args: Dictionary) -> String:
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
 		return _file_not_found(requested)
+	var guard := _mutation_target_guard(resolved, "edits")
+	if guard != "":
+		return guard
 	var ext := resolved.get_extension().to_lower()
 	# Restricted to the general serialized-resource containers; a .tscn/.gd/.png is technically a Resource too, but editing it as loose properties is meaningless or destructive.
 	if ext != "tres" and ext != "res":
@@ -5541,11 +5747,14 @@ static func _edit_res_coerce_string(raw: String, t: int, expected: String, info:
 	var parsed: Variant = str_to_var(raw)
 	if parsed == null:
 		return _edit_res_err("expects %s — pass it as a Godot literal string, e.g. \"%s\"." % [expected, _edit_res_literal_example(t)])
-	# str_to_var will happily parse an unrelated literal (a bare number for a Vector2), so verify the parsed type before accepting, allowing only the int→float widening set() would do anyway.
-	if typeof(parsed) != t and not (t == TYPE_FLOAT and parsed is int):
+	# str_to_var will happily parse an unrelated literal (a bare number for a Vector2), so verify the parsed type before accepting, allowing only the int↔float conversions set() would do anyway — and a float only onto an int property when it IS a whole in-range one, so "2.9" and "1e19" keep their teaching refusals instead of silently saving garbage.
+	var whole_for_int := t == TYPE_INT and parsed is float and _whole_int_float(parsed)
+	if typeof(parsed) != t and not (t == TYPE_FLOAT and parsed is int) and not whole_for_int:
 		return _edit_res_err("expects %s, but \"%s\" parses as %s — try e.g. \"%s\"." % [expected, raw, type_string(typeof(parsed)), _edit_res_literal_example(t)])
 	if t == TYPE_FLOAT and parsed is int:
 		return _edit_res_ok(float(parsed))
+	if whole_for_int:
+		return _edit_res_ok(int(parsed))
 	return _edit_res_ok(parsed)
 
 
@@ -5553,6 +5762,10 @@ static func _edit_res_coerce_string(raw: String, t: int, expected: String, info:
 static func _edit_res_coerce_object(raw: String, info: Dictionary) -> Dictionary:
 	var resolved := _resolve_file_path(raw)
 	if resolved == "":
+		# A fence-refused path failed for containment, not absence — reporting "no file found" would send the model hunting for a file that was refused.
+		var fence := _outside_path_guard(raw)
+		if fence != "":
+			return _edit_res_err("could not be assigned: " + fence.trim_prefix("Error: "))
 		return _edit_res_err("expects a resource — no file found for \"%s\". Pass the res:// path of a resource file, null to clear the property, or an inline object to author an EMBEDDED sub-resource, e.g. {\"script\": \"res://augment.gd\", \"amount\": 1.0}." % raw)
 	var loaded: Variant = load(resolved)
 	if not (loaded is Resource):
@@ -5740,8 +5953,9 @@ static func _edit_file_locked(args: Dictionary, ledger: SessionLedger) -> Dictio
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
 		return _plain(_file_not_found(requested) + " edit_file only changes an existing file — use write_file to create a new one.")
-	if not resolved.begins_with("res://"):
-		return _plain("Error: %s is outside res://, so it can't be edited. Only files inside the project (res://) are editable." % resolved)
+	var guard := _mutation_target_guard(resolved, "edits")
+	if guard != "":
+		return _plain(guard)
 	if _looks_binary(resolved):
 		return _plain("Error: %s looks like a binary file, not text, so it wasn't edited." % resolved)
 	var unseen_guard := _edit_file_unseen_guard(resolved, ledger)
@@ -5780,7 +5994,8 @@ static func _edit_file_locked(args: Dictionary, ledger: SessionLedger) -> Dictio
 			updated = original.substr(0, edit_at) + new_text + original.substr(edit_at + old_text.length())
 	var ext := resolved.get_extension().to_lower()
 	var uid_note := ""
-	if ext == "tscn" or ext == "tres":
+	# The uid lints are a project-tree service like write_file's (see _project_side): elsewhere they would register uids no rescan ever verifies.
+	if _project_side(resolved) and (ext == "tscn" or ext == "tres"):
 		var uid_fix := _lint_written_uid(resolved, updated, ledger)
 		if not uid_fix.is_empty():
 			# The uid sits in the header; an edit site past it keeps anchoring the result excerpt after the correction shifts offsets.
@@ -5788,7 +6003,7 @@ static func _edit_file_locked(args: Dictionary, ledger: SessionLedger) -> Dictio
 				edit_at += String(uid_fix["text"]).length() - updated.length()
 			updated = String(uid_fix["text"])
 			uid_note = String(uid_fix["note"])
-	if ext == "gd" or ext == "tscn" or ext == "tres":
+	if _project_side(resolved) and (ext == "gd" or ext == "tscn" or ext == "tres"):
 		var ref_fix := _lint_new_uid_refs(resolved, original, updated, ledger)
 		if String(ref_fix["error"]) != "":
 			return _plain(String(ref_fix["error"]))
@@ -5806,7 +6021,11 @@ static func _edit_file_locked(args: Dictionary, ledger: SessionLedger) -> Dictio
 	var prop_note := ""
 	var ws_para := ("\n\n" + ws_note) if ws_note != "" else ""
 	var validated := true
-	if CHECKABLE_SOURCE_EXTENSIONS.has(ext):
+	if not _project_side(resolved) and (CHECKABLE_SOURCE_EXTENSIONS.has(ext) or ext in ["tscn", "tres"]):
+		# The validation subprocess checks project code; a user:// or fence-dropped outside file isn't project code, so the edit lands unvalidated and says so rather than risking a verdict the engine run can't ground.
+		validated = false
+		checked = " — but it lives outside the project's res:// tree, where the engine's parse/load validation doesn't run, so the edit is UNVALIDATED: verify the file wherever it is used"
+	elif CHECKABLE_SOURCE_EXTENSIONS.has(ext):
 		var check: Dictionary = await _edit_file_validate_gd(resolved, original, updated)
 		if bool(check["restore_failed"]):
 			# Validation swapped the pre-edit content onto disk and could not swap the edit back, so the "edited" claim below would be a lie about disk state — nothing outranks reporting that truthfully.
@@ -6523,6 +6742,9 @@ static func _check_script(args: Dictionary, ledger: SessionLedger) -> String:
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
 		return _file_not_found(requested)
+	if not _project_side(resolved):
+		# The same gate as the automatic hook's: the check runs with THIS project's autoloads and classes live, so a verdict about a non-project script would be ungroundable either way it fell.
+		return "Error: %s lives outside the project's res:// tree, and check_script validates against this project's autoloads and global classes — a verdict from here would be ungroundable. Check the file from the project that owns it." % resolved
 	var refusal := _uncheckable_source_refusal(resolved)
 	if refusal != "":
 		return refusal
@@ -6953,7 +7175,8 @@ static func _edit_file_excerpt(updated: String, new_text: String, at: int) -> St
 ## The cached-shader refresh runs ahead of that gate: the resource cache is not the editor's, so a stale Shader would outlive the write in any long-lived process.
 static func _edit_file_refresh_editor(res_path: String) -> void:
 	_refresh_cached_shader(res_path)
-	if not Engine.is_editor_hint():
+	# The filesystem dock and script editor only track res:// — a user:// or fence-dropped outside write has nothing there to refresh.
+	if not Engine.is_editor_hint() or not _project_side(res_path):
 		return
 	var fs := EditorInterface.get_resource_filesystem()
 	if fs == null:
@@ -7052,7 +7275,7 @@ static func _class_name_of_script(res_path: String) -> String:
 	return ""
 
 
-## Write a whole text file at `args.path` — new or replacing an existing one wholesale — creating missing directories; the creation counterpart to _edit_file, sharing its writer, .gd validation, and editor refresh. The file is KEPT even when its content fails the parse or load check: the errors come back with orders to fix them at once, and the write marks the path seen in the session's ledger since the model authored every byte. The destination is taken literally (a new file can't be resolved), except that a bare name matching an existing file resolves to it so a replacement needn't spell the full path. Two refusals guard against silent destruction before any disk write: a blind overwrite of an unread existing file, and a new file colliding with an existing basename (see _write_overwrite_seen_guard / _write_phantom_collision_guard) — both waived by `force`.
+## Write a whole text file at `args.path` — new or replacing an existing one wholesale — creating missing directories; the creation counterpart to _edit_file, sharing its writer, .gd validation, and editor refresh. The file is KEPT even when its content fails the parse or load check: the errors come back with orders to fix them at once, and the write marks the path seen in the session's ledger since the model authored every byte. The destination is sanitized then taken literally (a new file can't be resolved), except that a bare name matching an existing file resolves to it so a replacement needn't spell the full path; a user:// destination is honored as spelled — the user:// data directory sits inside the fence — while the uid, phantom-collision, validation and editor-refresh machinery applies only to res:// destinations, and a write landing elsewhere says it went unvalidated. Two refusals guard against silent destruction before any disk write: a blind overwrite of an unread existing file, and a new file colliding with an existing basename (see _write_overwrite_seen_guard / _write_phantom_collision_guard) — both waived by `force`.
 static func _write_file_locked(args: Dictionary, ledger: SessionLedger) -> String:
 	var requested := _arg_string(args, FILE_PATH_KEYS)
 	if requested == "":
@@ -7061,8 +7284,13 @@ static func _write_file_locked(args: Dictionary, ledger: SessionLedger) -> Strin
 	if raw_content == null:
 		return "Error: no content was provided. " + WRITE_FILE_USAGE
 	var text := String(raw_content)
-	var dest := requested
-	if not dest.begins_with("res://"):
+	var canon := _sanitize_path(requested)
+	if String(canon["error"]) != "":
+		return String(canon["error"])
+	var dest := String(canon["path"])
+	var norm_req := requested.replace("\\", "/")
+	if not norm_req.begins_with("res://") and not norm_req.begins_with("user://") and not _is_os_absolute(norm_req):
+		# A scheme-less request may name an existing file elsewhere in the project rather than a new location at the sanitized path.
 		var existing := _resolve_file_path(requested)
 		if existing == "" and requested.begins_with("uid://"):
 			return _file_not_found(requested)
@@ -7071,7 +7299,11 @@ static func _write_file_locked(args: Dictionary, ledger: SessionLedger) -> Strin
 			var same := _find_all_by_name("res://", requested.get_file())
 			if same.size() > 1:
 				return "Error: %d files in the project are named \"%s\": %s. Pass the full res:// path of the one you mean, or a full new path to create another." % [same.size(), requested.get_file(), ", ".join(same)]
-		dest = existing if existing != "" else "res://" + requested.trim_prefix("./").trim_prefix("/")
+		if existing != "":
+			dest = existing
+	var guard := _mutation_target_guard(dest, "overwrites or creates into, even with force")
+	if guard != "":
+		return guard
 	if dest.get_extension() == "":
 		return "Error: \"%s\" has no file extension — include one so the editor knows what the file is, e.g. \"res://notes/design.md\"." % dest
 	var exists := FileAccess.file_exists(dest)
@@ -7081,7 +7313,8 @@ static func _write_file_locked(args: Dictionary, ledger: SessionLedger) -> Strin
 		var overwrite_refusal := _write_overwrite_seen_guard(dest, ledger, force)
 		if overwrite_refusal != "":
 			return overwrite_refusal
-	else:
+	elif _project_side(dest):
+		# The phantom-duplicate trap is a project-tree hazard: a new user:// or fence-dropped outside file sharing a project basename is no shadow of it.
 		var collision_refusal := _write_phantom_collision_guard(dest, force)
 		if collision_refusal != "":
 			return collision_refusal
@@ -7092,12 +7325,13 @@ static func _write_file_locked(args: Dictionary, ledger: SessionLedger) -> Strin
 		if made != OK:
 			return "Error: couldn't create the directory %s (%s)." % [dir, error_string(made)]
 	var uid_note := ""
-	if dest.get_extension().to_lower() in ["tscn", "tres"]:
+	# All uid work — header lint, reference lint, sidecar minting — belongs to the project tree alone: the editor never scans user:// or outside locations, so a uid minted or registered for one would be litter beside the file and a registry entry no rescan ever verifies.
+	if _project_side(dest) and dest.get_extension().to_lower() in ["tscn", "tres"]:
 		var uid_fix := _lint_written_uid(dest, text, ledger)
 		if not uid_fix.is_empty():
 			text = String(uid_fix["text"])
 			uid_note = String(uid_fix["note"])
-	if dest.get_extension().to_lower() in ["gd", "tscn", "tres"]:
+	if _project_side(dest) and dest.get_extension().to_lower() in ["gd", "tscn", "tres"]:
 		var ref_fix := _lint_new_uid_refs(dest, original, text, ledger)
 		if String(ref_fix["error"]) != "":
 			return String(ref_fix["error"])
@@ -7106,16 +7340,9 @@ static func _write_file_locked(args: Dictionary, ledger: SessionLedger) -> Strin
 	if not _edit_file_write(dest, text):
 		return _file_write_error(dest, "the file")
 	var uid_mint_note := ""
-	if SIDECAR_UID_EXTENSIONS.has(dest.get_extension().to_lower()) and not FileAccess.file_exists(dest + ".uid"):
+	if _project_side(dest) and SIDECAR_UID_EXTENSIONS.has(dest.get_extension().to_lower()) and not FileAccess.file_exists(dest + ".uid"):
 		# The editor mints these uids on its async rescan and headless never does — until then a reference to the new file's uid reads as invented, so the sidecar is minted here and the id registered immediately.
-		var minted_uid := ResourceUID.create_id()
-		var sidecar := FileAccess.open(dest + ".uid", FileAccess.WRITE)
-		if sidecar != null:
-			sidecar.store_string(ResourceUID.id_to_text(minted_uid) + "\n")
-			sidecar.close()
-			# Registered only once the sidecar is on disk: an id without one dies with this process and the next rescan mints a different one, so handing it out would report a uid that stops resolving.
-			ResourceUID.add_id(minted_uid, dest)
-		else:
+		if bool(_mint_uid_sidecar(dest)["failed"]):
 			uid_mint_note = "\nNOTE: the .uid sidecar for %s could not be written, so it has no uid yet — reference it by its res:// path; the editor will mint a uid on its next filesystem scan." % dest
 	_mark_seen(dest, true, ledger) # the model authored this exact content, so follow-up edits are grounded
 	# The file now holds only model-authored text; content that itself carries elidable payloads disarms STICKY (false), so a later elided view of what the model wrote can't re-arm the gate its author already cleared.
@@ -7131,7 +7358,11 @@ static func _write_file_locked(args: Dictionary, ledger: SessionLedger) -> Strin
 	var checked := ""
 	var prop_note := ""
 	var validated := true
-	if CHECKABLE_SOURCE_EXTENSIONS.has(dest.get_extension().to_lower()):
+	if not _project_side(dest) and (CHECKABLE_SOURCE_EXTENSIONS.has(dest.get_extension().to_lower()) or dest.get_extension().to_lower() in ["tscn", "tres"]):
+		# The validation subprocess checks project code; a user:// or fence-dropped outside file isn't project code, so the write lands unvalidated and says so rather than risking a verdict about a file the engine run can't ground.
+		validated = false
+		checked = " — but it lives outside the project's res:// tree, where the engine's parse/load validation doesn't run, so the write is UNVALIDATED: verify the file wherever it is used"
+	elif CHECKABLE_SOURCE_EXTENSIONS.has(dest.get_extension().to_lower()):
 		# An overwrite diffs against the previous content like edit_file; a brand-new file owns every error the located check attributes to it, so the baseline runs are skipped.
 		var check: Dictionary
 		if exists:
@@ -7228,42 +7459,70 @@ static func _write_file_locked(args: Dictionary, ledger: SessionLedger) -> Strin
 	_edit_file_refresh_editor(dest)
 	var reload_note := _edit_file_reload_open_scene(dest) if exists else ""
 	var uid_clause := ""
-	if dest.get_extension().to_lower() in ["tscn", "tres"] or SIDECAR_UID_EXTENSIONS.has(dest.get_extension().to_lower()):
-		# Transcripts show models re-reading a fresh .tres solely to harvest its header uid for a preload — and one inventing a uid to control it; the confirmation now carries the engine truth, for the sidecar kinds too since their uid is minted above.
+	if _project_side(dest) and (dest.get_extension().to_lower() in ["tscn", "tres"] or SIDECAR_UID_EXTENSIONS.has(dest.get_extension().to_lower())):
+		# Transcripts show models re-reading a fresh .tres solely to harvest its header uid for a preload — and one inventing a uid to control it; the confirmation now carries the engine truth, for the sidecar kinds too since their uid is minted above. Project tree only: elsewhere no uid is engine-assigned, and _uid_text_for's header fallback would present whatever text was sent as one.
 		var uid_text := _uid_text_for(dest)
 		if uid_text != "":
 			uid_clause = "; its uid is %s" % uid_text
+	elif not _project_side(dest) and dest.get_extension().to_lower() in ["tscn", "tres"]:
+		var declared := _uid_text_for(dest)
+		if declared != "":
+			uid_clause = "; its header's uid=\"%s\" was left exactly as sent — outside the project's res:// tree no uid is engine-assigned or verified, so it is inert text there, not an identity to preload by" % declared
 	return "%s%s%s.%s%s%s%s%s%s" % [saved, checked, uid_clause, prop_note, lint_note, reload_note, uid_note, uid_mint_note, _import_write_note(dest)]
 
 
-## Refuse a delete target that escapes the project or is too critical to remove, returning "" when the path is safe to delete — the containment boundary the reference scan is not.
-## _resolve_file_path will still resolve a res://../ traversal or a user:// path (FileAccess resolves ".." and user:// against the real filesystem), so the escape is caught HERE by globalizing the resolved path and the project root and refusing anything that lands outside the root; a bare "force" can't override it because containment is checked before force is ever consulted.
-## project.godot, the .godot editor cache, and the .git store define the project, its import state, and its history — deleting into them corrupts state the trash can't cleanly restore, so they are refused even under force.
+## The shared unresolved-path diagnosis for the file-mutation tools, in the one safe order: the fence speaks first — dir_exists_absolute resolves ".." against the real filesystem, so answering "is a directory" for a fence-refused path would confirm an outside directory exists — then an existing directory in any fenced tree is named as one with the tool's own guidance, and everything else is _file_not_found's business.
+static func _unresolved_file_error(requested: String, dir_hint: String) -> String:
+	if _outside_path_guard(requested) == "":
+		var as_dir := _resolve_dir_path(requested)
+		if as_dir != "":
+			return "Error: %s is a directory — %s" % [as_dir, dir_hint]
+	# The directory question is settled either way, so _file_not_found needn't walk the tree to re-ask it.
+	return _file_not_found(requested, "file", true)
+
+
+## The whole mutation-guard set applied to a deletion target (a bare "force" can't override any of it — the fence is checked before force is ever consulted).
 static func _delete_target_guard(resolved: String) -> String:
+	return _mutation_target_guard(resolved, "deletes, even with force")
+
+
+## Every containment refusal a mutating tool owes one target path — the outside fence, the critical stores, then the hidden-directory line — in that order, so a critical store keeps its own message ahead of the generic hidden-directory one. "" when `candidate` is clear; `action` names what was refused so no message calls a copy a delete. THE seam for a path a tool is about to change: every mutating tool consults it (directly or through _delete_target_guard/_path_boundary_guard), so a new one inherits the whole set by asking once instead of hand-wiring the guards in its own combination.
+static func _mutation_target_guard(candidate: String, action: String) -> String:
+	var fence := _outside_path_guard(candidate)
+	if fence != "":
+		return fence
+	var critical := _critical_store_guard(candidate, action)
+	if critical != "":
+		return critical
+	return _hidden_dir_guard(candidate)
+
+
+## The one critical-store refusal every mutating tool consults, "" when `candidate` is clear; `action` names what was refused so no message calls a copy a delete. A single seam so a new mutating tool inherits the whole protection by asking once.
+static func _critical_store_guard(candidate: String, action: String) -> String:
+	if not _in_critical_store(candidate):
+		return ""
+	return "Error: %s is (or sits inside) a critical store — the project definition (project.godot), the editor cache (.godot), version-control state (.git), or the plugin's own session records (user://gdllm) — which no tool %s: altering or losing it would destroy state nothing can cleanly restore. Leave it alone and work elsewhere." % [candidate, action]
+
+
+## Mint a fresh uid, write it as `dest`'s .uid sidecar, and register it — registered only once the sidecar is on disk: an id without one dies with this process and the next rescan mints a different one, so handing it out would report a uid that stops resolving. res:// only by contract (callers gate on _project_side): elsewhere the sidecar is litter beside the file and the registry entry one no rescan ever verifies. Returns {"uid": text, "failed": bool}.
+static func _mint_uid_sidecar(dest: String) -> Dictionary:
+	var minted := ResourceUID.create_id()
+	var sidecar := FileAccess.open(dest + ".uid", FileAccess.WRITE)
+	if sidecar == null:
+		return {"uid": "", "failed": true}
+	sidecar.store_string(ResourceUID.id_to_text(minted) + "\n")
+	sidecar.close()
+	ResourceUID.add_id(minted, dest)
+	return {"uid": ResourceUID.id_to_text(minted), "failed": false}
+
+
+## Whether `candidate` is (or sits inside) one of the critical stores. Judged on the globalized path through _path_is_or_under, so a res://../ route or a case-variant spelling of a store on a case-folding volume is caught the same as the direct one. .git is matched as an exact path too, not only as a directory prefix: in a git worktree, .git is a FILE pointing at the real repository, and trashing it severs the checkout. The plugin's own persistence under user://gdllm — session transcripts and caches, the record of everything the model has done — counts as critical the same way: it is never the model's to alter, remove or displace.
+static func _in_critical_store(candidate: String) -> bool:
 	var root := ProjectSettings.globalize_path("res://").simplify_path().trim_suffix("/")
-	var abs := ProjectSettings.globalize_path(resolved).simplify_path()
-	if abs != root and not abs.begins_with(root + "/"):
-		return "Error: %s resolves to %s, OUTSIDE the project directory — delete_file only removes files under res://. A path with \"..\" segments or a user:// path is refused so a deletion can never escape the project." % [resolved, abs]
-	var rel := abs.substr(root.length() + 1)
-	if rel == "project.godot" or rel.begins_with(".godot/") or rel.begins_with(".git/"):
-		return "Error: %s is a critical project file (the project definition, the editor cache, or version-control history) and is never deleted, even with force — removing it would corrupt state the system trash can't cleanly restore. Leave it in place." % resolved
-	if _symlink_in_path(root, rel):
-		return "Error: %s reaches its target through a symbolic link in its path — delete_file will not follow a link, since a symlinked directory points its real file OUTSIDE the project even while the path above reads as contained. Delete the real file by its actual path instead." % resolved
-	return ""
-
-
-## Whether any component of `rel` (a path relative to the project `root`) is a symbolic link, the containment escape the string check above can't see.
-## The globalized res:// path is compared to the root as text, but a symlinked directory anywhere in the path points its real inode elsewhere, so a delete THROUGH it still lands outside the project; Godot exposes no realpath, so this walks the path from the root outward and reports a link in ANY component.
-## is_link flags only the component that is itself the link — not a file reached through it — so the whole chain is checked, not just the leaf; it fails closed, refusing a legitimate in-project symlink too rather than guessing where it leads.
-## DirAccess.is_link reads the OS's link/reparse-point attribute, so this covers POSIX symlinks and, on Windows, symlinks and junctions alike.
-static func _symlink_in_path(root: String, rel: String) -> bool:
-	var da := DirAccess.open(root)
-	if da == null:
-		return false
-	var walk := root
-	for part in rel.split("/", false):
-		walk = walk.path_join(part)
-		if da.is_link(walk):
+	var abs := ProjectSettings.globalize_path(candidate).simplify_path()
+	var store := ProjectSettings.globalize_path(GDLLMSessionStore.DIR).simplify_path().trim_suffix("/")
+	for critical: String in [root + "/project.godot", root + "/.git", root + "/.godot", store]:
+		if _path_is_or_under(abs, critical):
 			return true
 	return false
 
@@ -7278,9 +7537,7 @@ static func _delete_file(args: Dictionary, ledger: SessionLedger) -> String:
 		return "Error: no path was provided. " + DELETE_FILE_USAGE
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
-		if DirAccess.dir_exists_absolute(requested) and requested.begins_with("res://"):
-			return "Error: %s is a directory — delete_file takes exactly one file. Delete its files individually so each removal is deliberate." % requested
-		return _file_not_found(requested)
+		return _unresolved_file_error(requested, "delete_file takes exactly one file. Delete its files individually so each removal is deliberate.")
 	var containment := _delete_target_guard(resolved)
 	if containment != "":
 		return containment
@@ -7320,10 +7577,10 @@ static func _delete_file_locked(resolved: String, ledger: SessionLedger, mention
 	ledger.previous_contents.erase(resolved)
 	ledger.auto_check_reports.erase(resolved)
 	ledger.broken_files.erase(resolved)
-	if Engine.is_editor_hint():
+	if Engine.is_editor_hint() and _project_side(resolved):
 		var fs := EditorInterface.get_resource_filesystem()
 		if fs != null:
-			# update_file also handles a path that vanished; scan_sources drops a deleted class_name from the global class list.
+			# update_file also handles a path that vanished; scan_sources drops a deleted class_name from the global class list. A user:// or fence-dropped outside path was never in the editor's view, so there is nothing to update.
 			fs.update_file(resolved)
 			fs.scan_sources()
 	var sidecar_note := "" if sidecars.is_empty() else " along with its %s sidecar file(s)" % ", ".join(sidecars)
@@ -7336,19 +7593,9 @@ static func _delete_file_locked(resolved: String, ledger: SessionLedger, mention
 	return out
 
 
-## Refuse a two-endpoint file operation's endpoint when it escapes the project or touches its critical stores, "" when safe — _delete_target_guard's containment fence applied to BOTH endpoints, so neither a move nor a copy can carry a file across the project boundary in either direction. `verb` names the operation in the refusals, since a message that says "move" during a copy is a lie the model repeats to the user.
-## The destination may not exist yet; every check here is string- or component-based (a nonexistent component is simply not a link), so it guards a path about to be created as well as one on disk.
-static func _path_boundary_guard(candidate: String, role: String, verb := "move") -> String:
-	var root := ProjectSettings.globalize_path("res://").simplify_path().trim_suffix("/")
-	var abs := ProjectSettings.globalize_path(candidate).simplify_path()
-	if abs == root or not abs.begins_with(root + "/"):
-		return "Error: the %s %s resolves to %s, OUTSIDE the project directory — a %s only ever runs between two res:// locations inside the project, never in from or out to anywhere else. A path with \"..\" segments or a user:// path is refused so a %s can never cross the project boundary." % [role, candidate, abs, verb, verb]
-	var rel := abs.substr(root.length() + 1)
-	if rel == "project.godot" or rel.begins_with(".godot/") or rel.begins_with(".git/"):
-		return "Error: the %s %s is (or sits inside) a critical project store — the project definition, the editor cache, or version-control history — which no %s ever reads from or writes into; doing so would corrupt state no %s can cleanly restore. Choose a different %s." % [role, candidate, verb, verb, role]
-	if _symlink_in_path(root, rel):
-		return "Error: the %s %s reaches its target through a symbolic link in its path — a %s will not follow a link, since a symlinked directory points its real files OUTSIDE the project even while the path above reads as contained. Use the real path instead." % [role, candidate, verb]
-	return ""
+## The whole mutation-guard set applied to a two-endpoint file operation's endpoint, "" when safe — called on BOTH endpoints. `verb` names the operation in the refusals, since a message that says "move" during a copy is a lie the model repeats to the user; the destination may not exist yet, and every check here is purely lexical, so it guards a path about to be created as well as one on disk.
+static func _path_boundary_guard(candidate: String, verb := "move") -> String:
+	return _mutation_target_guard(candidate, ("moves" if verb == "move" else "copies") + ", as source or destination")
 
 
 ## How one resource file's dependency records relate to `target` moving: "path" when at least one reference leans on the literal path alone (it breaks), "uid" when every reference carries the file's resolvable uid (the loader follows the uid, and only the recorded path fallback goes stale), "-" for no reference.
@@ -7410,10 +7657,8 @@ static func _move_file(args: Dictionary, ledger: SessionLedger, rename_only: boo
 		return "Error: no path was provided. " + usage
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
-		if DirAccess.dir_exists_absolute(requested) and requested.begins_with("res://"):
-			return "Error: %s is a directory — %s takes exactly one file, so move its files individually." % [requested, tool_name]
-		return _file_not_found(requested)
-	var guard := _path_boundary_guard(resolved, "source file")
+		return _unresolved_file_error(requested, "%s takes exactly one file, so move its files individually." % tool_name)
+	var guard := _path_boundary_guard(resolved)
 	if guard != "":
 		return guard
 	var dest_raw := _arg_string(args, dest_keys)
@@ -7421,36 +7666,51 @@ static func _move_file(args: Dictionary, ledger: SessionLedger, rename_only: boo
 		return "Error: no %s was provided. %s" % ["new name" if rename_only else "destination", usage]
 	var dest := ""
 	if rename_only:
-		var new_name := dest_raw.trim_prefix("res://").trim_prefix("./")
+		# Backslashes normalize first: Windows reads them as separators, so "..\\evil.txt" would otherwise slip past the slash check below and relocate the file.
+		var new_name := dest_raw.replace("\\", "/").trim_prefix("./")
 		if new_name.contains("/"):
-			# A full path is tolerated when it names the file's own directory; anything else is a move, and saying so beats guessing.
-			if ("res://" + new_name.trim_prefix("/")).get_base_dir() != resolved.get_base_dir():
+			# A full path is tolerated when it names the file's own directory — judged on its sanitized form, so user:// and fence-dropped absolute spellings get the same tolerance as res:// — anything else (a fence-refused spelling included) is a move, and saying so beats guessing.
+			var spelled := new_name if new_name.begins_with("res://") or new_name.begins_with("user://") or _is_os_absolute(new_name) else "res://" + new_name.trim_prefix("/")
+			var canon := _sanitize_path(spelled)
+			var canon_path := String(canon["path"])
+			if String(canon["error"]) != "" or not _paths_equal(canon_path.get_base_dir(), resolved.get_base_dir()):
 				return "Error: \"%s\" points outside %s's own directory — rename_file only changes the file's NAME in place. Use move_file to change its location." % [dest_raw, resolved]
-			new_name = new_name.get_file()
+			new_name = canon_path.get_file()
 		if new_name == "":
 			return "Error: no new name was provided. " + RENAME_FILE_USAGE
 		dest = resolved.get_base_dir().path_join(new_name)
 	else:
-		dest = dest_raw
-		if dest.begins_with("user://") or dest.begins_with("uid://"):
-			return "Error: the destination must be a res:// location inside the project — a %s destination is refused so a move can never leave it (and a uid names an existing file, not a new place)." % dest.substr(0, 6)
-		if not dest.begins_with("res://"):
-			dest = "res://" + dest.trim_prefix("./").trim_prefix("/")
-		if dest.ends_with("/") or DirAccess.dir_exists_absolute(dest):
-			dest = dest.trim_suffix("/").path_join(resolved.get_file())
+		if dest_raw.begins_with("uid://"):
+			return "Error: a uid names an existing file, not a new place — pass the destination as a path."
+		# Backslashes normalize before the directory-intent check, so "res://levels\\" carries the same new-directory meaning as the slashed spelling (rename_file's branch normalizes the same way).
+		var dest_norm := dest_raw.replace("\\", "/")
+		var into_dir := dest_norm.ends_with("/")
+		var canon := _sanitize_path(dest_norm)
+		if String(canon["error"]) != "":
+			return String(canon["error"])
+		dest = String(canon["path"])
+		if into_dir or DirAccess.dir_exists_absolute(dest):
+			dest = dest.path_join(resolved.get_file())
 	dest = dest.simplify_path()
 	if dest == resolved:
 		return "Error: %s already has that %s — there is nothing to do." % [resolved, "name" if rename_only else "location"]
-	if dest.get_extension() == "":
+	# Judged against the SOURCE's own name: an extensionless destination for an extensioned file almost always spells unstated directory intent, but an extensionless file (LICENSE, Makefile) can only ever move to extensionless destinations.
+	if dest.get_extension() == "" and resolved.get_extension() != "":
 		return "Error: \"%s\" has no file extension — pass the full destination file name (or, with move_file, end a directory destination with \"/\")." % dest
-	guard = _path_boundary_guard(dest, "destination")
+	guard = _path_boundary_guard(dest)
 	if guard != "":
 		return guard
-	if FileAccess.file_exists(dest) or DirAccess.dir_exists_absolute(dest):
+	guard = _cross_tree_guard(resolved, dest, "move")
+	if guard != "":
+		return guard
+	# A destination apart from the source in case alone names the SAME entry on a case-folding volume — a legitimate case-only rename, not an overwrite, so the exists refusals (which would only be seeing the source itself) don't apply.
+	var case_only := _paths_equal(dest, resolved)
+	if not case_only and (FileAccess.file_exists(dest) or DirAccess.dir_exists_absolute(dest)):
 		return "Error: something already exists at %s — a move never overwrites. Choose a different destination, or delete_file the existing file first if replacing it is truly intended." % dest
-	for sidecar_ext: String in [".uid", ".import"]:
-		if FileAccess.file_exists(resolved + sidecar_ext) and FileAccess.file_exists(dest + sidecar_ext):
-			return "Error: %s already exists — the file's %s sidecar moves with it, and a move never overwrites. Choose a different destination." % [dest + sidecar_ext, sidecar_ext]
+	if not case_only:
+		for sidecar_ext: String in [".uid", ".import"]:
+			if FileAccess.file_exists(resolved + sidecar_ext) and FileAccess.file_exists(dest + sidecar_ext):
+				return "Error: %s already exists — the file's %s sidecar moves with it, and a move never overwrites. Choose a different destination." % [dest + sidecar_ext, sidecar_ext]
 	if Engine.is_editor_hint() and resolved.get_extension().to_lower() in ["tscn", "scn"] and resolved in EditorInterface.get_open_scenes():
 		return "Error: %s is open in the editor — a save of that open tab would recreate the file at its old path, splitting the scene in two. Ask the user to close it (or move it themselves in the FileSystem dock, which retargets the tab), then retry." % resolved
 	var uid_text := _uid_text_for(resolved)
@@ -7491,14 +7751,20 @@ static func _move_file_locked(resolved: String, dest: String, ledger: SessionLed
 				import_file.store_string(import_text.replace("\"" + resolved + "\"", "\"" + dest + "\""))
 				import_file.close()
 				notes.append("Its .import metadata was retargeted to the new path; the editor re-imports the asset on its next filesystem scan.")
+	var uid_removed := false
 	if uid_text != "":
 		var id := ResourceUID.text_to_id(uid_text)
 		if id != ResourceUID.INVALID_ID:
-			# Retargeted immediately: the next rescan would heal it anyway, but until then every uid:// reference in this process would resolve to the old path.
-			if ResourceUID.has_id(id):
-				ResourceUID.set_id(id, dest)
-			else:
-				ResourceUID.add_id(id, dest)
+			if _project_side(dest):
+				# Retargeted immediately: the next rescan would heal it anyway, but until then every uid:// reference in this process would resolve to the old path.
+				if ResourceUID.has_id(id):
+					ResourceUID.set_id(id, dest)
+				else:
+					ResourceUID.add_id(id, dest)
+			elif ResourceUID.has_id(id):
+				# The file left the project tree (only possible with the fence dropped); a registry entry pointing outside would never be verified by any rescan, so it goes rather than lingering stale.
+				ResourceUID.remove_id(id)
+				uid_removed = true
 	for claims: Dictionary in [ledger.seen_files, ledger.elided_files, ledger.previous_contents, ledger.auto_check_reports, ledger.broken_files]:
 		if claims.has(resolved):
 			claims[dest] = claims[resolved]
@@ -7506,8 +7772,11 @@ static func _move_file_locked(resolved: String, dest: String, ledger: SessionLed
 	if Engine.is_editor_hint():
 		var fs := EditorInterface.get_resource_filesystem()
 		if fs != null:
-			fs.update_file(resolved)
-			fs.update_file(dest)
+			# Only res:// endpoints exist to the editor's filesystem view; a user:// or outside endpoint has nothing there to update.
+			if _project_side(resolved):
+				fs.update_file(resolved)
+			if _project_side(dest):
+				fs.update_file(dest)
 			fs.scan_sources()
 		var script_editor := EditorInterface.get_script_editor()
 		if script_editor != null:
@@ -7518,8 +7787,10 @@ static func _move_file_locked(resolved: String, dest: String, ledger: SessionLed
 	var out := "%s %s to %s" % [verb, resolved, dest]
 	if not sidecars.is_empty():
 		out += ", its %s sidecar file(s) moving with it" % ", ".join(sidecars)
-	if uid_text != "":
+	if uid_text != "" and not uid_removed:
 		out += "; its uid %s is unchanged, so uid:// references keep resolving" % uid_text
+	elif uid_removed:
+		out += "; its uid %s was UNREGISTERED — the file is outside the project now, so uid:// references to it no longer resolve" % uid_text
 	out += "."
 	if dest.get_extension().to_lower() != resolved.get_extension().to_lower():
 		notes.append("WARNING: the file's extension changed from .%s to .%s — the editor decides what a file IS by its extension, so it is now treated as a different kind of file." % [resolved.get_extension(), dest.get_extension()])
@@ -7542,33 +7813,34 @@ static func _copy_file(args: Dictionary, ledger: SessionLedger) -> String:
 		return "Error: no path was provided. " + COPY_FILE_USAGE
 	var resolved := _resolve_file_path(requested)
 	if resolved == "":
-		if DirAccess.dir_exists_absolute(requested) and requested.begins_with("res://"):
-			return "Error: %s is a directory — copy_file duplicates exactly one file. List it with list_directory and copy its files one at a time, naming each destination, so every new file is deliberate." % requested
-		return _file_not_found(requested)
-	var guard := _path_boundary_guard(resolved, "source file", "copy")
-	if guard != "":
-		return guard
-	guard = _hidden_dir_guard(resolved)
+		return _unresolved_file_error(requested, "copy_file duplicates exactly one file. List it with list_directory and copy its files one at a time, naming each destination, so every new file is deliberate.")
+	var guard := _path_boundary_guard(resolved, "copy")
 	if guard != "":
 		return guard
 	var dest := _arg_string(args, COPY_DEST_KEYS)
 	if dest == "":
 		return "Error: no destination was provided. " + COPY_FILE_USAGE
-	if dest.begins_with("user://") or dest.begins_with("uid://"):
-		return "Error: the destination must be a res:// location inside the project — a %s destination is refused so a copy can never leave it (and a uid names an existing file, not a new place)." % ("user://" if dest.begins_with("user://") else "uid://")
-	if not dest.begins_with("res://"):
-		dest = "res://" + dest.trim_prefix("./").trim_prefix("/")
-	if dest.ends_with("/") or DirAccess.dir_exists_absolute(dest):
-		dest = dest.trim_suffix("/").path_join(resolved.get_file())
+	if dest.begins_with("uid://"):
+		return "Error: a uid names an existing file, not a new place — pass the destination as a path."
+	# Backslashes normalize before the directory-intent check, as in _move_file.
+	dest = dest.replace("\\", "/")
+	var into_dir := dest.ends_with("/")
+	var canon := _sanitize_path(dest)
+	if String(canon["error"]) != "":
+		return String(canon["error"])
+	dest = String(canon["path"])
+	if into_dir or DirAccess.dir_exists_absolute(dest):
+		dest = dest.path_join(resolved.get_file())
 	dest = dest.simplify_path()
 	if dest == resolved:
 		return "Error: %s is its own destination — a copy needs a different path or file name (e.g. \"%s\"), since a file can't be duplicated onto itself. Nothing was written." % [resolved, resolved.get_basename() + "_copy." + resolved.get_extension()]
-	if dest.get_extension() == "":
+	# The same source-relative judgment as _move_file's: an extensionless source legitimately copies to extensionless destinations.
+	if dest.get_extension() == "" and resolved.get_extension() != "":
 		return "Error: \"%s\" has no file extension — pass the destination's full file name, or end a directory destination with \"/\" to keep the source's name." % dest
-	guard = _path_boundary_guard(dest, "destination", "copy")
+	guard = _path_boundary_guard(dest, "copy")
 	if guard != "":
 		return guard
-	guard = _hidden_dir_guard(dest)
+	guard = _cross_tree_guard(resolved, dest, "copy")
 	if guard != "":
 		return guard
 	if FileAccess.file_exists(dest) or DirAccess.dir_exists_absolute(dest):
@@ -7596,7 +7868,8 @@ static func _copy_file_locked(resolved: String, dest: String, ledger: SessionLed
 	var notes := PackedStringArray()
 	var uid_clause := ""
 	var header_rewritten := false
-	if dest.get_extension().to_lower() in ["tscn", "tres"] and not _looks_binary(dest):
+	# The identity work below — header uid rewrite, sidecar minting, .import retarget — belongs to res:// copies alone: uids and import records only exist to the editor's project scan, so a user:// or fence-dropped outside copy keeps the plain bytes and nothing else.
+	if _project_side(dest) and dest.get_extension().to_lower() in ["tscn", "tres"] and not _looks_binary(dest):
 		var text := FileAccess.get_file_as_string(dest)
 		var found := RegEx.create_from_string("^\\[gd_(?:scene|resource)\\b[^\\]]*?\\buid=\"(uid://[^\"]*)\"").search(text)
 		if found != null:
@@ -7612,18 +7885,19 @@ static func _copy_file_locked(resolved: String, dest: String, ledger: SessionLed
 			uid_clause += " Its header uid is the freshly minted %s — the source keeps %s, and that one line is the copy's only difference from it." % [fresh_text, found.get_string(1)]
 			if ledger.seen_files.get(resolved) == true:
 				uid_clause += " A follow-up edit_file on the copy needs its own read first: the rewritten line means no read of the source matches the copy's exact text."
-	if SIDECAR_UID_EXTENSIONS.has(dest.get_extension().to_lower()):
-		# Minted rather than copied, and registered the moment the sidecar is on disk — the same reason write_file mints for a new file: until the editor's async rescan reaches it, a reference to the copy's uid would otherwise read as invented.
-		var minted := ResourceUID.create_id()
-		var sidecar := FileAccess.open(dest + ".uid", FileAccess.WRITE)
-		if sidecar != null:
-			sidecar.store_string(ResourceUID.id_to_text(minted) + "\n")
-			sidecar.close()
-			ResourceUID.add_id(minted, dest)
-			uid_clause += " Its .uid sidecar was minted fresh as %s; the source's was NOT copied." % ResourceUID.id_to_text(minted)
-		else:
+	elif not _project_side(dest) and dest.get_extension().to_lower() in ["tscn", "tres"] and not _looks_binary(dest):
+		# The byte-for-byte copy is the point outside res:// — but the bytes include the source's uid header, and silence about that reads as the copy owning it.
+		var kept := RegEx.create_from_string("^\\[gd_(?:scene|resource)\\b[^\\]]*?\\buid=\"(uid://[^\"]*)\"").search(FileAccess.get_file_as_string(dest))
+		if kept != null:
+			uid_clause += " Its header still carries the SOURCE's uid text %s, byte for byte — outside the project's res:// tree no uid is engine-assigned, so the line is inert there and was left alone; it is not the copy's identity, and a copy back into res:// gets it rewritten then." % kept.get_string(1)
+	if _project_side(dest) and SIDECAR_UID_EXTENSIONS.has(dest.get_extension().to_lower()):
+		# Minted rather than copied — the same reason write_file mints for a new file: two files must never share a uid, and until the editor's async rescan reaches it a reference to the copy's uid would otherwise read as invented.
+		var mint := _mint_uid_sidecar(dest)
+		if bool(mint["failed"]):
 			notes.append("NOTE: the .uid sidecar for %s could not be written, so the copy has no uid yet — reference it by its res:// path; the editor mints one on its next filesystem scan." % dest)
-	if FileAccess.file_exists(resolved + ".import"):
+		else:
+			uid_clause += " Its .uid sidecar was minted fresh as %s; the source's was NOT copied." % String(mint["uid"])
+	if _project_side(dest) and FileAccess.file_exists(resolved + ".import"):
 		var import_text := FileAccess.get_file_as_string(resolved + ".import").replace("\"" + resolved + "\"", "\"" + dest + "\"")
 		var fresh_id := ResourceUID.INVALID_ID
 		var fresh_text := ""
@@ -7688,8 +7962,13 @@ static func _create_res_tool(args: Dictionary) -> String:
 	var dest := _arg_string(args, CREATE_PATH_KEYS)
 	if dest == "":
 		return "Error: no destination path was given. " + CREATE_RESOURCE_USAGE
-	if not dest.begins_with("res://"):
-		dest = "res://" + dest.trim_prefix("./").trim_prefix("/")
+	var canon := _sanitize_path(dest)
+	if String(canon["error"]) != "":
+		return String(canon["error"])
+	dest = String(canon["path"])
+	var guard := _mutation_target_guard(dest, "writes into")
+	if guard != "":
+		return guard
 	var ext := dest.get_extension().to_lower()
 	if ext != "tres" and ext != "res":
 		return "Error: the destination \"%s\" must end in .tres or .res, e.g. \"res://materials/red.tres\"." % dest
@@ -7710,8 +7989,8 @@ static func _create_res_tool(args: Dictionary) -> String:
 	var saved := ResourceSaver.save(resource, dest)
 	if saved != OK:
 		return "Error: the resource could not be saved to %s — %s" % [dest, _resource_save_cause(dest, saved)]
-	# Register the new file with the editor so it appears in the FileSystem dock; guarded for a headless run with no editor.
-	if Engine.is_editor_hint():
+	# Register the new file with the editor so it appears in the FileSystem dock; guarded for a headless run with no editor, and skipped for a user:// or fence-dropped outside destination the dock never shows.
+	if Engine.is_editor_hint() and _project_side(dest):
 		var fs := EditorInterface.get_resource_filesystem()
 		if fs != null:
 			fs.update_file(dest)
@@ -9173,6 +9452,12 @@ static func _set_import_setting(args: Dictionary) -> String:
 	if resolved == "":
 		return _file_not_found(requested)
 	var asset := GDLLMImport.asset_path_for(resolved)
+	var guard := _mutation_target_guard(asset, "changes import settings for")
+	if guard != "":
+		return guard
+	if not _project_side(asset):
+		# Import settings and re-imports are project-tree services: THIS editor's EditorFileSystem only indexes res://, so driving it at a user:// or fence-dropped outside asset mutates nothing while reporting success, and a foreign project's .import sidecar is that project's to manage.
+		return "Error: %s is not a file of this project's res:// tree — import settings and re-imports are the editor's own project-tree services, so this editor cannot re-import it and its .import sidecar is not this project's to change. Work with assets inside the project instead." % asset
 	var refusal := GDLLMImport.importable_refusal(asset)
 	if refusal != "":
 		return refusal

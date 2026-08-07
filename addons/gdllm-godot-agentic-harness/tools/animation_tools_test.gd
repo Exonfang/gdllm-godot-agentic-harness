@@ -302,6 +302,13 @@ func _test_converters() -> void:
 	_check(GDLLMAnimation._as_vector2("Vector2(1, 2)", "v").get("value") == Vector2(1, 2), "vector literal accepted where Vector2 is required")
 	var track_err: Dictionary = GDLLMAnimation.match_track(_walk_anim(), "zzz")
 	_check(String(track_err.get("error", "")).contains("0: value \"Pic:position\""), "a track miss lists the real tracks")
+	_check(int(GDLLMAnimation.match_track(_walk_anim(), 0.0).get("track", -1)) == 0, "a raw whole-float track index reads as its integer self")
+	_check(String(GDLLMAnimation.match_track(_walk_anim(), "0.0").get("error", "")).contains("0: value"), "a float-spelled STRING stays a track-path query — a track path could carry that name — and its miss lists the real tracks")
+	_check(String(GDLLMAnimation.match_track(_walk_anim(), "0.9").get("error", "")).contains("0: value"), "a fractional track spelling keeps the corrective list instead of truncating")
+	_check(int(GDLLMAnimation._as_int("3.0", "n").get("value", -1)) == 3, "_as_int takes a numeric string in either spelling")
+	_check(GDLLMAnimation._as_vector2(["1.5", 2], "v").get("value") == Vector2(1.5, 2), "a stringified number inside a vector array still counts")
+	_check(String(GDLLMAnimation._as_stream("res://../evil.ogg").get("error", "")).contains("OUTSIDE"), "a stream path faces the containment fence like every other tool path")
+	_check(GDLLMAnimation.parse_window(["0.0", "0.5"]).get("window", Vector2.ZERO) == Vector2(0.0, 0.5), "a window takes its numbers in any spelling, like every other converter")
 
 
 func _test_add_remove_move_track() -> void:
@@ -439,7 +446,7 @@ func _test_audio_ext_remap() -> void:
 	var offset := await _run("edit_animation", {"scene": EDIT_SCENE, "animation": "jingle", "set_key": {"track": 0, "index": 0, "start_offset": 0.05}}, true)
 	_check(offset.contains("start_offset → 0.05"), "an audio offset changes")
 	var missing := await _run("edit_animation", {"scene": EDIT_SCENE, "animation": "jingle", "insert_key": {"track": 0, "time": 0.6, "stream": "res://nope.wav"}}, true)
-	_check(missing.contains("could not be loaded"), "a missing stream path states the load failure")
+	_check(missing.contains("no audio stream file found"), "a missing stream path resolves to a not-found naming what was sought")
 	var not_stream := await _run("edit_animation", {"scene": EDIT_SCENE, "animation": "jingle", "insert_key": {"track": 0, "time": 0.6, "stream": FIXTURE_FRAMES}}, true)
 	_check(not_stream.contains("not an AudioStream"), "a non-stream resource states its real class")
 

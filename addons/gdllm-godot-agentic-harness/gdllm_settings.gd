@@ -37,6 +37,9 @@ const NEW_SESSION_EDITS := "gdllm/agents/new_sessions_start_with_edits"
 ## The "Delete files" counterpart to NEW_SESSION_EDITS: whether a newly created session starts with the delete toggle on. Off by default for the same reason, only more so — deletion stays a per-conversation opt-in.
 const NEW_SESSION_DELETE := "gdllm/agents/new_sessions_start_with_delete_files"
 
+## The containment fence's single switch: whether tool calls may name paths outside the project (res://) and its user:// data directory. Off refuses such paths at the tool layer (see GDLLMTools._outside_path_guard); on lets tools reach as far as the user's own account can.
+const ALLOW_OUTSIDE_TOOL_CALLS := "gdllm/agents/allow_tool_calls_outside_project_or_user_directories"
+
 ## Whether the plugin keeps the GDLLMGameAgent autoload registered in the project — the in-game half of the game-driving tools (read_game_ui, send_game_input, call_game_method). The autoload is inert without a debugger attached; turning this off removes it from Project Settings → Globals on the spot (see the plugin's _sync_game_agent).
 const GAME_AGENT := "gdllm/agents/register_game_input_agent"
 
@@ -79,6 +82,7 @@ const DEFAULT_MARKDOWN_RESPONSES := true
 const DEFAULT_MAX_PARALLEL_SUBAGENTS := 4
 const DEFAULT_NEW_SESSION_EDITS := false
 const DEFAULT_NEW_SESSION_DELETE := false
+const DEFAULT_ALLOW_OUTSIDE_TOOL_CALLS := false
 const DEFAULT_GAME_AGENT := true
 const DEFAULT_AUTO_COMPACTION := true
 ## 16k absorbs the incremental predictor's worst log-measured miss (~8.6k over 3421 wild requests) plus a typical reply's tokens.
@@ -108,6 +112,9 @@ const MODELS_CACHE_PATH := "user://gdllm/models_cache.json"
 
 ## The merged model list (qualified "source::model" ids) every model dropdown is built from. Seeded from disk cache at register() so a restart shows the full picker with no HTTP, then refreshed on demand — when a picker opens or from the Connections dialog (see GDLLMChatDock.refresh_all_models).
 static var _available_models: PackedStringArray = PackedStringArray()
+
+## What is_outside_tool_calls_allowed answers headlessly, where EditorSettings doesn't exist: the shipped default, which the test suites flip to exercise both sides of the fence.
+static var headless_allow_outside_tool_calls := DEFAULT_ALLOW_OUTSIDE_TOOL_CALLS
 
 
 ## Register the settings so they show up in Editor → Editor Settings and persist across sessions. Idempotent — safe to call on every plugin load; existing values are kept.
@@ -148,6 +155,7 @@ static func register() -> void:
 	_define_int(es, MAX_PARALLEL_SUBAGENTS, DEFAULT_MAX_PARALLEL_SUBAGENTS, "0,64,1,or_greater")
 	_define_bool(es, NEW_SESSION_EDITS, DEFAULT_NEW_SESSION_EDITS)
 	_define_bool(es, NEW_SESSION_DELETE, DEFAULT_NEW_SESSION_DELETE)
+	_define_bool(es, ALLOW_OUTSIDE_TOOL_CALLS, DEFAULT_ALLOW_OUTSIDE_TOOL_CALLS)
 	_define_bool(es, GAME_AGENT, DEFAULT_GAME_AGENT)
 	_define_bool(es, AUTO_COMPACTION, DEFAULT_AUTO_COMPACTION)
 	# or_greater lets the buffer pass 64k by typing; 0 means trigger only once the window itself is predicted full.
@@ -392,6 +400,16 @@ static func is_new_session_edits_on() -> bool:
 ## Whether a newly created session starts with "Delete files" on (see GDLLMSessionStore._new_record); the delete counterpart to is_new_session_edits_on.
 static func is_new_session_delete_on() -> bool:
 	return bool(EditorInterface.get_editor_settings().get_setting(NEW_SESSION_DELETE))
+
+
+## Whether tool calls may name paths outside the project and its user:// data directory (see GDLLMTools._outside_path_guard). Read defensively because the tool layer consults it headlessly and possibly before register() has defined the key.
+static func is_outside_tool_calls_allowed() -> bool:
+	if not Engine.is_editor_hint():
+		return headless_allow_outside_tool_calls
+	var es := EditorInterface.get_editor_settings()
+	if not es.has_setting(ALLOW_OUTSIDE_TOOL_CALLS):
+		return DEFAULT_ALLOW_OUTSIDE_TOOL_CALLS
+	return bool(es.get_setting(ALLOW_OUTSIDE_TOOL_CALLS))
 
 
 ## Whether the plugin keeps the GDLLMGameAgent autoload registered (see the plugin's _sync_game_agent). Read defensively because _enable_plugin consults it before register() has defined the key.

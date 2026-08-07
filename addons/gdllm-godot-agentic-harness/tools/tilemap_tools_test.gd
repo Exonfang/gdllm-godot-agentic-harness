@@ -26,6 +26,7 @@ var _failures: int = 0
 func _init() -> void:
 	_write_fixtures()
 	_test_decode()
+	_test_numeric_spellings()
 	_test_source_names()
 	_test_join_node_path()
 	_test_layers_from_state()
@@ -178,6 +179,13 @@ func _test_decode() -> void:
 	_check(int(bad["count"]) == 0 and bool(bad["undecodable"]), "an undecodable payload is flagged, not passed off as empty")
 
 
+func _test_numeric_spellings() -> void:
+	var rect: Dictionary = GDLLMTilemap.parse_rect(["-17.0", -13, "35", 39.0])
+	_check(rect.get("rect", Rect2i()) == Rect2i(-17, -13, 35, 39), "a rect takes its integers in any numeric spelling")
+	_check(GDLLMTilemap.parse_cell(["2.0", "3"], "cell").get("cell", Vector2i()) == Vector2i(2, 3), "a cell pair takes stringified numbers")
+	_check(String(GDLLMTilemap.parse_rect([1, 2, "x", 4]).get("error", "")).contains("four integers"), "a non-numeric rect entry still refuses")
+
+
 func _test_source_names() -> void:
 	var tile_set := TileSet.new()
 	var named := TileSetAtlasSource.new()
@@ -193,6 +201,11 @@ func _test_source_names() -> void:
 	etex.resource_path = "res://x.tres::ImageTexture_abc"
 	embedded.texture = etex
 	tile_set.add_source(embedded, 11)
+	var floaty := TileSetAtlasSource.new()
+	var ftex := ImageTexture.create_from_image(Image.create(16, 16, false, Image.FORMAT_RGBA8))
+	ftex.resource_path = "res://sprites/2.0.png"
+	floaty.texture = ftex
+	tile_set.add_source(floaty, 4)
 	var names := GDLLMTilemap.source_names(tile_set)
 	_check(String(names.get(0, "")) == "Debt Coffer", "resource_name wins as the source name")
 	_check(String(names.get(9, "")) == "stone_wall", "a texture's file name is the fallback name")
@@ -200,6 +213,9 @@ func _test_source_names() -> void:
 	_check(GDLLMTilemap.source_names(null).is_empty(), "no TileSet means no names, not a crash")
 	_check(GDLLMTilemap.source_label(9, names) == "source 9 (stone_wall)", "a named source labels as id (name)")
 	_check(GDLLMTilemap.source_label(5, names) == "source 5", "an unnamed source labels bare")
+	# A texture basename can be a whole-float spelling ("2.0.png"), so a float-spelled STRING must stay a name query — only a plain-integer string reads as an id.
+	_check(int(GDLLMTilemap.resolve_source(tile_set, "2.0", names).get("id", -1)) == 4, "a float-spelled source NAME resolves as the name it is, not as source id 2")
+	_check(int(GDLLMTilemap.resolve_source(tile_set, 9.0, names).get("id", -1)) == 9, "a raw whole-float source id reads as its integer self")
 
 
 func _test_join_node_path() -> void:

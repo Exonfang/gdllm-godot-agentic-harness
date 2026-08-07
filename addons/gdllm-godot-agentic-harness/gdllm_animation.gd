@@ -144,9 +144,9 @@ static func parse_window(value: Variant) -> Dictionary:
 		return {"error": "Error: \"window\" takes [start_sec, end_sec] as two numbers, e.g. [0.0, 0.5]."}
 	var numbers: Array[float] = []
 	for item in (value as Array):
-		if not (item is int or item is float):
+		if not GDLLMTools.is_number_like(item):
 			return {"error": "Error: \"window\" takes [start_sec, end_sec] as two numbers, e.g. [0.0, 0.5]."}
-		numbers.append(float(item))
+		numbers.append(GDLLMTools.number_like(item))
 	if numbers[1] <= numbers[0]:
 		return {"error": "Error: the window's end (%s) must be after its start (%s)." % [time_str(numbers[1]), time_str(numbers[0])]}
 	return {"window": Vector2(numbers[0], numbers[1])}
@@ -247,8 +247,8 @@ static func match_track(anim: Animation, query: Variant) -> Dictionary:
 		return {"error": "Error: this animation has no tracks."}
 	if query == null:
 		return {"error": "Error: no \"track\" was given — an index or a track path. " + track_list(anim)}
-	if query is int or query is float or (query is String and String(query).is_valid_int()):
-		var idx := int(query) if not query is String else String(query).to_int()
+	if GDLLMTools.is_index_like(query):
+		var idx := GDLLMTools.integer_like(query)
 		if idx < 0 or idx >= anim.get_track_count():
 			return {"error": "Error: track %d does not exist — this animation has %d track(s). %s" % [idx, anim.get_track_count(), track_list(anim)]}
 		return {"track": idx}
@@ -273,9 +273,9 @@ static func match_track(anim: Animation, query: Variant) -> Dictionary:
 static func find_key(anim: Animation, track: int, body: Dictionary) -> Dictionary:
 	if body.has("index") or body.has("key"):
 		var raw: Variant = body.get("index", body.get("key"))
-		if not (raw is int or raw is float):
+		if not GDLLMTools.is_integer_like(raw):
 			return {"error": "Error: \"index\" must be an integer, got %s." % value_string(raw)}
-		var idx := int(raw)
+		var idx := GDLLMTools.integer_like(raw)
 		if idx < 0 or idx >= anim.track_get_key_count(track):
 			return {"error": "Error: track %d has no key %d — it has %d key(s), at: %s." % [track, idx, anim.track_get_key_count(track), key_time_list(anim, track)]}
 		return {"key": idx}
@@ -1190,8 +1190,8 @@ static func _as_float(raw: Variant, label: String) -> Dictionary:
 
 
 static func _as_int(raw: Variant, label: String) -> Dictionary:
-	if raw is int or raw is float:
-		return {"value": int(raw)}
+	if GDLLMTools.is_integer_like(raw):
+		return {"value": GDLLMTools.integer_like(raw)}
 	return {"error": "Error: \"%s\" must be an integer, got %s." % [label, value_string(raw)]}
 
 
@@ -1235,15 +1235,18 @@ static func _as_method_call(raw: Variant) -> Dictionary:
 	return {"value": {"method": StringName(String((raw as Dictionary)["method"])), "args": args}}
 
 
-## An audio key's stream, loaded from its res:// path — the load failure or the wrong class is stated as-is.
+## An audio key's stream, resolved like every other tool path (bare names, the containment fence) and loaded — the load failure or the wrong class is stated as-is.
 static func _as_stream(raw: Variant) -> Dictionary:
 	if not raw is String or String(raw) == "":
 		return {"error": "Error: \"stream\" must be the res:// path of an audio stream resource, got %s." % value_string(raw)}
-	var res: Resource = ResourceLoader.load(String(raw), "", ResourceLoader.CACHE_MODE_REUSE)
+	var resolved := GDLLMTools._resolve_file_path(String(raw))
+	if resolved == "":
+		return {"error": GDLLMTools._file_not_found(String(raw), "audio stream file")}
+	var res: Resource = ResourceLoader.load(resolved, "", ResourceLoader.CACHE_MODE_REUSE)
 	if res == null:
-		return {"error": "Error: %s could not be loaded as a resource." % raw}
+		return {"error": "Error: %s could not be loaded as a resource." % resolved}
 	if not res is AudioStream:
-		return {"error": "Error: %s loaded as a %s, not an AudioStream." % [raw, res.get_class()]}
+		return {"error": "Error: %s loaded as a %s, not an AudioStream." % [resolved, res.get_class()]}
 	return {"value": res}
 
 
@@ -1251,10 +1254,10 @@ static func _num_array(raw: Variant, size: int) -> bool:
 	if not raw is Array or (raw as Array).size() != size:
 		return false
 	for item in (raw as Array):
-		if not (item is int or item is float):
+		if not GDLLMTools.is_number_like(item):
 			return false
 	return true
 
 
 static func _num(raw: Variant, i: int) -> float:
-	return float((raw as Array)[i])
+	return GDLLMTools.number_like((raw as Array)[i])

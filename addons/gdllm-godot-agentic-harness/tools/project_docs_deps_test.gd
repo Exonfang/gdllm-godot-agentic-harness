@@ -55,6 +55,10 @@ func _test_registration() -> void:
 		if String(entry["name"]) == "set_project_setting":
 			found = true
 	_check(found, "tool_search finds set_project_setting")
+	var coerced: Dictionary = GDLLMProject._coerce_plain("physics/common/physics_ticks_per_second", "90.0", true)
+	_check(coerced.get("value") is int and int(coerced.get("value")) == 90, "a stringified float coerces to an int setting's type instead of refusing")
+	_check(GDLLMProject._coerce_plain("physics/common/physics_ticks_per_second", "1e19", true).has("error"), "a whole float past int range keeps its refusal instead of overflowing into project.godot")
+	_check(GDLLMProject._coerce_plain("physics/common/physics_ticks_per_second", 1e19, true).has("error"), "the RAW float spelling of the same number keeps the refusal too")
 
 
 func _test_describe_project() -> void:
@@ -110,6 +114,13 @@ func _test_set_autoload() -> void:
 	_check(result.contains("Added autoload"), "adding an autoload confirms: %s" % result)
 	_check(String(ProjectSettings.get_setting("autoload/GdllmTestState", "")) == "*res://addons/gdllm-godot-agentic-harness/llm_client.gd", "the autoload stored enabled (* prefix)")
 	_check((await _run("set_project_setting", {"setting": "autoload/GdllmBad", "value": "res://no_such_file.gd"}, true)).begins_with("Error:"), "an autoload pointing at a missing file is refused")
+	var escaped := await _run("set_project_setting", {"setting": "autoload/GdllmEscape", "value": "res://../outside.gd"}, true)
+	_check(escaped.contains("OUTSIDE the project"), "an autoload path escaping the project is refused by the fence, confirming nothing about the outside")
+	_check(not ProjectSettings.has_setting("autoload/GdllmEscape"), "the refused autoload registered nothing")
+	var dotted := await _run("set_project_setting", {"setting": "autoload/GdllmDotted", "value": "res://addons/../addons/gdllm-godot-agentic-harness/llm_client.gd"}, true)
+	_check(dotted.contains("Added autoload"), "a ..-laden in-project autoload spelling is accepted")
+	_check(String(ProjectSettings.get_setting("autoload/GdllmDotted", "")) == "*res://addons/gdllm-godot-agentic-harness/llm_client.gd", "and stored CANONICAL — project.godot never carries a ..")
+	await _run("set_project_setting", {"setting": "autoload/GdllmDotted", "revert": true}, true)
 	_check((await _run("set_project_setting", {"setting": "autoload/GdllmTestState", "revert": true}, true)).contains("Removed"), "revert removes the autoload")
 	_check(not ProjectSettings.has_setting("autoload/GdllmTestState"), "the autoload is gone")
 

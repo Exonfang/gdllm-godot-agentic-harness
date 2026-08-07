@@ -592,9 +592,9 @@ static func parse_rect(value: Variant) -> Dictionary:
 		return {"error": "Error: a rect takes [x, y, width, height] as four integers in cell coordinates, e.g. [-17, -13, 35, 39]."}
 	var numbers: Array[int] = []
 	for item in (value as Array):
-		if not (item is int or item is float):
+		if not GDLLMTools.is_integer_like(item):
 			return {"error": "Error: a rect takes [x, y, width, height] as four integers in cell coordinates, e.g. [-17, -13, 35, 39]."}
-		numbers.append(int(item))
+		numbers.append(GDLLMTools.integer_like(item))
 	if numbers[2] < 1 or numbers[3] < 1:
 		return {"error": "Error: rect width and height must be at least 1 cell (got %d×%d)." % [numbers[2], numbers[3]]}
 	return {"rect": Rect2i(numbers[0], numbers[1], numbers[2], numbers[3])}
@@ -602,16 +602,16 @@ static func parse_rect(value: Variant) -> Dictionary:
 
 ## Parse one [x, y] cell coordinate.
 static func parse_cell(value: Variant, label: String) -> Dictionary:
-	if value is Array and (value as Array).size() == 2 and ((value as Array)[0] is int or (value as Array)[0] is float) and ((value as Array)[1] is int or (value as Array)[1] is float):
-		return {"cell": Vector2i(int((value as Array)[0]), int((value as Array)[1]))}
+	if value is Array and (value as Array).size() == 2 and GDLLMTools.is_integer_like((value as Array)[0]) and GDLLMTools.is_integer_like((value as Array)[1]):
+		return {"cell": Vector2i(GDLLMTools.integer_like((value as Array)[0]), GDLLMTools.integer_like((value as Array)[1]))}
 	return {"error": "Error: %s takes an [x, y] pair of integers." % label}
 
 
 ## Resolve a source given by id or NAME against the layer's TileSet — by name is what the wild demand used ("all dirt"), and a wrong id is invisible tiles at runtime, so an id the TileSet lacks is refused with the real list.
 static func resolve_source(tile_set: Variant, value: Variant, names: Dictionary) -> Dictionary:
 	var has_set := tile_set is TileSet
-	if value is int or value is float or (value is String and String(value).is_valid_int()):
-		var sid := int(value) if not value is String else String(value).to_int()
+	if GDLLMTools.is_index_like(value):
+		var sid := GDLLMTools.integer_like(value)
 		if has_set and not (tile_set as TileSet).has_source(sid):
 			return {"error": "Error: this TileSet has no source %d. Its sources are: %s." % [sid, _source_id_list(tile_set as TileSet, names)]}
 		var note := "" if has_set else "the layer has no TileSet, so source %d could not be validated" % sid
@@ -658,8 +658,8 @@ static func resolve_terrain(tile_set: Variant, value: Variant, set_arg: Variant)
 	var ts := tile_set as TileSet
 	if ts.get_terrain_sets_count() == 0:
 		return {"error": "Error: this TileSet defines no terrain sets, so there is nothing to terrain-match — use cells/fill/replace with plain sources instead."}
-	var wanted_set := int(set_arg) if (set_arg is int or set_arg is float) else -1
-	if value is int or value is float:
+	var wanted_set := GDLLMTools.integer_like(set_arg, -1)
+	if GDLLMTools.is_integer_like(value) and not value is String:
 		var s := wanted_set if wanted_set >= 0 else 0
 		if s >= ts.get_terrain_sets_count() or int(value) >= ts.get_terrains_count(s) or int(value) < 0:
 			return {"error": "Error: terrain %d does not exist in terrain set %d. %s" % [int(value), s, _terrain_list(ts)]}
