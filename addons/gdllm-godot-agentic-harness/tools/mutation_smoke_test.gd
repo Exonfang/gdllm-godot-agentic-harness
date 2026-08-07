@@ -197,6 +197,82 @@ func _test_write_file() -> void:
 	_check(out.begins_with("Overwrote") and _read(TMP_DIR + "/subdir/new.txt") == "other", "write_file replaces an existing file by default")
 	out = await _run("write_file", {"path": TMP_DIR + "/noext", "content": "x"}, true)
 	_check(out.contains("extension"), "write_file requires an extension")
+	out = await _run("write_file", {"path": "res://../fence_escape.txt", "content": "x"}, true)
+	_check(out.contains("OUTSIDE the project"), "write_file's literal destination is fenced — a res://../ escape writes nothing")
+	out = await _run("create_resource", {"from": "Resource", "path": "res://../fence_escape.tres"}, true)
+	_check(out.contains("OUTSIDE the project"), "create_resource's destination is fenced the same way")
+	# user:// sits inside the fence: a NEW user:// file is created where it says, sidecar-free (uids belong to the project tree), and stays editable and deletable.
+	out = await _run("write_file", {"path": "user://gdllm_smoke_user.gd", "content": "extends RefCounted\nvar n := 1\n"}, true)
+	_check(out.begins_with("Created") and FileAccess.file_exists("user://gdllm_smoke_user.gd"), "write_file creates a new user:// file at the spelled path")
+	_check(out.contains("UNVALIDATED"), "a user:// script write says the engine validation did not run")
+	_check(not FileAccess.file_exists("user://gdllm_smoke_user.gd.uid"), "no .uid sidecar is minted outside res:// — uids belong to the project tree")
+	out = await _run("edit_file", {"path": "user://gdllm_smoke_user.gd", "old_string": "var n := 1", "new_string": "var n := 2"}, true)
+	_check(out.begins_with("Edited") and _read("user://gdllm_smoke_user.gd").contains("var n := 2"), "edit_file edits a user:// file")
+	_check(out.contains("UNVALIDATED"), "a user:// edit is disclosed as unvalidated too")
+	_check(not FileAccess.file_exists("user://gdllm_smoke_user.gd.uid"), "the user:// edit minted no .uid sidecar — the lints are project-tree services")
+	# The automatic check hook is a project-tree service too: a non-project script gets no verdict issued from this project's context.
+	out = await _run("write_file", {"path": "user://gdllm_smoke_user.gd", "content": "extends RefCounted\nfunc broken( -> void:\n"}, true)
+	_check(out.contains("UNVALIDATED"), "a broken non-project script still lands, disclosed as unvalidated")
+	out = await _run("read_file", {"path": "user://gdllm_smoke_user.gd"}, false)
+	_check(not out.contains("Automatic check_script"), "no automatic check verdict is issued for a non-project script")
+	out = await _run("delete_file", {"path": "user://gdllm_smoke_user.gd", "force": true}, true, true)
+	_check(out.begins_with("Deleted") and not FileAccess.file_exists("user://gdllm_smoke_user.gd"), "delete_file removes a user:// file")
+	# A user:// write whose content declares a uid header lands as sent, and the confirmation must not present that header as an engine-assigned uid.
+	var user_uid_res := "user://gdllm_smoke_" + "wr_uid.tres"
+	out = await _run("write_file", {"path": user_uid_res, "content": "[gd_resource type=\"Resource\" format=3 uid=\"uid://smokeinvented\"]\n\n[resource]\n"}, true)
+	_check(_read(user_uid_res).contains("uid://smokeinvented"), "the user:// content landed exactly as sent, uid header included")
+	_check(out.contains("uid://smokeinvented") and out.contains("inert"), "the confirmation discloses the header uid as unverified inert text")
+	_check(not out.contains("its uid is"), "the confirmation never presents the header as the file's engine uid")
+	DirAccess.remove_absolute(user_uid_res)
+	# The critical stores are refused by the WRITE path too, not only delete/move/copy — the session records are the transparency ledger.
+	out = await _run("write_file", {"path": "user://gdllm/sessions.json", "content": "{}", "force": true}, true)
+	_check(out.contains("critical store"), "write_file refuses the session records even with force")
+	_check(GDLLMTools._critical_store_guard("user://gdllm/sessions.json", "edits") != "", "the shared critical-store guard answers for the edit path")
+	out = await _run("create_resource", {"from": "Resource", "path": "user://gdllm/evil.tres"}, true)
+	_check(out.contains("critical store"), "create_resource refuses a destination inside the session records")
+	DirAccess.make_dir_recursive_absolute("user://gdllm")
+	ResourceSaver.save(Resource.new(), "user://gdllm/gdllm_smoke_probe.tres")
+	out = await _run("edit_resource", {"path": "user://gdllm/gdllm_smoke_probe.tres", "properties": {"resource_name": "x"}}, true)
+	_check(out.contains("critical store"), "edit_resource refuses a resource inside the session records — every mutating tool consults the one guard")
+	DirAccess.remove_absolute("user://gdllm/gdllm_smoke_probe.tres")
+	# The scene/animation splice tools mutate files too, so they consult the same guard before their type gate — project.godot resolves and would otherwise reach the "not a .tscn" refusal instead.
+	out = await _run("edit_tilemap", {"scene": "res://project.godot", "erase": [[0, 0]]}, true)
+	_check(out.contains("critical store"), "edit_tilemap refuses a critical store ahead of its scene-type gate")
+	out = await _run("edit_animation", {"scene": "res://project.godot", "set_length": {"name": "x", "length": 1.0}}, true)
+	_check(out.contains("critical store"), "edit_animation refuses a critical store ahead of its file-type gate")
+	_check(GDLLMTools._in_critical_store("res://.godot"), "res://.godot itself is critical, matched exactly like .git")
+	out = await _run("write_file", {"path": "res://.godot", "content": "x"}, true)
+	_check(out.contains("critical store") and not FileAccess.file_exists("res://.godot"), "a FILE named .godot can never be created at the project root")
+	# check_script carries the hook's project-side gate: a non-project script gets no verdict from this project's context.
+	_write("user://gdllm_smoke_check.gd", "extends RefCounted\n")
+	out = await _run("check_script", {"path": "user://gdllm_smoke_check.gd"}, false)
+	_check(out.begins_with("Error") and out.contains("ungroundable"), "check_script refuses a non-project script instead of judging it with this project's autoloads")
+	DirAccess.remove_absolute("user://gdllm_smoke_check.gd")
+	# A user:// directory handed to a file tool is named as one — the diagnosis runs on any fenced tree.
+	DirAccess.make_dir_recursive_absolute("user://gdllm_smoke_probe_dir")
+	out = await _run("delete_file", {"path": "user://gdllm_smoke_probe_dir", "force": true}, true, true)
+	_check(out.contains("is a directory"), "a user:// directory is named as a directory, not reported missing")
+	DirAccess.remove_absolute("user://gdllm_smoke_probe_dir")
+	# Case-folded compares where the VOLUME resolves names case-insensitively: the same file in another case is the same file. The override forces both verdicts on one machine; production probes the volume itself (see _root_case_insensitive).
+	GDLLMTools._fs_case_override = true
+	var case_root := ProjectSettings.globalize_path("res://").simplify_path().trim_suffix("/")
+	_check(GDLLMTools._path_is_or_under(case_root.to_upper() + "/player.gd", case_root), "a case-variant in-project path reads as inside on a case-insensitive volume")
+	_check(GDLLMTools._in_critical_store(case_root + "/.GIT/config"), "a case-variant spelling of a critical store is still critical there")
+	GDLLMTools._fs_case_override = false
+	_check(not GDLLMTools._path_is_or_under(case_root.to_upper() + "/player.gd", case_root), "a case-sensitive volume keeps the exact compare")
+	GDLLMTools._fs_case_override = null
+	GDLLMTools._case_probe_cache.clear()
+	_check(GDLLMTools._path_is_or_under(case_root + "/player.gd", case_root), "the probed verdict never breaks the exact-case compare")
+	_check(GDLLMTools._root_case_insensitive(case_root) == GDLLMTools._root_case_insensitive(case_root), "the volume probe is stable across calls")
+	# With the fence dropped, a NEW absolute destination is honored literally instead of being re-rooted into the project.
+	var w_root := ProjectSettings.globalize_path("res://").simplify_path().trim_suffix("/")
+	var w_outside := w_root.path_join("..").simplify_path().path_join("gdllm_smoke_abs_write.txt")
+	GDLLMSettings.headless_allow_outside_tool_calls = true
+	out = await _run("write_file", {"path": w_outside, "content": "outside\n"}, true)
+	_check(out.begins_with("Created") and out.contains(w_outside) and FileAccess.file_exists(w_outside), "with the fence dropped, write_file creates a new file at the absolute path it was given")
+	_check(not FileAccess.file_exists("res://" + w_outside.trim_prefix("/")), "nothing was re-rooted into the project")
+	GDLLMSettings.headless_allow_outside_tool_calls = false
+	DirAccess.remove_absolute(w_outside)
 	var gd := TMP_DIR + "/written.gd"
 	out = await _run("write_file", {"path": gd, "content": "extends RefCounted\n\n\nfunc twice(x: int) -> int:\n\treturn x * 2\n"}, true)
 	_check(out.begins_with("Created"), "write_file creates a valid .gd")
@@ -269,24 +345,40 @@ func _test_delete_file() -> void:
 	_write(name_user, "extends RefCounted\n# builds on %s\n" % cname)
 	out = await _run("delete_file", {"path": named}, true, true)
 	_check(out.begins_with("Error:") and out.contains(name_user), "a class_name still used by name blocks the deletion")
-	# Containment: a path escaping the project is refused before the scan and force can't override it (F1/F2 audit).
+	# Containment: a path escaping the project and user:// is refused before the scan, force can't override it, and the refusal names the setting that would lift it.
 	var root_abs := ProjectSettings.globalize_path("res://").simplify_path().trim_suffix("/")
 	var outside_abs := root_abs.path_join("..").simplify_path().path_join("gdllm_outside_sentinel.txt")
 	_write(outside_abs, "outside")
 	out = await _run("delete_file", {"path": "res://../gdllm_outside_sentinel.txt", "force": true}, true, true)
-	_check(out.contains("OUTSIDE the project directory"), "a res://../ traversal is refused as outside the project")
+	_check(out.contains("OUTSIDE the project"), "a res://../ traversal is refused as outside the project")
+	_check(out.contains("Allow Tool Calls Outside"), "the refusal names the setting that would lift the fence")
 	_check(FileAccess.file_exists(outside_abs), "the out-of-project file was not touched, even with force")
-	DirAccess.remove_absolute(outside_abs)
-	# The guard itself, unit-tested so the dangerous targets never risk a real deletion inside this suite (F1/F2/F4 audit).
+	# The guard itself, unit-tested so the dangerous targets never risk a real deletion inside this suite.
 	_check(GDLLMTools._delete_target_guard("res://../secret.txt").contains("OUTSIDE"), "the guard refuses a .. escape")
-	_check(GDLLMTools._delete_target_guard("user://save.tres").contains("OUTSIDE"), "the guard refuses a user:// path")
+	_check(GDLLMTools._delete_target_guard("res://..\\secret.txt").contains("OUTSIDE"), "a backslash spelling of the same escape is refused too")
+	_check(GDLLMTools._delete_target_guard("user://save.tres") == "", "a user:// path is inside the fence — the user's data directory is the model's to work in")
 	_check(GDLLMTools._delete_target_guard("res://project.godot").contains("critical"), "the guard refuses project.godot even though it lives under res://")
 	_check(GDLLMTools._delete_target_guard("res://.godot/uid_cache.bin").contains("critical"), "the guard refuses a .godot editor-cache file")
 	_check(GDLLMTools._delete_target_guard("res://.git/config").contains("critical"), "the guard refuses a .git file")
+	_check(GDLLMTools._delete_target_guard("res://.git").contains("critical"), "the guard refuses .git itself — a FILE in a git worktree, whose loss severs the checkout")
+	_check(GDLLMTools._delete_target_guard("user://gdllm/sessions.json").contains("critical"), "the plugin's own session records are critical — the transparency record is never the model's to remove")
 	_check(GDLLMTools._delete_target_guard(TMP_DIR + "/plain.gd") == "", "the guard passes an ordinary project file")
-	# Symlink escape: a delete THROUGH a symlinked directory would hit a real file outside the project, so any link in the path is refused (audit follow-up).
+	# The is-a-directory diagnostic must not speak for a fence-refused path — answering "is a directory" would confirm an outside directory exists.
+	var leak_dir := root_abs.path_join("..").simplify_path().path_join("gdllm_leak_probe_dir")
+	DirAccess.make_dir_recursive_absolute(leak_dir)
+	out = await _run("delete_file", {"path": "res://../gdllm_leak_probe_dir", "force": true}, true, true)
+	_check(out.contains("OUTSIDE the project") and not out.contains("is a directory"), "a fence-refused outside directory gets the fence refusal, not an existence-confirming diagnostic")
+	DirAccess.remove_absolute(leak_dir)
+	# The single toggle drops the fence wholesale — but never the critical-store refusals.
+	GDLLMSettings.headless_allow_outside_tool_calls = true
+	_check(GDLLMTools._delete_target_guard("res://../secret.txt") == "", "the Allow Outside setting drops the fence")
+	_check(GDLLMTools._delete_target_guard("res://.godot/uid_cache.bin").contains("critical"), "the critical stores stay refused with the fence dropped")
+	out = await _run("delete_file", {"path": "res://../gdllm_outside_sentinel.txt", "force": true}, true, true)
+	_check(out.begins_with("Deleted") and not FileAccess.file_exists(outside_abs), "with the fence dropped, the outside delete goes through end to end")
+	GDLLMSettings.headless_allow_outside_tool_calls = false
+	DirAccess.remove_absolute(outside_abs)
+	# A symlink is the user's own setup: the fence judges the call's text and never chases where a path really leads, so a path through a link works exactly as it does for the user.
 	var link_da := DirAccess.open(root_abs)
-	var tmp_rel := TMP_DIR.trim_prefix("res://")
 	var tmp_abs := ProjectSettings.globalize_path(TMP_DIR).simplify_path()
 	var sym_out_dir := root_abs.path_join("..").simplify_path().path_join("gdllm_sym_outside")
 	DirAccess.make_dir_recursive_absolute(sym_out_dir)
@@ -296,20 +388,11 @@ func _test_delete_file() -> void:
 	_check(link_da.create_link(sym_out_dir, link_dir_abs) == OK, "test setup: a directory symlink is created inside the project")
 	var through_path := TMP_DIR + "/sym_linked/victim.txt"
 	_check(FileAccess.file_exists(through_path), "test setup: the outside victim is reachable through the link")
+	_check(GDLLMTools._delete_target_guard(through_path) == "", "a path through the user's own symlink passes the guard — the fence never chases links")
 	out = await _run("delete_file", {"path": through_path, "force": true}, true, true)
-	_check(out.contains("symbolic link"), "a delete through a symlinked directory is refused, even with force")
-	_check(FileAccess.file_exists(sym_victim), "the real out-of-project file behind the directory link was not touched")
-	var link_file_abs := tmp_abs.path_join("sym_linked_file.txt")
-	_check(link_da.create_link(sym_victim, link_file_abs) == OK, "test setup: a file symlink is created inside the project")
-	out = await _run("delete_file", {"path": TMP_DIR + "/sym_linked_file.txt", "force": true}, true, true)
-	_check(out.contains("symbolic link"), "a delete of a symlinked file is refused")
-	_check(FileAccess.file_exists(sym_victim), "the file link's target was not touched either")
-	_check(GDLLMTools._symlink_in_path(root_abs, tmp_rel + "/sym_linked/victim.txt"), "_symlink_in_path flags a link in an intermediate directory, not just the leaf")
-	_check(not GDLLMTools._symlink_in_path(root_abs, tmp_rel + "/no_such_link.gd"), "_symlink_in_path passes a path with no links")
+	_check(out.begins_with("Deleted"), "a delete through a symlinked directory follows the user's own setup")
+	_check(not FileAccess.file_exists(sym_victim), "the delete landed on the link's real target, as that setup intends")
 	DirAccess.remove_absolute(link_dir_abs)
-	DirAccess.remove_absolute(link_file_abs)
-	_check(FileAccess.file_exists(sym_victim), "removing the links left the outside target intact")
-	DirAccess.remove_absolute(sym_victim)
 	DirAccess.remove_absolute(sym_out_dir)
 	# Deleting a broken file settles its ledger entries, so the reminder can't nag about a file that no longer exists.
 	GDLLMTools._fallback_ledger.broken_reminder_cooldown = 0
@@ -362,6 +445,8 @@ func _test_move_rename() -> void:
 	_check(out.begins_with("Renamed") and _read(TMP_DIR + "/mv_sub/renamed_seen.txt").contains("ALPHA"), "rename_file renames in place")
 	out = await _run("rename_file", {"path": TMP_DIR + "/mv_sub/renamed_seen.txt", "new_name": "elsewhere/x.txt"}, true)
 	_check(out.begins_with("Error:") and out.contains("move_file"), "a new_name with a foreign directory steers to move_file")
+	out = await _run("rename_file", {"path": TMP_DIR + "/mv_sub/renamed_seen.txt", "new_name": "..\\bs_escape.txt"}, true)
+	_check(out.begins_with("Error:") and out.contains("move_file") and FileAccess.file_exists(TMP_DIR + "/mv_sub/renamed_seen.txt"), "a backslashed traversal in new_name is caught like the slashed one — a rename never relocates")
 	out = await _run("rename_file", {"path": TMP_DIR + "/mv_sub/renamed_seen.txt", "new_name": "renamed_seen.txt"}, true)
 	_check(out.begins_with("Error:") and out.contains("nothing to do"), "renaming to the same name errors")
 	# Moves never overwrite, force or not.
@@ -370,7 +455,7 @@ func _test_move_rename() -> void:
 	out = await _run("move_file", {"path": TMP_DIR + "/mv_src.txt", "to": TMP_DIR + "/mv_exists.txt", "force": true}, true)
 	_check(out.begins_with("Error:") and out.contains("never overwrites"), "a move refuses an existing destination even with force")
 	_check(_read(TMP_DIR + "/mv_exists.txt") == "old\n" and FileAccess.file_exists(TMP_DIR + "/mv_src.txt"), "the refused overwrite touched neither file")
-	# Containment end-to-end: neither endpoint may cross the project boundary, and force never overrides it.
+	# Containment end-to-end: with the fence up, neither endpoint may cross outside, and force never overrides it.
 	out = await _run("move_file", {"path": TMP_DIR + "/mv_src.txt", "to": "res://../mv_escaped.txt", "force": true}, true)
 	_check(out.contains("OUTSIDE") and FileAccess.file_exists(TMP_DIR + "/mv_src.txt"), "a destination outside the project is refused even with force")
 	var root_abs := ProjectSettings.globalize_path("res://").simplify_path().trim_suffix("/")
@@ -378,17 +463,47 @@ func _test_move_rename() -> void:
 	_write(outside, "outside")
 	out = await _run("move_file", {"path": "res://../gdllm_mv_outside.txt", "to": TMP_DIR + "/mv_in.txt", "force": true}, true)
 	_check(out.contains("OUTSIDE") and FileAccess.file_exists(outside) and not FileAccess.file_exists(TMP_DIR + "/mv_in.txt"), "a source outside the project is refused even with force — nothing is pulled in")
-	DirAccess.remove_absolute(outside)
+	# With the fence dropped by the setting, the same outside source moves in — the toggle is the single lever.
+	GDLLMSettings.headless_allow_outside_tool_calls = true
+	out = await _run("move_file", {"path": "res://../gdllm_mv_outside.txt", "to": TMP_DIR + "/mv_in.txt", "force": true}, true)
+	_check(out.begins_with("Moved") and FileAccess.file_exists(TMP_DIR + "/mv_in.txt") and not FileAccess.file_exists(outside), "with the fence dropped, an outside source moves into the project end to end")
+	GDLLMSettings.headless_allow_outside_tool_calls = false
+	DirAccess.remove_absolute(TMP_DIR + "/mv_in.txt")
+	# A move keeps a file in its own tree while the fence is up; user:// relocations work within user://.
+	out = await _run("move_file", {"path": TMP_DIR + "/mv_src.txt", "to": "user://gdllm_smoke_mv.txt", "force": true}, true)
+	_check(out.begins_with("Error:") and out.contains("its own tree") and FileAccess.file_exists(TMP_DIR + "/mv_src.txt"), "a res:// file refuses a user:// destination with the same-tree rule, honestly worded")
+	# Assembled at runtime so the reference scan never matches this file's own text (the suite's convention for probe names).
+	var user_mv_a := "user://gdllm_smoke_" + "mv_a.txt"
+	var user_mv_b := "user://gdllm_smoke_" + "mv_b.txt"
+	_write(user_mv_a, "u\n")
+	out = await _run("move_file", {"path": user_mv_a, "to": user_mv_b}, true)
+	_check(out.begins_with("Moved") and _read(user_mv_b) == "u\n" and not FileAccess.file_exists(user_mv_a), "a user:// file relocates within user://")
+	# The full-path-in-own-directory tolerance works for user:// spellings too, judged on the sanitized form.
+	var user_mv_c := "user://gdllm_smoke_" + "mv_c.txt"
+	out = await _run("rename_file", {"path": user_mv_b, "new_name": user_mv_c}, true)
+	_check(out.begins_with("Renamed") and FileAccess.file_exists(user_mv_c), "a user:// rename spelled as a full path in its own directory lands")
+	DirAccess.remove_absolute(user_mv_c)
+	out = await _run("move_file", {"path": TMP_DIR + "/mv_sub/renamed_seen.txt", "to": TMP_DIR + "/bs_sub\\", "force": true}, true)
+	_check(out.begins_with("Moved") and FileAccess.file_exists(TMP_DIR + "/bs_sub/renamed_seen.txt"), "a backslashed directory destination carries the same new-directory intent as the slashed spelling")
 	# The boundary guard itself, unit-tested on both roles so the dangerous targets never risk a real move in this suite.
-	_check(GDLLMTools._path_boundary_guard("res://../escape.txt", "destination").contains("OUTSIDE"), "the boundary guard refuses a .. escape")
-	_check(GDLLMTools._path_boundary_guard("user://save.dat", "source file").contains("OUTSIDE"), "the boundary guard refuses a user:// path")
-	_check(GDLLMTools._path_boundary_guard("res://project.godot", "source file").contains("critical"), "the boundary guard refuses project.godot")
-	_check(GDLLMTools._path_boundary_guard("res://.godot/uid_cache.bin", "destination").contains("critical"), "the boundary guard refuses the editor cache as a destination")
-	_check(GDLLMTools._path_boundary_guard("res://.git/config", "destination").contains("critical"), "the boundary guard refuses the .git store")
-	_check(GDLLMTools._path_boundary_guard(TMP_DIR + "/fine.txt", "destination") == "", "the boundary guard passes an ordinary project path")
+	_check(GDLLMTools._path_boundary_guard("res://../escape.txt").contains("OUTSIDE"), "the boundary guard refuses a .. escape")
+	_check(GDLLMTools._path_boundary_guard("user://save.dat") == "", "a user:// endpoint is inside the fence (the same-tree rule, not the fence, pairs it with a user:// other end)")
+	_check(GDLLMTools._path_boundary_guard("res://project.godot").contains("critical"), "the boundary guard refuses project.godot")
+	_check(GDLLMTools._path_boundary_guard("res://.godot/uid_cache.bin").contains("critical"), "the boundary guard refuses the editor cache as a destination")
+	_check(GDLLMTools._path_boundary_guard("res://.git/config").contains("critical"), "the boundary guard refuses the .git store")
+	_check(GDLLMTools._path_boundary_guard(TMP_DIR + "/fine.txt") == "", "the boundary guard passes an ordinary project path")
 	# An extension change lands but is disclosed loudly.
 	out = await _run("rename_file", {"path": TMP_DIR + "/mv_src.txt", "new_name": "mv_src.md"}, true)
 	_check(out.begins_with("Renamed") and out.contains("extension changed"), "an extension change is disclosed as a warning")
+	# An extensionless file (a LICENSE, a Makefile) is a real project file: relocating it must not demand an extension it doesn't have, while an extensioned source keeps the directory-intent refusal.
+	var license := TMP_DIR + "/LICENSE"
+	_write(license, "license text\n")
+	out = await _run("move_file", {"path": license, "to": TMP_DIR + "/mv_docs/"}, true)
+	_check(out.begins_with("Moved") and FileAccess.file_exists(TMP_DIR + "/mv_docs/LICENSE"), "an extensionless file moves into a directory under its own name")
+	out = await _run("rename_file", {"path": TMP_DIR + "/mv_docs/LICENSE", "new_name": "NOTICE"}, true)
+	_check(out.begins_with("Renamed") and FileAccess.file_exists(TMP_DIR + "/mv_docs/NOTICE"), "an extensionless file renames to another extensionless name")
+	out = await _run("move_file", {"path": TMP_DIR + "/mv_src.md", "to": TMP_DIR + "/mv_noext"}, true)
+	_check(out.begins_with("Error:") and out.contains("no file extension") and FileAccess.file_exists(TMP_DIR + "/mv_src.md"), "an extensioned source still refuses an extensionless destination — that spelling means unstated directory intent")
 
 
 ## copy_file: the binary bytes surviving intact, the three ways a copy could steal the source's uid all minting fresh instead, the refusal ladder, and the ledger claims carrying to a duplicate whose bytes are the source's.
@@ -464,6 +579,21 @@ func _test_copy_file() -> void:
 	out = await _run("edit_file", {"path": TMP_DIR + "/cp_sub/cp_seen.txt", "old_string": "alpha", "new_string": "ALPHA"}, true)
 	_check(out.begins_with("Edited"), "the seen-file claim carries to the copy — no re-read required")
 	_check(_read(seen_src) == "alpha\nbeta\n", "editing the copy left the source alone")
+	# An extensionless source copies to an extensionless destination — the directory-intent refusal is judged against the source's own name.
+	var cp_plain := TMP_DIR + "/MAKEFILE"
+	_write(cp_plain, "all:\n")
+	out = await _run("copy_file", {"path": cp_plain, "to": TMP_DIR + "/MAKEFILE_TWO"}, true)
+	_check(out.begins_with("Copied") and _read(TMP_DIR + "/MAKEFILE_TWO") == "all:\n", "an extensionless file copies to an extensionless destination")
+	# A user:// copy keeps the source's bytes verbatim — uid header included — and the result must disclose the kept uid as inert rather than presenting it as the copy's identity.
+	var user_res := "user://gdllm_smoke_" + "cp_keep.tres"
+	var user_res_copy := "user://gdllm_smoke_" + "cp_keep_two.tres"
+	var kept_uid := ResourceUID.id_to_text(ResourceUID.create_id())
+	_write(user_res, "[gd_resource type=\"Resource\" format=3 uid=\"%s\"]\n\n[resource]\n" % kept_uid)
+	out = await _run("copy_file", {"path": user_res, "to": user_res_copy}, true)
+	_check(out.begins_with("Copied") and _read(user_res_copy).contains(kept_uid), "a user:// copy keeps the source's bytes verbatim, uid header included")
+	_check(out.contains(kept_uid) and out.contains("inert"), "the kept source uid is disclosed as inert, never as the copy's own")
+	DirAccess.remove_absolute(user_res)
+	DirAccess.remove_absolute(user_res_copy)
 	# The refusal ladder, each naming its way out.
 	out = await _run("copy_file", {"path": png, "to": silver}, true)
 	_check(out.begins_with("Error:") and out.contains("never overwrites") and out.contains("delete_file"), "an identical repeat refuses instead of duplicating again")
@@ -477,7 +607,9 @@ func _test_copy_file() -> void:
 	out = await _run("copy_file", {"path": png, "to": "res://.secret/cp_hidden.png"}, true)
 	_check(out.begins_with("Error:") and out.contains("hidden directory"), "a hidden destination directory is refused")
 	out = await _run("copy_file", {"path": png, "to": "res://../cp_escaped.png"}, true)
-	_check(out.contains("OUTSIDE") and out.contains("copy") and not out.contains("moved"), "a destination outside the project is refused, in copy's own words")
+	_check(out.contains("OUTSIDE") and not out.contains("moved"), "a destination outside the project is refused")
+	out = await _run("copy_file", {"path": png, "to": "user://cp_crossed.png"}, true)
+	_check(out.begins_with("Error:") and out.contains("its own tree") and not FileAccess.file_exists("user://cp_crossed.png"), "a copy refuses to cross from res:// into user:// while the fence is up")
 	out = await _run("copy_file", {"path": "res://../gdllm_copy_outside.png", "to": TMP_DIR + "/cp_pulled_in.png"}, true)
 	_check(out.begins_with("Error:") and not FileAccess.file_exists(TMP_DIR + "/cp_pulled_in.png"), "a source outside the project is refused — nothing is pulled in")
 	out = await _run("copy_file", {"path": "cp_no_such_file.png", "to": TMP_DIR + "/cp_x.png"}, true)
@@ -579,6 +711,14 @@ func _test_edit_resource() -> void:
 	_check(out.begins_with("Saved"), "edit_resource batch confirms")
 	var reloaded: Resource = ResourceLoader.load(res_path, "", ResourceLoader.CACHE_MODE_IGNORE)
 	_check(reloaded.get("speed") == 4.5 and reloaded.get("count") == 7 and bool(reloaded.get("active")), "edit_resource scalars hit disk")
+	out = await _run("edit_resource", {"path": res_path, "properties": {"count": "3.0"}}, true)
+	_check(out.begins_with("Saved"), "a stringified float lands on an int property")
+	_check((ResourceLoader.load(res_path, "", ResourceLoader.CACHE_MODE_IGNORE) as Resource).get("count") == 3, "the int property took the string-float's integer self")
+	out = await _run("edit_resource", {"path": res_path, "properties": {"count": "2.9"}}, true)
+	_check(out.begins_with("Error") and out.contains("parses as"), "a fractional string keeps its teaching refusal — nothing truncates silently")
+	out = await _run("edit_resource", {"path": res_path, "properties": {"count": "1e19"}}, true)
+	_check(out.begins_with("Error"), "a whole float past int range keeps its refusal instead of overflowing into garbage")
+	await _run("edit_resource", {"path": res_path, "properties": {"count": 7}}, true)
 	_check(reloaded.get("offset") == Vector2(64, 32) and reloaded.get("tint") == Color(1, 0, 0, 1), "edit_resource literals hit disk")
 	_check(reloaded.get("mat") is StandardMaterial3D, "edit_resource object path loaded and saved")
 	_check(reloaded.get("tags") == PackedStringArray(["a", "b"]), "edit_resource array coerced to packed")

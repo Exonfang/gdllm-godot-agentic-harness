@@ -152,6 +152,13 @@ func _test_catalog_markers() -> void:
 			read_file_line = line
 	_check(read_file_line.contains("(attached — call directly)"), "an attached tool's catalog line is marked")
 	_check(marked.count("(attached — call directly)") == 1, "only the attached tool is marked")
+	# The dropped fence is stated in the catalog — every per-tool summary says "the project", and a model with no other signal refuses outside paths the setting would serve.
+	GDLLMSettings.headless_allow_outside_tool_calls = true
+	var dropped := String(GDLLMTools.tool_search_schema(false)["function"]["description"])
+	_check(dropped.contains("Allow Tool Calls Outside") and dropped.contains("spelled exactly"), "the catalog states the dropped fence and its exact-spelling rule")
+	GDLLMSettings.headless_allow_outside_tool_calls = false
+	var fenced := String(GDLLMTools.tool_search_schema(false)["function"]["description"])
+	_check(not fenced.contains("Allow Tool Calls Outside"), "the default fenced state adds no catalog line")
 
 
 func _test_history_reactivation() -> void:

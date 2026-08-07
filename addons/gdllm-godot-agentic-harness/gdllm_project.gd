@@ -201,8 +201,8 @@ static func _parse_mouse_event(text: String) -> Dictionary:
 	var index := -1
 	if MOUSE_BUTTON_NAMES.has(token):
 		index = MOUSE_BUTTON_NAMES[token]
-	elif token.is_valid_int():
-		index = int(token)
+	elif GDLLMTools.is_integer_like(token):
+		index = GDLLMTools.integer_like(token)
 	if index < 1:
 		return {"error": "Error: unknown mouse button \"%s\" (use Left, Right, Middle, WheelUp, WheelDown, X1, X2, or a button index). %s" % [text, EVENT_SPEC_HELP]}
 	var event := InputEventMouseButton.new()
@@ -215,8 +215,8 @@ static func _parse_joy_button_event(text: String) -> Dictionary:
 	var index := -1
 	if JOY_BUTTON_NAMES.has(token):
 		index = JOY_BUTTON_NAMES[token]
-	elif token.is_valid_int():
-		index = int(token)
+	elif GDLLMTools.is_integer_like(token):
+		index = GDLLMTools.integer_like(token)
 	if index < 0:
 		return {"error": "Error: unknown joypad button \"%s\" (use a button index like 0, or A/B/X/Y/Start/Back/Left_Shoulder/Right_Shoulder). %s" % [text, EVENT_SPEC_HELP]}
 	var event := InputEventJoypadButton.new()
@@ -234,8 +234,8 @@ static func _parse_joy_axis_event(text: String) -> Dictionary:
 	var axis := -1
 	if JOY_AXIS_NAMES.has(token):
 		axis = JOY_AXIS_NAMES[token]
-	elif token.is_valid_int():
-		axis = int(token)
+	elif GDLLMTools.is_integer_like(token):
+		axis = GDLLMTools.integer_like(token)
 	if axis < 0:
 		return {"error": "Error: unknown joypad axis \"%s\" (use an axis index plus direction like \"1-\", or a name like \"left_y-\"). %s" % [text, EVENT_SPEC_HELP]}
 	var event := InputEventJoypadMotion.new()
@@ -250,9 +250,13 @@ static func _coerce_autoload(value: Variant) -> Dictionary:
 		return {"error": "Error: an autoload's value is the res:// path of its script or scene, e.g. \"res://globals/game_state.gd\"."}
 	var text := String(value).strip_edges()
 	var enabled := not text.begins_with("-")
-	var path := text.trim_prefix("-").trim_prefix("*")
-	if not path.begins_with("res://"):
-		path = "res://" + path.trim_prefix("/")
+	# Sanitized once, before file_exists (which resolves ".." against the real filesystem and would otherwise confirm an outside file's existence), and the CANONICAL spelling is what gets stored — project.godot must never carry a "..".
+	var canon: Dictionary = GDLLMTools._sanitize_path(text.trim_prefix("-").trim_prefix("*"))
+	if String(canon["error"]) != "":
+		return {"error": String(canon["error"])}
+	var path := String(canon["path"])
+	if not GDLLMTools._project_side(path):
+		return {"error": "Error: an autoload lives in the project — the engine loads it from a res:// path, so nothing outside the project tree can be registered as one."}
 	if not FileAccess.file_exists(path):
 		return {"error": "Error: no file exists at %s, so it can't be an autoload. Pass the res:// path of an existing script or scene." % path}
 	if not path.get_extension().to_lower() in ["gd", "tscn", "scn", "res", "tres"]:
@@ -269,7 +273,7 @@ static func _coerce_plain(name: String, value: Variant, known: bool) -> Dictiona
 	if typeof(value) == want:
 		return {"value": value}
 	# JSON numbers arrive as floats, and a Godot literal in a string ("Vector2(64, 32)") covers the non-JSON types.
-	if value is float and want == TYPE_INT:
+	if value is float and want == TYPE_INT and GDLLMTools._whole_int_float(value):
 		return {"value": int(value)}
 	if value is int and want == TYPE_FLOAT:
 		return {"value": float(value)}
@@ -277,6 +281,10 @@ static func _coerce_plain(name: String, value: Variant, known: bool) -> Dictiona
 		var parsed: Variant = str_to_var(String(value))
 		if typeof(parsed) == want:
 			return {"value": parsed}
+		if parsed is float and want == TYPE_INT and GDLLMTools._whole_int_float(parsed):
+			return {"value": int(parsed)}
+		if parsed is int and want == TYPE_FLOAT:
+			return {"value": float(parsed)}
 	var converted: Variant = type_convert(value, want)
 	if typeof(converted) == want and (value is Array or value is Dictionary or want in [TYPE_STRING, TYPE_STRING_NAME, TYPE_BOOL]):
 		return {"value": converted}

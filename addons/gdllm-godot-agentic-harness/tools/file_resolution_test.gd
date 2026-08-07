@@ -7,6 +7,7 @@ extends SceneTree
 
 # Preloaded rather than referenced by class_name so the test runs in a checkout whose global class cache hasn't been built yet.
 const GDLLMTools = preload("res://addons/gdllm-godot-agentic-harness/gdllm_tools.gd")
+const GDLLMSettings = preload("res://addons/gdllm-godot-agentic-harness/gdllm_settings.gd")
 
 const FIXTURE_DIR := "res://resolve_test_fixture"
 const UNIQUE := "gdllm_resolve_probe_unique.txt"
@@ -35,6 +36,7 @@ func _init() -> void:
 	_test_near_miss_suggested()
 	_test_plain_not_found()
 	_test_user_path_untouched()
+	_test_containment_fence()
 	_test_read_file_end_to_end()
 	_test_resolution_note()
 	_test_write_guards()
@@ -100,6 +102,63 @@ func _test_scene_detail_filter() -> void:
 	_check(miss.contains("none of 46 match \"zzz\""), "a filter matching nothing says so")
 	var treeless := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "filter": "prop"}))["content"])
 	_check(treeless.begins_with("Error") and treeless.contains("node_path"), "filter without node_path is refused with the shape")
+
+
+## The containment fence at the resolvers: an escaping path resolves to nothing and the not-found composer reports the refusal (naming the setting that lifts it) instead of a missing file; the single toggle drops the fence for relative escapes and absolute paths alike, and read_file end-to-end serves an outside file only once it is dropped.
+func _test_containment_fence() -> void:
+	var root_abs := ProjectSettings.globalize_path("res://").simplify_path().trim_suffix("/")
+	var outside_abs := root_abs.path_join("..").simplify_path().path_join("gdllm_fence_probe.txt")
+	_write(outside_abs, "over the fence")
+	_check(GDLLMTools._resolve_file_path("res://../gdllm_fence_probe.txt") == "", "a res://../ escape resolves to nothing while the fence is up")
+	_check(GDLLMTools._resolve_file_path("../gdllm_fence_probe.txt") == "", "a bare ../ escape resolves to nothing too")
+	_check(GDLLMTools._resolve_dir_path("res://..") == "", "a directory escape resolves to nothing")
+	var refusal := GDLLMTools._file_not_found("res://../gdllm_fence_probe.txt")
+	_check(refusal.contains("OUTSIDE the project") and refusal.contains("Allow Tool Calls Outside"), "the refusal says outside, not missing, and names the setting that lifts the fence")
+	var read := String((await GDLLMTools.execute("read_file", {"path": "res://../gdllm_fence_probe.txt"}))["content"])
+	_check(read.contains("OUTSIDE the project"), "read_file surfaces the fence refusal end to end")
+	_check(GDLLMTools._file_not_found("/definitely/not/here.txt").contains("Allow Tool Calls Outside"), "an absolute outside path is refused with the setting named, never remapped into the project")
+	# Hostile spellings the fence must judge the same as their plain forms.
+	_check(GDLLMTools._outside_path_guard("..\\..\\gdllm_x.txt") != "", "a backslashed traversal is judged like the slashed one")
+	_check(GDLLMTools._outside_path_guard("res:////gdllm_x.txt") == "", "extra slashes collapse inside the project, not past it")
+	_check(GDLLMTools._outside_path_guard("C:/gdllm_x.txt") != "", "a drive-lettered path is absolute intent, judged by where it lands")
+	# A uid registered under an odd in-project spelling still resolves to the canonical form, so the project-tree services see it.
+	var odd_id := ResourceUID.create_id()
+	ResourceUID.add_id(odd_id, ProjectSettings.globalize_path(FIXTURE_DIR.path_join("a").path_join(UNIQUE)).simplify_path())
+	_check(GDLLMTools._resolve_file_path(ResourceUID.id_to_text(odd_id)) == FIXTURE_DIR.path_join("a").path_join(UNIQUE), "a uid recorded under an absolute in-project spelling resolves to its res:// form")
+	ResourceUID.remove_id(odd_id)
+	# A uid whose REGISTERED path lies outside faces the same fence as a spelled path — the registry is data, not an exemption.
+	var alien_id := ResourceUID.create_id()
+	ResourceUID.add_id(alien_id, outside_abs)
+	var alien_uid := ResourceUID.id_to_text(alien_id)
+	_check(GDLLMTools._resolve_file_path(alien_uid) == "", "a uid registered to an outside file resolves to nothing while the fence is up")
+	_check(GDLLMTools._file_not_found(alien_uid).contains("OUTSIDE the project"), "and its refusal reports the fence, not a stale registration")
+	GDLLMSettings.headless_allow_outside_tool_calls = true
+	_check(GDLLMTools._resolve_file_path(alien_uid) == outside_abs, "the toggle lets the same uid resolve to its outside file")
+	GDLLMSettings.headless_allow_outside_tool_calls = false
+	ResourceUID.remove_id(alien_id)
+	# Canonicalization: an absolute or dotted spelling of an IN-project location is the same file, resolved and disclosed calmly.
+	var unique_res := FIXTURE_DIR.path_join("a").path_join(UNIQUE)
+	var unique_abs := ProjectSettings.globalize_path(unique_res).simplify_path()
+	_check(GDLLMTools._resolve_file_path(unique_abs) == unique_res, "an absolute spelling of an in-project file resolves to its res:// form")
+	_check(GDLLMTools._resolution_note(unique_abs, unique_res).contains("same location"), "the remap is disclosed as the same location, not as a by-name resolution")
+	_check(GDLLMTools._resolve_file_path(FIXTURE_DIR.path_join("a/../a").path_join(UNIQUE)) == unique_res, "an in-project ../ detour collapses to the canonical path")
+	GDLLMSettings.headless_allow_outside_tool_calls = true
+	_check(GDLLMTools._resolve_file_path("res://../gdllm_fence_probe.txt") == outside_abs, "the toggle lets the same escape resolve, canonicalized to its absolute form")
+	_check(GDLLMTools._resolve_file_path(outside_abs) == outside_abs, "the toggle lets an absolute OS path resolve as-is")
+	_check(GDLLMTools._resolve_dir_path(outside_abs.get_base_dir()) == outside_abs.get_base_dir(), "the toggle lets an absolute directory resolve as-is")
+	read = String((await GDLLMTools.execute("read_file", {"path": outside_abs}))["content"])
+	_check(read.contains("over the fence"), "read_file serves the outside file once the fence is dropped")
+	# A missing outside path is missing AT ITS OWN LOCATION — the in-project name search once answered this with "2 files in the project are named README.md", and the model concluded outside files were unreachable at all.
+	var gone := outside_abs.get_base_dir().path_join("gdllm_fence_gone.txt")
+	var gone_msg := GDLLMTools._file_not_found(gone)
+	_check(gone_msg.contains("nothing exists at " + gone) and gone_msg.contains("list_directory"), "a missing outside path is reported missing at its own location, with the directory listing as the way forward")
+	_check(not gone_msg.contains("in the project are named"), "no in-project name search answers for an outside request")
+	var gone_dir := outside_abs.get_base_dir().path_join("gdllm_fence_gone_dir")
+	var gone_dir_msg := String((await GDLLMTools.execute("list_directory", {"path": gone_dir}))["content"])
+	_check(gone_dir_msg.contains("nothing exists at " + gone_dir), "a missing outside DIRECTORY is reported missing at its own location too")
+	_check(not gone_dir_msg.contains("in the project"), "no in-project directory search answers for an outside request")
+	GDLLMSettings.headless_allow_outside_tool_calls = false
+	DirAccess.remove_absolute(outside_abs)
 
 
 func _write(path: String, text: String) -> void:
