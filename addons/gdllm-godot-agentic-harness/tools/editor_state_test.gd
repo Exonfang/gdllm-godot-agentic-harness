@@ -55,8 +55,9 @@ func _test_search_reachability() -> void:
 	_check("read_editor_selection" in _names(GDLLMTools.search("what user selected", false)), "a natural selected-what phrase finds read_editor_selection")
 	_check("read_undo_history" in _names(GDLLMTools.search("undo", false)), "\"undo\" finds read_undo_history")
 	_check("read_undo_history" in _names(GDLLMTools.search("recent user actions", false)), "a what-did-they-do phrase finds read_undo_history")
-	_check("open_for_user" in _names(GDLLMTools.search("open file user", false)), "an open-for-them phrase finds open_for_user")
-	_check(_names(GDLLMTools.search("open_for_user", false)) == ["open_for_user"], "exact name returns only open_for_user")
+	_check("open_for_user" in _names(GDLLMTools.search("open file user", true)), "an open-for-them phrase finds open_for_user when project-code loading is authorized")
+	_check(_names(GDLLMTools.search("open_for_user", true)) == ["open_for_user"], "exact name returns only open_for_user when authorized")
+	_check(not "open_for_user" in _names(GDLLMTools.search("open_for_user", false)), "open_for_user stays hidden without project-code execution authority")
 
 
 func _test_headless_refusals() -> void:
@@ -65,7 +66,7 @@ func _test_headless_refusals() -> void:
 	var undo: Dictionary = await GDLLMTools.execute("read_undo_history", {})
 	_check(String(undo["content"]).begins_with("Error") and String(undo["content"]).contains("headless"), "read_undo_history refuses headless naming the cause")
 	var real_path := "res://addons/gdllm-godot-agentic-harness/gdllm_editor_state.gd"
-	var open: Dictionary = await GDLLMTools.execute("open_for_user", {"path": real_path})
+	var open: Dictionary = await GDLLMTools.execute("open_for_user", {"path": real_path}, true)
 	var content := String(open["content"])
 	_check(content.begins_with("Error") and content.contains("headless"), "open_for_user refuses headless naming the cause")
 	_check(content.contains(real_path), "the headless open refusal still reports the resolved path")
@@ -75,16 +76,16 @@ func _test_headless_refusals() -> void:
 func _test_argument_validation() -> void:
 	var undo: Dictionary = await GDLLMTools.execute("read_undo_history", {"bogus": 3})
 	_check(String(undo["content"]).contains("unrecognized argument") and String(undo["content"]).contains("window"), "a misnamed undo argument errors naming the real key")
-	var junk: Dictionary = await GDLLMTools.execute("open_for_user", {"junk": true})
+	var junk: Dictionary = await GDLLMTools.execute("open_for_user", {"junk": true}, true)
 	_check(String(junk["content"]).contains("unrecognized argument"), "open_for_user with only unknown keys errors instead of ignoring them")
-	var missing: Dictionary = await GDLLMTools.execute("open_for_user", {})
+	var missing: Dictionary = await GDLLMTools.execute("open_for_user", {}, true)
 	_check(String(missing["content"]).contains("no file was named"), "open_for_user without a path says nothing was opened and why")
 
 
 func _test_open_for_user_resolution() -> void:
-	var ghost: Dictionary = await GDLLMTools.execute("open_for_user", {"path": "no_such_file_anywhere.gd"})
+	var ghost: Dictionary = await GDLLMTools.execute("open_for_user", {"path": "no_such_file_anywhere.gd"}, true)
 	_check(String(ghost["content"]).begins_with("Error") and String(ghost["content"]).contains("Nothing was opened"), "an unresolvable path is refused stating nothing was opened")
-	var dir: Dictionary = await GDLLMTools.execute("open_for_user", {"path": "res://addons"})
+	var dir: Dictionary = await GDLLMTools.execute("open_for_user", {"path": "res://addons"}, true)
 	_check(String(dir["content"]).contains("DIRECTORY"), "a directory is named as one rather than reported missing")
 
 

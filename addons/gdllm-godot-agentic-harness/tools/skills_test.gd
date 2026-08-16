@@ -253,13 +253,19 @@ func _test_skill_file_capitalization() -> void:
 	conflicts = []
 	skills = GDLLMInstructions.discover_skills(GDLLMInstructions.SKILLS_DIR, conflicts)
 	var delta := GDLLMInstructions.find_skill("Delta", skills)
-	_check(String(delta.get("path", "")).ends_with("delta/SKILL.md"), "the exact SKILL.md spelling wins a capitalization conflict")
-	_check(String(delta.get("body", "")).contains("Uppercase wins"), "the winning spelling's body is the one served")
 	var cap := ""
 	for entry in conflicts:
 		if String(entry).contains("spellings of SKILL.md"):
 			cap = String(entry)
-	_check(cap.contains("delta") and cap.contains("skill.md") and cap.contains("SKILL.md"), "the capitalization caption names the winner and the ignored file")
+	var delta_dir := DirAccess.open(SKILLS_ROOT + "/delta")
+	if delta_dir != null and delta_dir.is_equivalent("skill.md", "SKILL.md"):
+		_check(String(delta.get("path", "")).ends_with("delta/skill.md"), "a case-insensitive filesystem keeps the one physical spelling")
+		_check(String(delta.get("body", "")).contains("Uppercase wins"), "rewriting the equivalent spelling updates the one discovered skill")
+		_check(cap == "", "equivalent spellings do not invent a capitalization conflict")
+	else:
+		_check(String(delta.get("path", "")).ends_with("delta/SKILL.md"), "the exact SKILL.md spelling wins a capitalization conflict")
+		_check(String(delta.get("body", "")).contains("Uppercase wins"), "the winning spelling's body is the one served")
+		_check(cap.contains("delta") and cap.contains("skill.md") and cap.contains("SKILL.md"), "the capitalization caption names the winner and the ignored file")
 	_check(GDLLMInstructions.skills_signature().contains("delta/skill.md"), "the losing spelling still signs, so deleting it reads as a change")
 	DirAccess.remove_absolute(SKILLS_ROOT + "/delta/skill.md")
 	DirAccess.remove_absolute(SKILLS_ROOT + "/delta/SKILL.md")
@@ -317,10 +323,11 @@ func _test_use_skill_whole() -> void:
 	file.store_string("---\nname: Long Guide\n---\n" + body)
 	file.close()
 	var content := await _run("use_skill", {"name": "Long Guide"})
-	_check(content.contains(body), "a long skill comes back whole — instructions are never split into parts")
+	var wrapped := GDLLMInstructions.skill_body_block("Long Guide", SKILLS_ROOT + "/long.md", body)
+	_check(content.contains(wrapped), "a long skill comes back whole inside its untrusted-data boundary — instructions are never split into parts")
 	_check(not content.contains("part") and not content.contains("[Skill continues"), "a long result carries no windowing residue")
 	var stray := await _run("use_skill", {"name": "Long Guide", "part": 2})
-	_check(stray.contains(body), "a stray part key still serves the whole body — nothing is withheld")
+	_check(stray.contains(wrapped), "a stray part key still serves the whole bounded body — nothing is withheld")
 	DirAccess.remove_absolute(SKILLS_ROOT + "/long.md")
 
 

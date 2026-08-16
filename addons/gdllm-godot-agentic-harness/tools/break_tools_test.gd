@@ -263,12 +263,13 @@ func _test_refusals() -> void:
 	# An unrecognized argument NAME is answered before the environment is judged (as in the other game tools), but an unrecognized action VALUE is checked after, so the headless refusal wins here and the usage line is what carries the actions.
 	_check(Tools.DEBUG_GAME_USAGE.contains("continue") and Tools.DEBUG_GAME_USAGE.contains("out"), "the usage line an unknown action is answered with names the actions that exist")
 	var gated_step: Dictionary = await Tools.execute("debug_game", {"action": "continue"}, false, false)
-	_check(String(gated_step["content"]).contains("runs the project's own code"), "debug_game's gate refusal says it runs code, since stepping resumes the project's own code")
+	_check(String(gated_step["content"]).contains("Run project code"), "debug_game's gate refusal names the explicit execution permission")
 	var gated_point: Dictionary = await Tools.execute("set_breakpoint", {"path": "res://a.gd", "line": 3}, false, false)
-	_check(String(gated_point["content"]).contains("where the project's code halts"), "set_breakpoint's gate refusal describes halting, not running or modifying — neither of which it does")
+	_check(String(gated_point["content"]).contains("Run project code"), "set_breakpoint's gate refusal names the execution boundary of the debugger")
 	var catalog := String(Tools.tool_search_schema(false)["function"]["description"])
-	_check(catalog.contains("read_game_break"), "reading a paused game is a read tool, listed even with Make changes off")
-	_check(not catalog.contains("debug_game"), "the stepping tool is not offered while Make changes is off")
+	_check(not catalog.contains("read_game_break") and not catalog.contains("debug_game"), "debugger tools stay hidden while Run project code is off")
+	var executable_catalog := String(Tools.tool_search_schema(true)["function"]["description"])
+	_check(executable_catalog.contains("read_game_break") and executable_catalog.contains("debug_game"), "debugger tools appear once execution is explicitly enabled")
 
 
 ## The "break" action: the one debugger control whose precondition is a RUNNING game, and whose spellings must not collide with suspend_game's between-frames freeze.

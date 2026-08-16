@@ -169,13 +169,13 @@ func _test_gate_and_flags() -> void:
 	_check(not Tools.is_mutating("read_game_ui"), "the snapshot is a read tool, ungated")
 	_check(Tools.RUN_TOOLS.has("send_game_input") and Tools.RUN_TOOLS.has("call_game_method"), "both driving tools carry the runs-code refusal wording")
 	var gated: Dictionary = await Tools.execute("send_game_input", {"steps": [{"action": "jump"}]})
-	_check(String(gated["content"]).contains("runs the project's own code") and String(gated["content"]).contains("Make changes"), "the gate refusal words what the tool does, not a file-edit lie")
+	_check(String(gated["content"]).contains("loads or executes project-controlled code") and String(gated["content"]).contains("Run project code"), "the gate refusal names the dedicated execution capability")
 	var call_gated: Dictionary = await Tools.execute("call_game_method", {"path": "/root", "method": "get"})
-	_check(String(call_gated["content"]).contains("runs the project's own code"), "call_game_method's gate refusal matches")
+	_check(String(call_gated["content"]).contains("loads or executes project-controlled code"), "call_game_method's gate refusal matches")
 
 
 func _test_headless_refusals() -> void:
-	var ui: Dictionary = await Tools.execute("read_game_ui", {})
+	var ui: Dictionary = await Tools.execute("read_game_ui", {}, true)
 	_check(String(ui["content"]).begins_with("Error:") and String(ui["content"]).contains("headless"), "read_game_ui refuses by name in a headless run")
 	_check(String(ui["content"]).contains("no game to read"), "the snapshot refusal says what is missing")
 	var drive: Dictionary = await Tools.execute("send_game_input", {"steps": [{"action": "jump"}]}, true)
@@ -190,7 +190,7 @@ func _test_headless_refusals() -> void:
 	_check(String(incomplete["content"]).contains("method"), "a methodless call carries the usage shape")
 	var reach: Dictionary = await Tools.execute("call_game_method", {"path": "/root", "method": "get", "args": ["name"]}, true)
 	_check(String(reach["content"]).contains("no game to reach"), "call_game_method refuses by name in a headless run")
-	var unexpected: Dictionary = await Tools.execute("read_game_ui", {"bogus": 1})
+	var unexpected: Dictionary = await Tools.execute("read_game_ui", {"bogus": 1}, true)
 	_check(String(unexpected["content"]).contains("path"), "an unknown argument answers with the usage line")
 	var transport: Dictionary = await Game.command({"op": "ping"}, 100)
 	_check(not bool(transport["ok"]) and String(transport["why_kind"]) == "headless", "the transport itself reports the headless rung for the tools to word")

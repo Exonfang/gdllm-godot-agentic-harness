@@ -117,21 +117,22 @@ func _test_long_file_map_and_ranged_read() -> void:
 	_check(not whole.has("subagent") and String(whole.get("content", "")).contains("x"), "a many-line but small file is returned whole — the gate is characters, not lines")
 
 
-## read_file on a .tscn defaults to the saved-tree map (shape-only, so the edit gate stays unsatisfied), full/range still return the real text, and a .tscn the engine cannot load falls through to the raw read.
+## read_file on a .tscn is an inert text read: it never invokes ResourceLoader,
+## and default/full/range all return serialized source rather than executing a
+## project-controlled scene dependency.
 func _test_scene_read_map() -> void:
 	var p := TMP_DIR + "/map_sample.tscn"
 	_write(p, "[gd_scene format=3]\n\n[node name=\"Root\" type=\"Node2D\"]\n\n[node name=\"Hero\" type=\"Sprite2D\" parent=\".\"]\n")
 	var out := await _run("read_file", {"path": p}, false)
-	_check(out.contains("Saved scene tree of") and out.contains("Hero"), "a .tscn read defaults to the saved node tree")
-	_check(not out.contains("[node name="), "the tree view carries no raw serialized text")
-	_check(out.contains("(6 lines)") and out.contains("\"full\" set to true"), "the map names the withheld size and the full: true way back to the text")
-	_check(GDLLMTools._fallback_ledger.seen_files.get(p) == false, "the scene map marks the file shape-only")
+	_check(out.contains("[gd_scene") and out.contains("[node name=\"Hero\""), "a .tscn read defaults to inert serialized text")
+	_check(not out.contains("Saved scene tree of"), "read_file never ResourceLoader-maps a scene")
+	_check(GDLLMTools._fallback_ledger.seen_files.get(p) == true, "the inert text read marks the exact scene source seen")
 	out = await _run("edit_file", {"path": p, "old_string": "Hero", "new_string": "Hero2"}, true)
-	_check(out.begins_with("Error") and out.contains("full=true"), "the scene map does not unlock edit_file, and the refusal names full=true")
+	_check(out.begins_with("Edited"), "an exact serialized-text read grounds a later edit")
 	out = await _run("read_file", {"path": p, "start_line": 5, "end_line": 5}, false)
-	_check(out.contains("[node name=\"Hero\""), "a ranged read of a .tscn still returns the raw lines")
+	_check(out.contains("[node name=\"Hero2\""), "a ranged read of a .tscn returns raw lines")
 	out = await _run("read_file", {"path": p, "full": true}, false)
-	_check(out.contains("[node name=\"Root\"") and out.contains("[node name=\"Hero\""), "full: true returns the whole serialized text")
+	_check(out.contains("[node name=\"Root\"") and out.contains("[node name=\"Hero2\""), "full: true returns the whole serialized text")
 	_check(GDLLMTools._fallback_ledger.seen_files.get(p) == true, "a full read marks the scene seen verbatim")
 	var broken := TMP_DIR + "/broken_sample.tscn"
 	_write(broken, "[gd_scene format=3]\nthis line is not scene syntax\n")
@@ -253,12 +254,12 @@ func _test_hidden_guard_and_row_cap() -> void:
 	DirAccess.make_dir_recursive_absolute(engine_cache)
 	DirAccess.make_dir_recursive_absolute(stash)
 	var out := await _run("list_directory", {"path": engine_cache}, false)
-	_check(out.begins_with("Error:") and out.contains("engine's own cache"), "a .godot component is refused as the engine cache")
-	_check(out.contains(".import"), "the refusal points at the real levers instead")
+	_check(out.begins_with("Error:") and out.contains("protected") and out.contains("editor-cache"), "a .godot component is refused as protected editor cache")
+	_check(not out.contains("entry_"), "the protected-cache refusal discloses none of its contents")
 	out = await _run("list_directory", {"path": stash}, false)
 	_check(out.begins_with("Error:") and out.contains("hidden directory"), "any other hidden component is refused generically")
 	out = await _run("search_files", {"query": "anything", "path": engine_cache}, false)
-	_check(out.begins_with("Error:") and out.contains("engine's own cache"), "a search scoped into a hidden directory meets the same refusal")
+	_check(out.begins_with("Error:") and out.contains("protected"), "a search scoped into the editor cache meets the same protected-path refusal")
 	out = await _run("list_directory", {"path": "res://."}, false)
 	_check(not out.begins_with("Error:"), "the project root spelled res://. is navigation, not a hidden name")
 

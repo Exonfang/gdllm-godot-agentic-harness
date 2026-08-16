@@ -2,11 +2,13 @@
 class_name GDLLMOAuth extends Node
 ## "Sign in with ChatGPT" for the OpenAI ChatGPT Subscription source kind: a standard OAuth 2.0 authorization-code flow with PKCE (RFC 6749/7636), written from the protocol against Godot's own primitives — no third-party code. An instance runs one interactive sign-in: it opens the browser on OpenAI's authorization page, catches the redirect on a loopback listener, exchanges the code for tokens, and stores them; the static half owns the per-source token store and the refresh path requests ride on.
 ## The endpoint constants and client id are OpenAI's published values for ChatGPT sign-in (public constants of the open Codex CLI; PKCE clients carry no secret).
-## Tokens persist in EditorSettings beside the source list — the same custody API keys already have — keyed by source id, so a renamed source keeps its sign-in and deleting a row orphans nothing sensitive beyond what the key field already stored.
+## Tokens persist in GDLLMCredentialStore, separate from EditorSettings and chat
+## records. Existing plaintext EditorSettings records migrate transactionally.
 
 signal finished(ok: bool, detail: String) ## The flow ended: signed in and stored (true), or failed/cancelled with a user-facing reason (false). Emitted exactly once; the instance is done either way and should be freed.
 
-const SETTINGS_KEY := "gdllm/connection/chatgpt_tokens_fallback" ## EditorSettings key holding the token store as a JSON object string, {source_id: {access_token, refresh_token, account_id, account_label, expires_at}}. Named "…_fallback" like its siblings — the Connections dialog's sign-in button is the primary editor.
+const SETTINGS_KEY := "gdllm/connection/chatgpt_tokens_fallback" ## Legacy plaintext setting, retained only as the migration source.
+const TOKENS_NAMESPACE := "chatgpt_oauth_tokens"
 
 const AUTH_URL := "https://auth.openai.com/oauth/authorize"
 const TOKEN_URL := "https://auth.openai.com/oauth/token"
@@ -134,7 +136,9 @@ func _exchange(code: String) -> void:
 	if not (parsed is Dictionary) or String(parsed.get("access_token", "")) == "":
 		_finish(false, "The token exchange failed: %s" % _token_error(parsed))
 		return
-	save_tokens(_source_id, parsed)
+	if not save_tokens(_source_id, parsed):
+		_finish(false, "The sign-in succeeded, but its credentials could not be stored safely. The previous sign-in, if any, was left unchanged.")
+		return
 	_finish(true, account_label(_source_id))
 
 
@@ -149,7 +153,7 @@ func _finish(ok: bool, detail: String) -> void:
 	if _server != null:
 		_server.stop()
 		_server = null
-	finished.emit(ok, detail)
+	finished.emit(ok, GDLLMSecretRedactor.redact(detail))
 
 
 ## Write the tiny confirmation page and finish the HTTP exchange, so the browser tab doesn't spin.
@@ -200,15 +204,17 @@ static func ensure_fresh(source_id: String, host: Node) -> String:
 	var parsed: Variant = await _post_form(host, TOKEN_URL, body)
 	_refresh_pending.erase(source_id)
 	if not (parsed is Dictionary) or String(parsed.get("access_token", "")) == "":
-		push_warning("GDLLMOAuth: token refresh failed for \"%s\": %s" % [source_id, _token_error(parsed)])
+		push_warning(GDLLMSecretRedactor.redact("GDLLMOAuth: token refresh failed for \"%s\": %s" % [source_id, _token_error(parsed)]))
 		# invalid_grant means this sign-in is dead (revoked, or a rotated token lost) — forget it, so the sign-in notices come back up with their one-click fix instead of every send failing the same way.
 		if parsed is Dictionary and String(parsed.get("error", "")) == "invalid_grant":
-			clear_tokens(source_id)
+			if not clear_tokens(source_id):
+				push_warning("GDLLMOAuth: the invalid local sign-in for \"%s\" could not be removed; the credential store still contains it." % source_id)
 		return ""
 	# A refresh response may rotate the refresh token; keep the old one when it doesn't.
 	if String(parsed.get("refresh_token", "")) == "":
 		parsed["refresh_token"] = record.get("refresh_token", "")
-	save_tokens(source_id, parsed)
+	if not save_tokens(source_id, parsed):
+		return ""
 	return String(tokens_for(source_id).get("access_token", ""))
 
 
@@ -232,12 +238,12 @@ static func account_label(source_id: String) -> String:
 
 ## The stored token record for `source_id`, {} when none (headless runs included — see GDLLMSettings.stored_map).
 static func tokens_for(source_id: String) -> Dictionary:
-	var record: Variant = GDLLMSettings.stored_map(SETTINGS_KEY).get(source_id)
-	return record if record is Dictionary else {}
+	_migrate_legacy_tokens()
+	return GDLLMCredentialStore.get_record(TOKENS_NAMESPACE, source_id)
 
 
 ## Store a token response for `source_id`, deriving the fields requests need: the account id claim the backend wants echoed as a header, a display label, and the refresh deadline from the access token's own exp claim (fallback: now + expires_in). Writing emits EditorSettings.settings_changed, which is how open sessions' sign-in notices refresh.
-static func save_tokens(source_id: String, token_response: Dictionary) -> void:
+static func save_tokens(source_id: String, token_response: Dictionary) -> bool:
 	var access := String(token_response.get("access_token", ""))
 	var claims := jwt_claims(access)
 	var auth_claim: Dictionary = claims["https://api.openai.com/auth"] if claims.get("https://api.openai.com/auth") is Dictionary else {}
@@ -249,27 +255,63 @@ static func save_tokens(source_id: String, token_response: Dictionary) -> void:
 	var previous := tokens_for(source_id)
 	var account_id := String(auth_claim.get("chatgpt_account_id", ""))
 	var account_label := String(id_claims.get("email", ""))
-	_write_record(source_id, {
+	var record := {
 		"access_token": access,
 		"refresh_token": String(token_response.get("refresh_token", "")),
 		"account_id": account_id if account_id != "" else String(previous.get("account_id", "")),
 		"account_label": account_label if account_label != "" else String(previous.get("account_label", "")),
 		"expires_at": expires_at,
-	})
+	}
+	GDLLMSecretRedactor.register_variant(record)
+	return _write_record(source_id, record)
 
 
 ## Drop `source_id`'s sign-in (the dialog's Sign out). The settings write refreshes open sessions' notices like save_tokens' does.
-static func clear_tokens(source_id: String) -> void:
-	_write_record(source_id, {})
+static func clear_tokens(source_id: String) -> bool:
+	# No documented revocation endpoint is configured for this public PKCE client,
+	# so sign-out honestly performs local deletion only. A provider-side session can
+	# still be revoked from the provider's account security controls.
+	return _write_record(source_id, {})
 
 
-static func _write_record(source_id: String, record: Dictionary) -> void:
-	var store := GDLLMSettings.stored_map(SETTINGS_KEY)
-	if record.is_empty():
-		store.erase(source_id)
-	else:
-		store[source_id] = record
-	EditorInterface.get_editor_settings().set_setting(SETTINGS_KEY, JSON.stringify(store))
+static func _write_record(source_id: String, record: Dictionary) -> bool:
+	return GDLLMCredentialStore.set_record(TOKENS_NAMESPACE, source_id, record)
+
+
+## Remove local tokens for deleted sources or rows changed away from the ChatGPT
+## kind. Called after source metadata is safely stored.
+static func remove_orphans(valid_source_ids: Array[String]) -> PackedStringArray:
+	_migrate_legacy_tokens()
+	var failed := PackedStringArray()
+	for id in GDLLMCredentialStore.get_namespace(TOKENS_NAMESPACE).keys():
+		if not valid_source_ids.has(String(id)):
+			if not clear_tokens(String(id)):
+				failed.append(String(id))
+	if not failed.is_empty():
+		push_warning("GDLLMOAuth: could not remove stored tokens for deleted or changed source(s): %s." % ", ".join(failed))
+	return failed
+
+
+## Move the historical EditorSettings JSON into the credential store. The legacy
+## value is erased only after the atomic store write verifies, so migration cannot
+## silently destroy a refresh token on write failure.
+static func _migrate_legacy_tokens() -> bool:
+	var es := EditorInterface.get_editor_settings()
+	if not es.has_setting(SETTINGS_KEY):
+		return true
+	var parsed: Variant = JSON.parse_string(String(es.get_setting(SETTINGS_KEY)))
+	if not (parsed is Dictionary) or parsed.is_empty():
+		return true
+	var records := GDLLMCredentialStore.get_namespace(TOKENS_NAMESPACE)
+	for id in parsed:
+		if parsed[id] is Dictionary:
+			records[id] = parsed[id]
+			GDLLMSecretRedactor.register_variant(parsed[id])
+	if not GDLLMCredentialStore.replace_namespace(TOKENS_NAMESPACE, records):
+		push_warning("GDLLM OAuth: legacy tokens remain in EditorSettings because credential migration could not be verified.")
+		return false
+	es.set_setting(SETTINGS_KEY, null)
+	return true
 
 
 ## Whether a token record needs refreshing at `now` — pure, so the margin rule is testable headless. A record without an expiry reads as stale: refreshing early costs one round-trip, riding an expired token costs the whole request.
@@ -325,7 +367,7 @@ static func _token_error(parsed: Variant) -> String:
 		var code := String(parsed.get("error", ""))
 		var description := String(parsed.get("error_description", ""))
 		if code != "" or description != "":
-			return ("%s: %s" % [code, description]) if code != "" and description != "" else code + description
+			return GDLLMSecretRedactor.redact(("%s: %s" % [code, description]) if code != "" and description != "" else code + description)
 	return "the token endpoint didn't answer (check your network and try again)"
 
 

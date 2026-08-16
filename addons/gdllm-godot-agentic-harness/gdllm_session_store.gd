@@ -12,6 +12,7 @@ signal store_failed(message: String)
 const DIR := "user://gdllm"
 const PATH := "user://gdllm/sessions.json"
 const DEFAULT_TITLE := "New chat"
+const UNIX_OWNER_READ_WRITE := 384 # 0600
 const ECHO_THINKING_TYPES: Array[String] = ["thinking", "redacted_thinking", "reasoning"] ## The provider-echo block types that ARE stored reasoning (Anthropic's thinking/redacted_thinking, the Responses API's reasoning items) — shared with the manage dialog's Thinking-size column, so what Clear Thinking strips and what the column counts can never drift apart (see strip_echo_thinking).
 # The save-debounce window is user-configurable — see GDLLMTunables' gdllm/interface section.
 
@@ -96,7 +97,19 @@ func flush() -> void:
 	if file == null:
 		_fail("GDLLM sessions: could not write %s — chat sessions are NOT being saved, and changes since the last successful save will be lost when the editor exits. Check the folder's permissions and free disk space." % PATH)
 		return
-	file.store_string(JSON.stringify({"active": active_id, "sessions": sessions}))
+	var payload := _persistence_payload()
+	file.store_string(JSON.stringify(payload))
+	file.flush()
+	file = null
+	if OS.get_name() in ["Linux", "macOS", "FreeBSD", "NetBSD", "OpenBSD", "BSD"]:
+		FileAccess.set_unix_permissions(PATH, UNIX_OWNER_READ_WRITE)
+
+
+## The final serialization boundary, exposed as a pure seam for security tests.
+## A second whole-payload pass catches legacy/in-memory records not created via
+## set_history, including tool arguments and assistant diagnostics.
+func _persistence_payload() -> Dictionary:
+	return GDLLMSecretRedactor.redact_variant({"active": active_id, "sessions": sessions})
 
 
 ## Create, register as active, persist, and return a fresh empty session record.
@@ -147,7 +160,7 @@ func set_history(id: String, history: Array) -> void:
 	var record := get_session(id)
 	if record.is_empty():
 		return
-	record["history"] = history.duplicate(true)
+	record["history"] = GDLLMSecretRedactor.redact_variant(history)
 	record["updated"] = int(Time.get_unix_time_from_system())
 	save()
 
@@ -233,6 +246,15 @@ func set_delete_files(id: String, on: bool) -> void:
 	save()
 
 
+## Persist one session's explicit permission to execute project code. It is independent of edits: validation and game-running tools can execute without changing source files.
+func set_run_project_code(id: String, on: bool) -> void:
+	var record := get_session(id)
+	if record.is_empty() or bool(record.get("run_project_code", false)) == on:
+		return
+	record["run_project_code"] = on
+	save()
+
+
 ## Persist one session's "Tools" state, the per-session counterpart to set_make_changes. No-op when absent or unchanged.
 func set_tools_enabled(id: String, on: bool) -> void:
 	var record := get_session(id)
@@ -261,6 +283,7 @@ func _new_record() -> Dictionary:
 		"is_open": true,
 		"make_changes": GDLLMSettings.is_new_session_edits_on(), ## Per-session write permission; whether a fresh session starts with it on is the user's editor setting.
 		"delete_files": GDLLMSettings.is_new_session_delete_on(), ## Per-session delete permission, seeded the same way; existing sessions keep their stored state.
+		"run_project_code": GDLLMSettings.is_new_session_execution_on(), ## Per-session execution permission. Off by default so reading or validating never silently runs the project.
 		"tools_enabled": true,
 		"effort": GDLLMEfforts.remembered_level_for(String(GDLLMSettings.get_chat_model())), ## Seeded once from the model's last user-picked level (see GDLLMEfforts.remember_level), so a new session opens at the effort its user actually runs the model at; from here on the record's own value is authoritative.
 		"history": [],
@@ -277,6 +300,8 @@ func _normalize(record: Dictionary, legacy_make_changes: bool) -> Dictionary:
 	record["updated"] = int(record.get("updated", now))
 	record["is_open"] = bool(record.get("is_open", true))
 	record["make_changes"] = bool(record.get("make_changes", legacy_make_changes))
+	record["delete_files"] = bool(record.get("delete_files", false))
+	record["run_project_code"] = bool(record.get("run_project_code", false))
 	record["tools_enabled"] = bool(record.get("tools_enabled", true))
 	# A record from before effort was stored per session ran at Default; stamping that explicitly keeps the per-model memory (which post-dates those records) from silently changing what an old session sends.
 	record["effort"] = String(record.get("effort", ""))

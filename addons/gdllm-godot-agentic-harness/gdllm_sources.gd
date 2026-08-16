@@ -3,8 +3,9 @@ class_name GDLLMSources
 ## Pure logic over the configured model sources: the list of places models come from (Ollama local/cloud, OpenAI-compatible endpoints like vLLM or Poolside, and Anthropic) and the qualified-id helpers that let one "model" string carry which source it belongs to.
 ## No UI, no transport — the dock's Connections dialog edits this list, and LLMClient consumes a resolved source (see resolve_qualified).
 
-const SETTINGS_KEY := "gdllm/connection/sources_fallback" ## EditorSettings key holding the sources as a JSON array string. Named "…/sources_fallback" so the settings dialog labels it "Sources Fallback" — a reminder the dock's Connections dialog is the primary editor.
+const SETTINGS_KEY := "gdllm/connection/sources_fallback" ## EditorSettings key holding non-secret source metadata as JSON. API keys live in GDLLMCredentialStore, never in this setting.
 const TEMPLATES_SEEDED_KEY := "gdllm/connection/templates_seeded" ## EditorSettings key listing (as a JSON array) the template ids already offered to this install. A template added after an install's first seeding appears exactly once through it — deleting the row sticks, instead of the template resurrecting on every load.
+const API_KEYS_NAMESPACE := "source_api_keys"
 const QUALIFIER := "::" ## Separates a source id from a model name in a qualified model id; neither part contains it.
 
 const KIND_OLLAMA := "ollama" ## Native Ollama wire format (/api/chat NDJSON), used by local and cloud alike.
@@ -25,12 +26,95 @@ static func get_sources() -> Array:
 	if not es.has_setting(SETTINGS_KEY):
 		return default_sources()
 	var parsed: Variant = JSON.parse_string(String(es.get_setting(SETTINGS_KEY)))
-	return parsed if parsed is Array else default_sources()
+	if not parsed is Array:
+		return default_sources()
+	_migrate_plaintext_keys(parsed)
+	return _hydrate_keys(parsed)
 
 
-## Persist the sources list as a JSON string. Writing it emits EditorSettings.settings_changed, which is how open clients pick up an endpoint or key edit made in the Connections dialog.
-static func save_sources(sources: Array) -> void:
-	EditorInterface.get_editor_settings().set_setting(SETTINGS_KEY, JSON.stringify(sources))
+## Persist keys in the separate credential store first, verify that write, then
+## persist only source metadata. A credential-store failure leaves the previous
+## settings untouched, rather than silently dropping a key or falling back to
+## plaintext EditorSettings.
+static func save_sources(sources: Array) -> bool:
+	var split := _split_keys(sources)
+	var keys: Dictionary = split["keys"]
+	var metadata: Array = split["metadata"]
+	var valid_chatgpt_ids: Array[String] = []
+	for source_value in sources:
+		if not source_value is Dictionary:
+			continue
+		var source: Dictionary = source_value
+		var id := String(source.get("id", ""))
+		if id != "" and String(source.get("kind", "")) == KIND_OPENAI_CHATGPT:
+			valid_chatgpt_ids.append(id)
+	if not GDLLMCredentialStore.replace_namespace(API_KEYS_NAMESPACE, keys):
+		push_warning("GDLLM sources: credentials could not be saved; source settings were not changed.")
+		return false
+	EditorInterface.get_editor_settings().set_setting(SETTINGS_KEY, JSON.stringify(metadata))
+	# Deleted sources and rows changed away from the subscription kind must not
+	# leave reusable refresh tokens behind.
+	var orphan_failures := GDLLMOAuth.remove_orphans(valid_chatgpt_ids)
+	if not orphan_failures.is_empty():
+		push_warning("GDLLM sources: metadata was saved, but reusable local OAuth tokens remain for: %s. Retry after fixing credential-store access." % ", ".join(orphan_failures))
+	return true
+
+
+## One-time, fail-closed migration from the historical source JSON. Secrets are
+## written and read back by GDLLMCredentialStore before the plaintext setting is
+## scrubbed. On failure the old setting remains intact so access is not lost.
+static func _migrate_plaintext_keys(sources: Array) -> bool:
+	var split := _split_keys(sources, GDLLMCredentialStore.get_namespace(API_KEYS_NAMESPACE))
+	if not bool(split["found_plaintext"]):
+		return true
+	var keys: Dictionary = split["keys"]
+	var metadata: Array = split["metadata"]
+	if not GDLLMCredentialStore.replace_namespace(API_KEYS_NAMESPACE, keys):
+		push_warning("GDLLM sources: legacy API keys remain in EditorSettings because credential migration could not be verified.")
+		return false
+	EditorInterface.get_editor_settings().set_setting(SETTINGS_KEY, JSON.stringify(metadata))
+	# Keep the caller's in-memory array metadata-only before it is hydrated from
+	# the now-authoritative store.
+	sources.assign(metadata)
+	return true
+
+
+## Pure half of source migration, exposed for headless regression tests. Existing
+## stored keys are retained unless a legacy plaintext row supplies a replacement.
+static func _split_keys(sources: Array, existing_keys: Dictionary = {}) -> Dictionary:
+	var keys := existing_keys.duplicate(true)
+	var metadata: Array = []
+	var found_plaintext := false
+	for source_value in sources:
+		if not source_value is Dictionary:
+			continue
+		var source: Dictionary = source_value.duplicate(true)
+		var id := String(source.get("id", ""))
+		var had_key_field := source.has("api_key")
+		var key := String(source.get("api_key", ""))
+		found_plaintext = found_plaintext or had_key_field
+		if id != "" and key != "":
+			keys[id] = key
+			GDLLMSecretRedactor.register_secret(key)
+		elif had_key_field and id != "":
+			keys.erase(id)
+		source.erase("api_key")
+		metadata.append(source)
+	return {"metadata": metadata, "keys": keys, "found_plaintext": found_plaintext}
+
+
+static func _hydrate_keys(sources: Array) -> Array:
+	var keys := GDLLMCredentialStore.get_namespace(API_KEYS_NAMESPACE)
+	var hydrated: Array = []
+	for source_value in sources:
+		if not source_value is Dictionary:
+			continue
+		var source: Dictionary = source_value.duplicate(true)
+		var key := String(keys.get(String(source.get("id", "")), source.get("api_key", "")))
+		source["api_key"] = key
+		GDLLMSecretRedactor.register_secret(key)
+		hydrated.append(source)
+	return hydrated
 
 
 ## Seed the sources list on first run if it's unset — every template disabled, so no unconfigured endpoint is swept for models (and errors) before the user has set anything up. Idempotent — leaves an existing list untouched.

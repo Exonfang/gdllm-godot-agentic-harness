@@ -14,7 +14,7 @@ static func read_output(lines: int, filter: String) -> String:
 	var label := _output_label()
 	if label == null:
 		return "Error: the Output panel's log could not be located in this editor build — its internal layout may have changed. Tell the user the read_output tool needs updating for this editor version."
-	return format_output(label.get_parsed_text(), lines, filter) + _output_hidden_note()
+	return GDLLMSecretRedactor.redact(format_output(label.get_parsed_text(), lines, filter) + _output_hidden_note())
 
 
 ## The newest entries of the debugger's Errors tab across every session, filtered when `filter` is non-empty; `limit` <= 0 means the default.
@@ -30,7 +30,7 @@ static func read_errors(limit: int, filter: String) -> String:
 		if sessions.size() > 1:
 			body = "%s:\n%s" % [session["session"], body]
 		blocks.append(body)
-	return "\n\n".join(PackedStringArray(blocks))
+	return GDLLMSecretRedactor.redact("\n\n".join(PackedStringArray(blocks)))
 
 
 ## Editor-only baseline for a run capture: the Output panel's current trimmed line count and last line, from which output_delta_since measures what a run printed; {} when the panel can't be located (or headless, where none exists).
@@ -52,6 +52,10 @@ static func output_delta_since(baseline: Dictionary) -> Dictionary:
 	if label == null:
 		return {"lines": [], "reset": false, "missing": true}
 	var delta := lines_delta(int(baseline["count"]), String(baseline["last"]), output_lines(label.get_parsed_text()))
+	var safe_lines: Array = []
+	for line in delta["lines"]:
+		safe_lines.append(GDLLMSecretRedactor.redact(String(line)))
+	delta["lines"] = safe_lines
 	delta["missing"] = false
 	return delta
 
@@ -73,6 +77,7 @@ static func errors_delta_since(baseline: Dictionary) -> Array:
 		return out
 	for session in _error_trees():
 		var delta := entries_delta(error_entries(session["tree"]), int(baseline.get(String(session["session"]), 0)))
+		delta["entries"] = GDLLMSecretRedactor.redact_variant(delta["entries"])
 		delta["session"] = String(session["session"])
 		out.append(delta)
 	return out
@@ -80,12 +85,12 @@ static func errors_delta_since(baseline: Dictionary) -> Array:
 
 ## Public face of the view-controls rider for the run tools' capture reports, which disclose a filtered panel the same way read_output does; "" headless, where no panel exists to have controls.
 static func output_hidden_note() -> String:
-	return _output_hidden_note() if Engine.is_editor_hint() else ""
+	return GDLLMSecretRedactor.redact(_output_hidden_note()) if Engine.is_editor_hint() else ""
 
 
 ## Public face of _format_entry for the run tools' capture reports, which render error entries outside this class.
 static func format_error_entry(entry: Dictionary) -> String:
-	return _format_entry(entry)
+	return GDLLMSecretRedactor.redact(_format_entry(entry))
 
 
 ## Public face of the class-fingerprint walker for the other panel-reading namespaces (GDLLMPerf), so the one editor-widget location strategy lives in one place.
@@ -105,12 +110,12 @@ static func format_output(text: String, lines: int, filter: String) -> String:
 		var needle := filter.to_lower()
 		pool = all.filter(func(line: Variant) -> bool: return String(line).to_lower().contains(needle))
 		if pool.is_empty():
-			return "Output console: %d lines; none contain \"%s\"." % [all.size(), filter]
+			return GDLLMSecretRedactor.redact("Output console: %d lines; none contain \"%s\"." % [all.size(), filter])
 	var shown: Array = pool.slice(maxi(0, pool.size() - cap))
 	var body: Array = []
 	for line in shown:
 		body.append(_clip_line(String(line)))
-	return "%s\n%s" % [_output_header(all.size(), pool.size(), shown.size(), filter), "\n".join(PackedStringArray(body))]
+	return GDLLMSecretRedactor.redact("%s\n%s" % [_output_header(all.size(), pool.size(), shown.size(), filter), "\n".join(PackedStringArray(body))])
 
 
 ## Pure formatter behind read_errors, separated so the headless tests can drive it with synthetic entries.
@@ -128,12 +133,12 @@ static func format_errors(entries: Array, limit: int, filter: String) -> String:
 		var needle := filter.to_lower()
 		pool = entries.filter(func(entry: Variant) -> bool: return _entry_text(entry).to_lower().contains(needle))
 		if pool.is_empty():
-			return "Debugger error history: %d entries (%d errors, %d warnings); none contain \"%s\"." % [entries.size(), errors, entries.size() - errors, filter]
+			return GDLLMSecretRedactor.redact("Debugger error history: %d entries (%d errors, %d warnings); none contain \"%s\"." % [entries.size(), errors, entries.size() - errors, filter])
 	var shown: Array = pool.slice(maxi(0, pool.size() - cap))
 	var body: Array = []
 	for entry: Dictionary in shown:
 		body.append(_format_entry(entry))
-	return "%s\n%s" % [_errors_header(entries.size(), errors, pool.size(), shown.size(), filter), "\n".join(PackedStringArray(body))]
+	return GDLLMSecretRedactor.redact("%s\n%s" % [_errors_header(entries.size(), errors, pool.size(), shown.size(), filter), "\n".join(PackedStringArray(body))])
 
 
 ## One dictionary per recorded error — kind from the engine's own _is_warning/_is_error item marks, the two visible columns (time, message), and each child row (engine error, source line, stack frames) flattened to one line — so the formatter and the tests share a shape that isn't a live Tree.
@@ -189,7 +194,7 @@ static func tail_lines(lines: Array, cap: int) -> Dictionary:
 	var shown: Array = lines.slice(maxi(0, lines.size() - cap))
 	var body: Array = []
 	for line in shown:
-		body.append(_clip_line(String(line)))
+		body.append(_clip_line(GDLLMSecretRedactor.redact(String(line))))
 	return {"text": "\n".join(PackedStringArray(body)), "omitted": lines.size() - shown.size()}
 
 

@@ -29,9 +29,9 @@ func _enter_tree() -> void:
 	# Record break state from load, not from the first debugging tool call: a game can break before any tool asks, and the stack it reports arrives once (see GDLLMBreak).
 	GDLLMBreak.ensure_connected()
 
-	# The scrapped CTRL+G completion feature registered a GDLLMUtils autoload; drop it from a project that still carries it.
+	# The scrapped CTRL+G completion feature once registered GDLLMUtils, but old releases recorded no ownership metadata. Preserve any surviving value: deleting by name alone could remove another plugin's singleton.
 	if ProjectSettings.has_setting("autoload/GDLLMUtils"):
-		remove_autoload_singleton("GDLLMUtils")
+		push_warning("GDLLM: preserved the legacy GDLLMUtils autoload because its exact ownership cannot be proven; remove it manually if it still points to retired GDLLM code.")
 
 	# Keep the game agent's autoload matched to its setting — now (covers installs enabled before the agent existed, where _enable_plugin never re-runs) and on every settings change (the checkbox is the remove lever, and it must act on the spot).
 	_sync_game_agent()
@@ -58,34 +58,25 @@ func _enable_plugin() -> void:
 
 ## Disabling the plugin takes its project footprint with it; re-enabling restores it.
 func _disable_plugin() -> void:
-	if ProjectSettings.has_setting("autoload/" + GAME_AGENT_AUTOLOAD):
-		remove_autoload_singleton(GAME_AGENT_AUTOLOAD)
-		_save_project_settings()
+	_apply_game_agent_autoload(false)
 
 
 ## Keep the GDLLMGameAgent autoload registered exactly while its setting says so, each change disclosed in the Output console — a project-file write should never be silent. Idempotent and cheap, so it can ride every settings_changed.
 func _sync_game_agent() -> void:
-	var want := GDLLMSettings.is_game_agent_enabled()
-	var registered := ProjectSettings.has_setting("autoload/" + GAME_AGENT_AUTOLOAD)
-	if want and not registered:
-		add_autoload_singleton(GAME_AGENT_AUTOLOAD, GAME_AGENT_SCRIPT)
-		_save_project_settings()
-		print("GDLLM: registered the %s autoload (Project Settings → Globals) — the in-game half of the game-driving tools; the %s setting removes it." % [GAME_AGENT_AUTOLOAD, GDLLMSettings.GAME_AGENT])
-	elif not want and registered:
-		remove_autoload_singleton(GAME_AGENT_AUTOLOAD)
-		_save_project_settings()
-		print("GDLLM: removed the %s autoload (%s is off); games already running keep the agent they launched with until restarted." % [GAME_AGENT_AUTOLOAD, GDLLMSettings.GAME_AGENT])
+	_apply_game_agent_autoload(GDLLMSettings.is_game_agent_enabled())
 
 
-## add/remove_autoload_singleton only update the in-memory ProjectSettings, but a launched game reads project.godot from DISK — an unsaved registration would never reach the game, so the change is saved on the spot (the same persistence set_project_setting uses).
-func _save_project_settings() -> void:
-	var save_err := ProjectSettings.save()
-	if save_err != OK:
-		push_warning("GDLLM: project.godot could not be saved (%s) — the %s autoload change will not reach launched games until the project is saved." % [error_string(save_err), GAME_AGENT_AUTOLOAD])
+## Apply the consented autoload state as one save+verify transaction. Foreign name collisions are preserved, and any failed or unverifiable save is rolled back rather than leaving editor memory and project.godot disagreeing.
+func _apply_game_agent_autoload(enabled: bool) -> void:
+	var result := GDLLMProjectMutation.sync_autoload(GAME_AGENT_AUTOLOAD, GAME_AGENT_SCRIPT, enabled)
+	if not bool(result["ok"]):
+		push_warning("GDLLM: " + String(result["message"]))
+	elif bool(result["changed"]):
+		print("GDLLM: %s The %s setting is the explicit project.godot consent and removal control." % [String(result["message"]), GDLLMSettings.GAME_AGENT])
 
 
 func _exit_tree() -> void:
-	# The agent autoload itself stays registered across unloads by design — _disable_plugin removes it when the user actually disables the plugin.
+	# The agent autoload itself stays registered across an editor/plugin reload; _disable_plugin removes only the exact value GDLLM owns when the user actually disables the plugin.
 	var settings := EditorInterface.get_editor_settings()
 	if settings.settings_changed.is_connected(_sync_game_agent):
 		settings.settings_changed.disconnect(_sync_game_agent)

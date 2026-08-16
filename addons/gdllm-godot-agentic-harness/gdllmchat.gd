@@ -248,6 +248,7 @@ func _open_session(record: Dictionary) -> GDLLMChatSession:
 	session.model_changed.connect(_on_session_model_changed)
 	session.make_changes_toggled.connect(_on_session_make_changes_toggled)
 	session.delete_files_toggled.connect(_on_session_delete_files_toggled)
+	session.run_project_code_toggled.connect(_on_session_run_project_code_toggled)
 	session.tools_enabled_toggled.connect(_on_session_tools_enabled_toggled)
 	session.effort_changed.connect(_on_session_effort_changed)
 	session.connections_requested.connect(_on_connections_pressed) # the ⚙ beside its picker opens the shared dialog
@@ -404,6 +405,11 @@ func _on_session_make_changes_toggled(id: String, on: bool) -> void:
 ## Persist one session's "Delete files" flip on its own record, like _on_session_make_changes_toggled.
 func _on_session_delete_files_toggled(id: String, on: bool) -> void:
 	_store.set_delete_files(id, on)
+
+
+## Persist one session's project-code execution flip, independently of file editing.
+func _on_session_run_project_code_toggled(id: String, on: bool) -> void:
+	_store.set_run_project_code(id, on)
 
 
 ## Persist one session's "Tools" flip on its own record, like _on_session_make_changes_toggled.
@@ -618,7 +624,7 @@ func _ensure_connections_dialog() -> void:
 	content.add_theme_constant_override("separation", 8)
 
 	var hint := Label.new()
-	hint.text = "Each source is a place models come from. Kind sets the wire format and auth: Ollama (local or cloud), OpenAI-Compatible (Chat Completions — LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, most others...), OpenAI Responses API (api.openai.com with an API key), OpenAI ChatGPT Subscription (your Plus/Pro account via Sign in with ChatGPT — no key), or Anthropic (Claude models). For the URL, paste what your provider hands you — the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one — keys (and ChatGPT sign-in tokens) are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
+	hint.text = "Each source is a place models come from. Kind sets the wire format and auth: Ollama (local or cloud), OpenAI-Compatible (Chat Completions — LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, most others...), OpenAI Responses API (api.openai.com with an API key), OpenAI ChatGPT Subscription (your Plus/Pro account via Sign in with ChatGPT — no key), or Anthropic (Claude models). For the URL, paste what your provider hands you — the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one — keys and ChatGPT tokens use GDLLM's editor-wide per-user credential file, outside project/session settings, and are never committed. Save, then Refresh Models to pull each source's models into the pickers."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(hint)
 
@@ -763,7 +769,7 @@ func _refresh_connection_auth_button(auth_button: Button, source_id: String) -> 
 		auth_button.tooltip_text = "Signed in. Click to sign out and forget this source's stored tokens."
 	else:
 		auth_button.text = "Sign in with ChatGPT"
-		auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your ChatGPT account (Plus/Pro) — your subscription covers usage, no API key involved. Tokens are stored in Editor Settings with the same custody as API keys."
+		auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your ChatGPT account (Plus/Pro) — your subscription covers usage, no API key involved. Tokens are stored in GDLLM's editor-wide per-user credential file, outside project/session settings."
 
 
 ## The row's sign-in/sign-out click. A fresh unsaved row has no id yet for tokens to key on, so it saves and rebuilds first, then resumes this click on the rebuilt row now carrying the assigned id — one click starts the browser either way. Sign-out is immediate; sign-in runs one GDLLMOAuth flow (see GDLLMOAuth.launch) and restamps the button on completion.
@@ -784,7 +790,10 @@ func _on_connection_auth_pressed(entry: Dictionary, auth_button: Button) -> void
 				return
 		return
 	if GDLLMOAuth.is_signed_in(source_id):
-		GDLLMOAuth.clear_tokens(source_id)
+		if not GDLLMOAuth.clear_tokens(source_id):
+			auth_button.tooltip_text = "Sign-out failed: the local token record could not be removed. It remains reusable; fix credential-store access and retry."
+			push_warning("GDLLM: ChatGPT sign-out failed for %s; stored tokens remain." % source_id)
+			return
 		_refresh_connection_auth_button(auth_button, source_id)
 		return
 	auth_button.disabled = true
