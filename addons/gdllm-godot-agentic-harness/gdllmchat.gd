@@ -840,7 +840,7 @@ func _on_connection_auth_pressed(entry: Dictionary, auth_button: Button) -> void
 			GDLLMGeminiOAuth.clear_credentials(source_id)
 		else:
 			GDLLMOAuth.clear_tokens(source_id)
-		_refresh_connection_auth_button(auth_button, source_id)
+		_refresh_connection_auth_button(auth_button, source_id, kind)
 		return
 	auth_button.disabled = true
 	auth_button.text = "Waiting for the browser…"
@@ -848,7 +848,7 @@ func _on_connection_auth_pressed(entry: Dictionary, auth_button: Button) -> void
 		GDLLMGeminiOAuth.launch(self, source_id, func(ok: bool, detail: String) -> void:
 			if is_instance_valid(auth_button):
 				auth_button.disabled = false
-				_refresh_connection_auth_button(auth_button, source_id)
+				_refresh_connection_auth_button(auth_button, source_id, kind)
 				if not ok:
 					auth_button.tooltip_text = "Sign-in failed: %s" % detail
 			if not ok:
@@ -857,7 +857,7 @@ func _on_connection_auth_pressed(entry: Dictionary, auth_button: Button) -> void
 	GDLLMOAuth.launch(self, source_id, func(ok: bool, detail: String) -> void:
 		if is_instance_valid(auth_button):
 			auth_button.disabled = false
-			_refresh_connection_auth_button(auth_button, source_id)
+			_refresh_connection_auth_button(auth_button, source_id, kind)
 			if not ok:
 				auth_button.tooltip_text = "Sign-in failed: %s" % detail
 		if not ok:
