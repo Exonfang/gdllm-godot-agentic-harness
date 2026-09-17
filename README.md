@@ -70,14 +70,49 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 
 ## First-time Setup
 - Download and extract the release zip of your choice (GDLLM + MarkdownLabel recommended) directly into your Godot project directory.
-- Using the **Connections** button in the session panel, link up your inference providers: pick the Kind (OpenAI-Compatible (Chat Completions), OpenAI Responses API, OpenAI ChatGPT Subscription, Anthropic, or Ollama), paste the URL your provider hands you (the full endpoint or just the server address, either works) and add API keys where needed. Any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, koboldcpp, most others...) uses the OpenAI-Compatible (Chat Completions) kind. OpenAI's own API (api.openai.com) works best as the **OpenAI Responses API** kind — its newest models (GPT-5.6 and up) require the Responses API to combine reasoning effort with tools.
+- Using the **Connections** button in the session panel, link up your inference providers: pick the Kind (OpenAI-Compatible (Chat Completions), OpenAI Responses API, OpenAI ChatGPT Subscription, Anthropic, Google Gemini (BYOK), Google Gemini (Antigravity), or Ollama), paste the URL your provider hands you (the full endpoint or just the server address, either works) and add API keys where needed. Any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, koboldcpp, most others...) uses the OpenAI-Compatible (Chat Completions) kind. OpenAI's own API (api.openai.com) works best as the **OpenAI Responses API** kind — its newest models (GPT-5.6 and up) require the Responses API to combine reasoning effort with tools.
 - A ChatGPT Plus/Pro subscription can drive the harness without API billing: use the **OpenAI ChatGPT Subscription** kind and press its **Sign in with ChatGPT** button (a browser sign-in; no API key).
+- **Google Gemini** ships as two distinct routes in separate source rows, so a per-token AI Studio key never gets used to drive a Cloud Code Assist session, and stale credentials from one route never answer a request meant for the other:
+  - **Google Gemini (BYOK)** — `Kind: "gemini"`, base `https://generativelanguage.googleapis.com/v1beta`. Paste your AI Studio API key (`AIzaSy…`, free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)); it ships as `x-goog-api-key`. Paid on your GCP project, independent of any AI Studio Pro subscription.
+  - **Google Gemini (Antigravity)** — `Kind: "gemini-oauth"`, base `https://cloudcode-pa.googleapis.com`. Sign in with Google (browser OAuth + PKCE); the harness refreshes the access token silently. Plan-covered against your Google AI plan, not per-token. Only available to accounts on a Cloud Code Assist whitelisted tenant.
 - After the model list refreshes, use the **Effort Configuration** to specify the available thinking levels, cache TTL, and context windows. No provider has an API to retrieve model effort/thinking levels, so they need to be manually identified and added, or the default effort level for the model will be used.
   - Context window size and cache TTL are used to inform context compaction.
   - For providers that report it, context window size is automatically fetched via API.
   - For Anthropic models, setting the cache above 300s uses Anthropic's 1 hour cache declaration. _(Other providers don't currently publish cache times.)_
 - In Editor Settings > GDLLM > Models, specify your preferred default chat model and tasks model. The tasks model powers summarization and title generation.
-- Review Editor Settings > GDLLM and update to your preference. Some color-blind users will want to adjust their colors.
+- Review Editor Settings > GDLLM and update to your preference. Some color-blind users may want to adjust their colors.
+
+## Gemini integration notes
+
+Two kinds, two routes, two distinct bases — picked automatically from each source row's `kind`:
+
+| Kind | Base | Auth | Surface | Billing |
+|---|---|---|---|---|
+| `gemini` (BYOK) | `https://generativelanguage.googleapis.com/v1beta` | `x-goog-api-key: AIza…` | native `:streamGenerateContent?alt=sse` | Per-token on your GCP project |
+| `gemini-oauth` | `https://cloudcode-pa.googleapis.com` | `Authorization: Bearer ya29…/1//…` (Google OAuth) | Cloud Code Assist envelope at `/v1internal:streamGenerateContent?alt=sse` | Plan-covered (Google AI plan), whitelist-gated |
+
+Both kinds share the **native Gemini wire shape** (`contents[]` + `parts[]`, `systemInstruction`, `functionCall` / `functionResponse`, `usageMetadata`). The OAuth route only diverges by wrapping the same body in the Cloud Code Assist envelope `{project, model, request, requestType, userAgent, requestId}`.
+
+### Tool calling — `thought_signature`
+
+`Gemini 3.x Flash` (and `Gemini 2.5+`) thinking models attach an opaque `thought_signature` to every `functionCall` / `functionResponse` part they emit, and reject the next tool-loop request with `400 Function call is missing a thought_signature` when the signature isn't echoed back. `GeminiAdapter` reads the signature from each functionCall part on response and replays it on the next turn's `parts[]` — `thoughtSignature` is a **sibling** of `functionCall`, never a child, per Google's REST reference.
+
+### JSON-Schema tool definitions
+
+Gemini's `OpenApi` schema dialect rejects 22 common JSON-Schema keywords (`$schema`, `$ref`, `additionalProperties`, `exclusiveMinimum` / `exclusiveMaximum`, `minimum` / `maximum`, `pattern`, `format`, `minLength` / `maxLength`, …) with `Unknown name "…" at …`. `GeminiAdapter._clean_json_schema` strips them recursively before send. Model clients (Kilo Code, Continue, the OpenAI SDK, gdllm itself) generate schemas with these keywords by default; without the scrubber tool calls silently 400.
+
+### Currently shipping Gemini models (as of 2026-09)
+
+`gemini-3.6-flash`, `gemini-3.7-flash`, `gemini-3.8-flash` — each with a 1M-token context window, vision input, and tool calling. There is no Gemini Pro model in the current catalogue; Gemini 2.5 / 2.0 generations are retired on Google's side.
+
+### Setting up Antigravity OAuth
+
+1. Open the Connections dialog and enable the **Google Gemini (Antigravity)** source row. The kind is `gemini-oauth`; the base is prefilled to `cloudcode-pa.googleapis.com`.
+2. Press **Sign in with Google**. A browser tab opens to Google's consent screen; the access token + refresh token are stored in Editor Settings; `loadCodeAssist` resolves the Cloud Code Assist project id at sign-in and persists it alongside the tokens.
+3. Pick a model from `fetchAvailableModels` once the sign-in finishes.
+
+The default client id / secret are the official Antigravity CLI public credentials (intentionally public, see `gdllm_gemini_oauth.gd`'s header comment). To use a private Google Cloud OAuth client, set `gdllm/connection/gemini_oauth_client_id` and `gdllm/connection/gemini_oauth_client_secret` in Editor Settings before signing in.
+
 
 ## Roadmap
 

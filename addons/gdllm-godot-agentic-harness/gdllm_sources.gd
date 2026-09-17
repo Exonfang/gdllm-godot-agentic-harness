@@ -12,11 +12,15 @@ const KIND_OPENAI := "openai" ## OpenAI-compatible wire format (/v1/chat/complet
 const KIND_OPENAI_RESPONSES := "openai-responses" ## OpenAI Responses API wire format (/v1/responses SSE) — the newer OpenAI API, which GPT-5.6-class models require for reasoning effort with tools; /v1/chat/completions rejects that combination on them.
 const KIND_OPENAI_CHATGPT := "openai-chatgpt" ## The Responses wire format served from OpenAI's ChatGPT backend, authenticated with a ChatGPT sign-in instead of an API key (see GDLLMOAuth) — how a Plus/Pro subscription drives the harness without API billing.
 const KIND_ANTHROPIC := "anthropic" ## Anthropic Messages API wire format (/v1/messages SSE), used by the Claude models.
+const KIND_GEMINI := "gemini" ## Google Gemini API wire format on the BYOK native surface (/v1beta/models/{model}:streamGenerateContent?alt=sse) — Google AI Studio's public Gemini API, paid per token on the user's GCP project via an AI Studio API key (AIza…), independent of any AI Studio Pro subscription.
+const KIND_GEMINI_OAUTH := "gemini-oauth" ## Google Cloud Code Assist / Antigravity wire format on /v1internal:streamGenerateContent?alt=sse — the OAuth route that drives Gemini usage against a Cloud Code Assist whitelisted tenant (not every account has one). Auth is a Google OAuth 2.0 access token (ya29.… or 1//…), refreshed silently; the model list and project id come from loadCodeAssist on first connection, not from /v1beta/models. Always plan-covered (the user's Google AI plan); never billed by API key.
 
 const DEFAULT_OLLAMA_LOCAL_BASE := "http://localhost:11434" ## Seed endpoint for the first-run local Ollama source.
 const DEFAULT_ANTHROPIC_BASE := "https://api.anthropic.com" ## Anthropic's API host; the same for every account, so the Connections dialog prefills it when a row switches to the Anthropic kind.
 const DEFAULT_OPENAI_BASE := "https://api.openai.com/v1" ## OpenAI's own API base; the same for every account, so the Connections dialog prefills it when a row switches to the Responses kind (third-party servers speak the chat-completions kind instead).
 const DEFAULT_CHATGPT_BASE := "https://chatgpt.com/backend-api/codex" ## The ChatGPT subscription backend; the same for every account, prefilled like its siblings when a row switches to the subscription kind.
+const DEFAULT_GEMINI_BASE := "https://generativelanguage.googleapis.com/v1beta" ## Google AI Studio's Gemini API base; the same for every account, prefilled when a row switches to the BYOK Gemini kind.
+const DEFAULT_GEMINI_OAUTH_BASE := "https://cloudcode-pa.googleapis.com" ## Google Cloud Code Assist / Antigravity's API base. Distinct from the BYOK base (different tenant) — every Gemini OAuth request, including model discovery (`fetchAvailableModels`) and the streaming endpoint (`streamGenerateContent`), runs through this host.
 
 
 ## The configured sources as an Array of source Dictionaries, or the default seed when nothing is stored yet or the stored value is unparseable.
@@ -41,7 +45,7 @@ static func ensure_seeded() -> void:
 	save_sources(default_sources())
 
 
-## The first-run source list: ready-to-fill templates for a local Ollama, Ollama Cloud, a local vLLM, Poolside, OpenAI, and Anthropic (blank keys). Every row starts disabled — enable yours in the Connections dialog once its endpoint or key is in.
+## The first-run source list: ready-to-fill templates for a local Ollama, Ollama Cloud, a local vLLM, Poolside, OpenAI, Anthropic, Google Gemini (BYOK), and Google Gemini (Antigravity OAuth) (blank keys). Every row starts disabled — enable yours in the Connections dialog once its endpoint or key is in.
 static func default_sources() -> Array:
 	return [
 		{"id": "ollama-local", "name": "Ollama (Local)", "kind": KIND_OLLAMA, "base_url": DEFAULT_OLLAMA_LOCAL_BASE, "api_key": "", "enabled": false},
@@ -51,6 +55,8 @@ static func default_sources() -> Array:
 		_openai_template(),
 		_chatgpt_template(),
 		_anthropic_template(),
+		_gemini_template(),
+		_gemini_oauth_template(),
 	]
 
 
@@ -69,6 +75,16 @@ static func _anthropic_template() -> Dictionary:
 	return {"id": "anthropic", "name": "Anthropic", "kind": KIND_ANTHROPIC, "base_url": DEFAULT_ANTHROPIC_BASE, "api_key": "", "enabled": false}
 
 
+## The ready-to-fill Google Gemini source row, shared by the first-run seed and the one-time append for installs that predate it. Carries an AI Studio API key (`AIza...`, sent as `x-goog-api-key`) on the BYOK native surface — independent of the Antigravity OAuth route, which is its own kind, base, and credentials row.
+static func _gemini_template() -> Dictionary:
+	return {"id": "gemini", "name": "Google Gemini (BYOK)", "kind": KIND_GEMINI, "base_url": DEFAULT_GEMINI_BASE, "api_key": "", "enabled": false}
+
+
+## The ready-to-fill Google Gemini Antigravity OAuth source row, distinct from the BYOK row above. Auth is a Google OAuth sign-in (see GDLLMGeminiOAuth) — not an API key; the row's `api_key` field stays empty. Disabled until the user signs in and flips it on. Available only to accounts with a Cloud Code Assist whitelisted tenant.
+static func _gemini_oauth_template() -> Dictionary:
+	return {"id": "gemini-antigravity", "name": "Google Gemini (Antigravity)", "kind": KIND_GEMINI_OAUTH, "base_url": DEFAULT_GEMINI_OAUTH_BASE, "api_key": "", "enabled": false}
+
+
 ## Append each post-release template row for an install whose sources predate it — a first run already carries them all via default_sources. Each is offered exactly once, tracked by its id in TEMPLATES_SEEDED_KEY, so a deleted row never resurrects; a source the user already points at the provider — by the template's id or by its kind — counts as offered too.
 static func ensure_templates() -> void:
 	var es := EditorInterface.get_editor_settings()
@@ -80,7 +96,7 @@ static func ensure_templates() -> void:
 	var sources := get_sources()
 	var seeded_changed := false
 	var sources_changed := false
-	for template: Dictionary in [_anthropic_template(), _openai_template(), _chatgpt_template()]:
+	for template: Dictionary in [_anthropic_template(), _openai_template(), _chatgpt_template(), _gemini_template(), _gemini_oauth_template()]:
 		var template_id := String(template["id"])
 		if seeded.has(template_id):
 			continue

@@ -21,6 +21,10 @@ static func for_kind(kind: String) -> LLMAdapter:
 		return OpenAIChatGPTAdapter.new()
 	if kind == GDLLMSources.KIND_ANTHROPIC:
 		return AnthropicAdapter.new()
+	if kind == GDLLMSources.KIND_GEMINI:
+		return GeminiAdapter.new()
+	if kind == GDLLMSources.KIND_GEMINI_OAUTH:
+		return GeminiOAuthAdapter.new()
 	return OllamaAdapter.new()
 
 
@@ -1143,3 +1147,343 @@ class AnthropicAdapter extends LLMAdapter:
 			"eval_duration": 0,
 			"total_duration": 0,
 		}
+
+
+## Google Gemini API: /v1beta/models/{model}:streamGenerateContent?alt=sse, /v1beta/models. The Google AI Studio public endpoint, accepting either an AI Studio API key (sent as `x-goog-api-key`) or a Google OAuth 2.0 access token (sent as `Authorization: Bearer`) — auth_headers picks the right one from the value's shape, so the same source row serves both modes without a separate kind. SSE frames are `data: {json}` (no event name) with usage riding the terminal frame's `usageMetadata`.
+## Translates canonical (Ollama-shaped) history to Gemini's `contents` array (assistant role renamed to `model`, system lifted to `systemInstruction`, tool calls and results nested inside `parts`), and reassembles Gemini's streamed `candidates[].content.parts[]` deltas — text and `functionCall` (whole per delta) — back into canonical events.
+## Gemini emits each tool call whole (functionCall.args already an object), like Ollama; no fragment assembly. Function-call turns echo verbatim through `assistant_blocks` because the API requires them to continue a tool loop (same reason the OpenAI Responses and Anthropic adapters do).
+class GeminiAdapter extends LLMAdapter:
+	var _tool_calls: Array = [] ## Tool calls accumulated from the final frame (no fragment assembly needed), in stream order.
+	var _blocks: Array = [] ## Finished raw parts (`text` and `functionCall`) for the tool-loop echo.
+	var _usage: Dictionary = {} ## usageMetadata from the terminal frame.
+	var _finish_reason: String = "" ## finishReason from the last candidate (STOP normal, MAX_TOKENS → length, SAFETY/SPII/RECITATION → surfaced).
+	var _finished := false ## Guards _finish_events so a malformed trailing frame can't double-emit.
+	var _auth_mode: String = "" ## Cached auth detection: "apikey" for AI Studio API keys (AIza…), "oauth" for OAuth access tokens (ya29. or 1//…), "" for unset.
+
+	func chat_path() -> String:
+		# The model id in the path is the bare name ("gemini-3.8-flash"); Gemini accepts the "models/" prefix too, but the bare form matches what the model list returns after parse_models strips it.
+		return "/v1beta/models/%s:streamGenerateContent?alt=sse" % _current_model
+
+	## Gemini takes either `x-goog-api-key` for an AI Studio key or `Authorization: Bearer` for an OAuth access token — different shapes, so the value's prefix picks the right header. Empty sends neither (the request fails loudly, naming the missing credential).
+	func auth_headers(api_key: String) -> PackedStringArray:
+		var key := api_key.strip_edges()
+		if key == "":
+			return PackedStringArray()
+		_auth_mode = _detect_auth_mode(key)
+		if _auth_mode == "oauth":
+			return PackedStringArray(["Authorization: Bearer " + key])
+		# AI Studio API keys — "AIza…" is Google's published prefix; treat anything else as a Bearer too, since a paste mistake (extra space, "Bearer …" already prepended) shouldn't 401 silently.
+		if _auth_mode == "apikey":
+			return PackedStringArray(["x-goog-api-key: " + key])
+		return PackedStringArray(["Authorization: Bearer " + key])
+
+	## Pure auth-shape detector, so it can be unit-tested headless. "apikey" for AIza…, "oauth" for ya29. or 1//…, "bearer" fallback for anything else (a paste mistake, a custom gateway).
+	static func _detect_auth_mode(key: String) -> String:
+		if key.begins_with("AIza"):
+			return "apikey"
+		if key.begins_with("ya29.") or key.begins_with("1//"):
+			return "oauth"
+		return "bearer"
+
+	func build_chat_body(model: String, messages: Array, tools: Array, effort: String = "", _cache_ttl: int = 0) -> Dictionary:
+		# Stash the model id for chat_path, which the request builder consults immediately after build_chat_body (the model lives on the URL with this provider — no other adapter needs it).
+		_current_model = model
+		# Gemini always streams; alt=sse on the path makes the response SSE rather than the default JSON array.
+		var body := {"contents": _translate_contents(messages)}
+		var system := _system_text(messages)
+		if system != "":
+			body["systemInstruction"] = {"parts": [{"text": system}]}
+		if not tools.is_empty():
+			body["tools"] = [{"functionDeclarations": _translate_tools(tools)}]
+		# Gemini's knob is a `thinkingConfig`; `thinkingBudget` 0 disables reasoning outright (a level name has no first-class spelling on this provider — the Effort Configuration dialog gates what's offered, so a level the model doesn't accept fails loudly at request time).
+		if effort == "none":
+			body["generationConfig"] = {"thinkingConfig": {"thinkingBudget": 0}}
+		elif effort != "":
+			body["generationConfig"] = {"thinkingConfig": {"thinkingBudget": -1}, "thinkingLevel": effort}
+		return body
+
+	## The canonical history translated to Gemini's `contents` shape. Assistant turns become `role: "model"`; tool calls land as `functionCall` parts (one per part, named like the schema); tool results become `functionResponse` parts bound to their call by order. No raw echo here — Gemini is happy to rebuild completed turns from text + synthesized call names, so the trailing loop's turns speak the same shape as the older ones (unlike Anthropic/Responses, which require verbatim replay).
+	## A canonical tool_call may carry an opaque `thought_signature` (read back from a previous Gemini response); when set, it rides on the request as a sibling of `functionCall`. The native API rejects a replayed `functionCall` part without its matching signature with `400 Function call is missing a thought_signature` on thinking models (gemini-3.6/3.7/3.8 Flash and newer), so this is not optional for tool-using turns.
+	func _translate_contents(messages: Array) -> Array:
+		var out: Array = []
+		var pending_names: Array = [] # names of the last assistant turn's calls, awaiting their function responses in order
+		for msg in messages:
+			if not (msg is Dictionary):
+				continue
+			var role := String(msg.get("role", ""))
+			if role == "system":
+				continue # lifted to top-level systemInstruction by build_chat_body
+			if role == "assistant":
+				var parts: Array = []
+				var text := _text(msg.get("content"))
+				if text.strip_edges() != "":
+					parts.append({"text": text})
+				pending_names = []
+				if msg.get("tool_calls") is Array:
+					for tc in msg["tool_calls"]:
+						var fn: Dictionary = tc["function"] if tc is Dictionary and tc.get("function") is Dictionary else {}
+						var name := _text(fn.get("name"))
+						var raw_args: Variant = fn.get("arguments", {})
+						var args: Dictionary = raw_args if raw_args is Dictionary else (JSON.parse_string(_text(raw_args)) if _text(raw_args) != "" else {})
+						if not (args is Dictionary):
+							args = {}
+						pending_names.append(name)
+						var fc_part: Dictionary = {"functionCall": {"name": name, "args": args}}
+						# thought_signature is a SIBLING of functionCall, never inside it. The plug-in upstream store is responsible for round-tripping the value (it lives on a canonical tool_call dict as the `thought_signature` key, picked up here); see the response-side read at parse_line for how it's first acquired.
+						var signature := _text(tc.get("thought_signature", ""))
+						if signature != "":
+							fc_part["thoughtSignature"] = signature
+						parts.append(fc_part)
+				if parts.is_empty():
+					parts.append({"text": "(empty)"}) # Gemini rejects empty contents
+				out.append({"role": "model", "parts": parts})
+			elif role == "tool":
+				var name := String(pending_names.pop_front()) if not pending_names.is_empty() else "tool"
+				var content_text := _text(msg.get("content"))
+				out.append({"role": "user", "parts": [{"functionResponse": {"name": name, "response": {"result": content_text if content_text.strip_edges() != "" else "(no output)"}}}]})
+			else:
+				var user_text := _text(msg.get("content"))
+				out.append({"role": role, "parts": [{"text": user_text if user_text.strip_edges() != "" else "(empty)"}]})
+		return out
+
+	## The canonical function-schema envelope unwrapped to Gemini's flat functionDeclarations shape.
+	func _translate_tools(tools: Array) -> Array:
+		var out: Array = []
+		for entry in tools:
+			var fn: Dictionary = entry["function"] if entry is Dictionary and entry.get("function") is Dictionary else {}
+			if fn.is_empty():
+				continue
+			var schema: Variant = fn.get("parameters")
+			out.append({
+				"name": _text(fn.get("name")),
+				"description": _text(fn.get("description")),
+				# Gemini uses parametersJsonSchema for OpenAPI 3 schemas; the legacy `parameters` key is rejected on recent models. The schema is scrubbed of JSON-Schema keywords Gemini's `OpenApi` dialect rejects with `Unknown name …` — see _clean_json_schema.
+				"parametersJsonSchema": _clean_json_schema(schema) if schema is Dictionary and not schema.is_empty() else {"type": "object", "properties": {}},
+			})
+		return out
+
+	## JSON-Schema keywords Gemini's `OpenApi` schema dialect rejects with `Unknown name "<keyword>" at …`. Numeric bounds (`minimum`/`maximum` and friends) and pattern-style validators are the common offenders — schema libraries used by model clients (Kilo Code, Continue, the OpenAI SDK) frequently include them. Recursive scrubber, modeled on AIFlowBridge's gemini-native.ts: strips the offending keys while preserving `properties` (recursively cleaned), `items` (recursively cleaned), and the rest of the shape untouched. A schema that isn't an object reduces to `{type: "object"}` rather than being sent malformed.
+	static var _FORBIDDEN_SCHEMA_KEYS := {
+		"$schema": true, "$id": true, "$ref": true, "$defs": true, "definitions": true, "examples": true,
+		"patternProperties": true, "additionalProperties": true,
+		"exclusiveMinimum": true, "exclusiveMaximum": true,
+		"minLength": true, "maxLength": true,
+		"minimum": true, "maximum": true, "multipleOf": true,
+		"pattern": true, "format": true,
+		"minItems": true, "maxItems": true, "uniqueItems": true,
+		"minProperties": true, "maxProperties": true,
+	}
+
+	static func _clean_json_schema(schema: Variant) -> Dictionary:
+		if not (schema is Dictionary):
+			return {"type": "object"}
+		var result: Dictionary = {}
+		for key in (schema as Dictionary).keys():
+			var value: Variant = (schema as Dictionary)[key]
+			if _FORBIDDEN_SCHEMA_KEYS.has(key):
+				continue
+			if key == "properties" and value is Dictionary:
+				var cleaned_props: Dictionary = {}
+				for prop_name in (value as Dictionary).keys():
+					cleaned_props[prop_name] = _clean_json_schema((value as Dictionary)[prop_name])
+				result["properties"] = cleaned_props
+			elif key == "items":
+				result["items"] = _clean_json_schema(value)
+			else:
+				result[key] = value
+		if not result.has("type"):
+			result["type"] = "object"
+		return result
+
+	func models_path() -> String:
+		return "/v1beta/models?pageSize=100"
+
+	## A pasted full endpoint (Google's docs hand out …/v1beta/models/…:generateContent and similar) reduces to its server root; a bare host with no path passes through and the /v1beta paths join after it.
+	func normalize_base(base: String) -> String:
+		return _root_from_endpoint(super.normalize_base(base), [":streamGenerateContent", ":generateContent", ":streamGenerateContent?alt=sse", ":generateContent?alt=sse", "/v1beta/models", "/v1beta", "/v1"])
+
+	func parse_models(data: Variant) -> PackedStringArray:
+		var names := PackedStringArray()
+		if data is Dictionary and data.get("models") is Array:
+			for entry in data["models"]:
+				if entry is Dictionary and entry.has("name"):
+					# Gemini returns names as "models/gemini-3.8-flash"; the request path takes the bare suffix.
+					var raw := String(entry["name"])
+					names.append(raw.trim_prefix("models/"))
+		return names
+
+	## /v1beta/models/{id} returns the model entry directly — inputTokenLimit is the context window in tokens.
+	func context_probe(model: String) -> Dictionary:
+		return {"path": "/v1beta/models/" + model.uri_encode(), "method": HTTPClient.METHOD_GET, "body": {}}
+
+	func parse_context_window(data: Variant, _model: String = "") -> int:
+		if data is Dictionary:
+			var limit: Variant = data.get("inputTokenLimit")
+			if limit is float or limit is int:
+				return int(limit)
+		return 0
+
+	func completion_request(model: String, system_prompt: String, prompt: String) -> Dictionary:
+		var body := {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
+		if system_prompt != "":
+			body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+		return {"path": "/v1beta/models/%s:generateContent" % model, "body": body}
+
+	func parse_completion(data: Variant) -> String:
+		if data is Dictionary and data.get("candidates") is Array and not data["candidates"].is_empty():
+			var candidate: Variant = data["candidates"][0]
+			if candidate is Dictionary and candidate.get("content") is Dictionary:
+				var content: Dictionary = candidate["content"]
+				if content.get("parts") is Array:
+					for part in content["parts"]:
+						if part is Dictionary and part.has("text"):
+							return _text(part["text"])
+		return ""
+
+	func parse_completion_stats(data: Variant) -> Dictionary:
+		if data is Dictionary and data.get("usageMetadata") is Dictionary:
+			return _stats_from(data["usageMetadata"])
+		return {}
+
+	func parse_line(line: String) -> Array:
+		var trimmed := line.strip_edges()
+		if not trimmed.begins_with("data:"):
+			return []
+		var payload := trimmed.substr(5).strip_edges()
+		if payload == "":
+			return []
+		var json := JSON.new()
+		if json.parse(payload) != OK:
+			return []
+		var data: Variant = json.get_data()
+		if not (data is Dictionary):
+			return []
+		var events: Array = []
+		# Gemini reports mid-stream failures as a top-level `promptFeedback.blockReason` or an `error` block; either way the message is lifted verbatim — a guard against dropping the cause on the floor.
+		if data.has("error"):
+			var err: Variant = data["error"]
+			var message := _text(err.get("message", "")) if err is Dictionary else _text(err)
+			return [{"type": "error", "message": _prefixed_error(_text(err.get("code", "") if err is Dictionary else ""), message, payload)}]
+		if data.get("usageMetadata") is Dictionary:
+			_usage = data["usageMetadata"]
+		if data.get("candidates") is Array:
+			for candidate in data["candidates"]:
+				if not (candidate is Dictionary):
+					continue
+				var content: Variant = candidate.get("content")
+				if content is Dictionary and content.get("parts") is Array:
+					for part in content["parts"]:
+						if not (part is Dictionary):
+							continue
+						if part.has("text"):
+							var text := _text(part["text"])
+							if text != "":
+								events.append({"type": "content", "text": text})
+								_blocks.append({"text": text})
+						elif part.get("functionCall") is Dictionary:
+							var fc: Dictionary = part["functionCall"]
+							var raw_args: Variant = fc.get("args", {})
+							# Gemini sends args as an object already; stringify to match the canonical wire shape used by the other adapters, then parse back to keep one code path.
+							var args_text := JSON.stringify(raw_args)
+							var parsed: Variant = JSON.parse_string(args_text) if args_text != "" else {}
+							var args: Dictionary = parsed if parsed is Dictionary else {}
+							var call_entry: Dictionary = {"function": {"name": _text(fc.get("name")), "arguments": args}}
+							# thought_signature is a SIBLING of functionCall on the upstream response — `{ functionCall, thoughtSignature }` per Gemini's REST reference — not a child of functionCall. Read it from the same part and replay it on the canonical tool_call so _translate_contents can echo it back on the next request (see LLMClient / the session's tool-loop echo path).
+							var signature := _text(part.get("thoughtSignature", ""))
+							if signature != "":
+								call_entry["thought_signature"] = signature
+							_tool_calls.append(call_entry)
+							var block_call: Dictionary = {"functionCall": {"name": _text(fc.get("name")), "args": args}}
+							if signature != "":
+								block_call["thoughtSignature"] = signature
+							_blocks.append(block_call)
+				var reason := _text(candidate.get("finishReason", ""))
+				if reason != "":
+					_finish_reason = reason
+		# End of stream is signalled by an empty `candidates` array on the final frame; emit done on the first frame that carries a finishReason or usageMetadata.
+		if _finish_reason != "" or (data.get("usageMetadata") is Dictionary and (data["candidates"] is Array and data["candidates"].is_empty())):
+			events.append_array(_finish_events())
+		return events
+
+	## The terminal events: raw parts for the tool-loop echo, assembled tool calls, then done+stats — emitted at most once.
+	func _finish_events() -> Array:
+		if _finished:
+			return []
+		_finished = true
+		var events: Array = []
+		if not _tool_calls.is_empty():
+			events.append({"type": "assistant_blocks", "blocks": _blocks})
+			events.append({"type": "tool_calls", "calls": _tool_calls})
+		# "STOP" is the normal finish; "MAX_TOKENS" canonicalizes to "length"; SAFETY/SPII/RECITATION/MALFORMED_FUNCTION_CALL/OTHER ride verbatim so the cause is disclosed.
+		var stop := _canonical_stop(_finish_reason, PackedStringArray(["STOP"]))
+		events.append({"type": "done", "stats": _stats_from(_usage), "stop": stop})
+		return events
+
+	## Gemini's usage counters mapped onto the plugin's stat keys. promptTokenCount and candidatesTokenCount are the canonical fields; cachedContentTokenCount rides tokens_in too (cached tokens still count against the context window).
+	static func _stats_from(usage: Dictionary) -> Dictionary:
+		return {
+			"tokens_in": int(usage.get("promptTokenCount", 0)) + int(usage.get("cachedContentTokenCount", 0)),
+			"tokens_out": int(usage.get("candidatesTokenCount", 0)),
+			"prompt_eval_duration": 0,
+			"eval_duration": 0,
+			"total_duration": 0,
+		}
+
+	## The model id for the chat path's URL — the LLMClient carries the active model on the adapter between calls (see LLMClient.configure_from); the field is set right before chat_path is consulted.
+	var _current_model: String = ""
+
+
+## Google Cloud Code Assist / Antigravity: the OAuth route against the same Gemini models on a separate host (`cloudcode-pa.googleapis.com`). Every request is wrapped in a Cloud Code envelope (`{project, model, request, requestType, userAgent, requestId}`) addressed to `v1internal:streamGenerateContent?alt=sse`, with `Authorization: Bearer <oauth_access_token>`. The native Gemini wire shape (`contents[]`/`parts[]`) is reused intact — the envelope is the only divergence from the BYOK native surface — so all parsing, thought_signature propagation, and the FORBIDDEN_SCHEMA_KEYS scrubber from GeminiAdapter are inherited unchanged.
+## Model discovery and the project id come from Cloud Code Assist (`fetchAvailableModels`, `loadCodeAssist`), not from `/v1beta/models`; the project id is recorded on the source row at sign-in time and stashed on the adapter before chat_path sees it. This route is plan-covered against the user's Google AI plan (for Cloud Code Assist whitelisted tenants) — distinct from and independent of the BYOK native surface, which is paid on the user's GCP project.
+class GeminiOAuthAdapter extends GeminiAdapter:
+	var _current_project: String = "" ## The Cloud Code Assist project id (`cloudaicompanionProject` from loadCodeAssist) the AGY envelope requires; populated by the caller before build_chat_body fires (see static set_project_id).
+
+	## AGY's streaming endpoint — distinct from the BYOK `/v1beta/models/...:streamGenerateContent` path; same `:streamGenerateContent?alt=sse` query (sse), different host and `:v1internal` prefix.
+	func chat_path() -> String:
+		return "/v1internal:streamGenerateContent?alt=sse" % []
+
+	## Cloud Code Assist authenticates with a Google OAuth access token as Bearer; the upstream rejects `x-goog-api-key`. The token is refreshed by GDLLMGeminiOAuth before send (the LLMClient pipeline replaces the `api_key` field with a freshly-refreshed token at request time — see GDLLMGeminiOAuth.ensure_fresh).
+	func auth_headers(api_key: String) -> PackedStringArray:
+		var token := api_key.strip_edges()
+		if token == "":
+			return PackedStringArray()
+		return PackedStringArray(["Authorization: Bearer " + token])
+
+	## The native Gemini request body the parent built — systemInstruction / contents / tools / generationConfig, with JSON-Schema tools already cleaned — wrapped in the Cloud Code Assist envelope `{ project, model, request, requestType: "agent", userAgent, requestId }`. Caller-side fields (project id, userAgent) come from the stored OAuth credentials (loadCodeAssist at sign-in).
+	func build_chat_body(model: String, messages: Array, tools: Array, effort: String = "", cache_ttl: int = 0) -> Dictionary:
+		var native_body: Dictionary = super.build_chat_body(model, messages, tools, effort, cache_ttl)
+		_current_model = model
+		var request_id := "gdllm-%d-%s" % [Time.get_ticks_msec(), _hex(8)]
+		return {
+			"project": _current_project,
+			"model": model,
+			"request": native_body,
+			"requestType": "agent",
+			"userAgent": "antigravity",
+			"requestId": request_id,
+		}
+
+	## One-shot (non-streamed) completion for session-title generation — same envelope, single intent.
+	func completion_request(model: String, system_prompt: String, prompt: String) -> Dictionary:
+		var native: Dictionary = super.completion_request(model, system_prompt, prompt)
+		return {
+			"project": _current_project,
+			"model": model,
+			"request": native,
+			"requestType": "agent",
+			"userAgent": "antigravity",
+			"requestId": "gdllm-comp-%d-%s" % [Time.get_ticks_msec(), _hex(8)],
+		}
+
+	## Project id setter — the LLMClient pipeline (or the Connections dialog) calls this once per source switch, after reading the project id from the stored OAuth credentials (see GDLLMGeminiOAuth.credentials_for(source_id).project_id, populated by loadCodeAssist at sign-in). An empty project id is sent anyway — AGY's error names the real cause cleanly.
+	func set_project_id(p: String) -> void:
+		_current_project = p
+
+	## Short hex suffix for requestId, keeping the 8-byte entropy of the official Antigravity binary without exposing crypto state to the request layer.
+	static func _hex(n_bytes: int) -> String:
+		var out := ""
+		var crypto := Crypto.new()
+		var bytes := crypto.generate_random_bytes(n_bytes)
+		for b in bytes:
+			out += "%02x" % b
+		return out
