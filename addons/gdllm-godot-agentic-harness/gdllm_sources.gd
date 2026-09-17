@@ -21,6 +21,7 @@ const DEFAULT_OPENAI_BASE := "https://api.openai.com/v1" ## OpenAI's own API bas
 const DEFAULT_CHATGPT_BASE := "https://chatgpt.com/backend-api/codex" ## The ChatGPT subscription backend; the same for every account, prefilled like its siblings when a row switches to the subscription kind.
 const DEFAULT_GEMINI_BASE := "https://generativelanguage.googleapis.com/v1beta" ## Google AI Studio's Gemini API base; the same for every account, prefilled when a row switches to the BYOK Gemini kind.
 const DEFAULT_GEMINI_OAUTH_BASE := "https://cloudcode-pa.googleapis.com" ## Google Cloud Code Assist / Antigravity's API base. Distinct from the BYOK base (different tenant) — every Gemini OAuth request, including model discovery (`fetchAvailableModels`) and the streaming endpoint (`streamGenerateContent`), runs through this host.
+const DEFAULT_OPENROUTER_BASE := "https://openrouter.ai/api/v1" ## OpenRouter's single endpoint that exposes 100+ models (OpenAI, Anthropic, Google, Meta, Mistral, etc.) on the OpenAI Chat Completions wire format. One API key covers every model behind the `/api/v1` path; `HTTP-Referer` and `X-Title` headers (free, opt-in from your OpenRouter dashboard) tag your app in their analytics.
 
 
 ## The configured sources as an Array of source Dictionaries, or the default seed when nothing is stored yet or the stored value is unparseable.
@@ -57,6 +58,7 @@ static func default_sources() -> Array:
 		_anthropic_template(),
 		_gemini_template(),
 		_gemini_oauth_template(),
+		_openrouter_template(),
 	]
 
 
@@ -75,14 +77,19 @@ static func _anthropic_template() -> Dictionary:
 	return {"id": "anthropic", "name": "Anthropic", "kind": KIND_ANTHROPIC, "base_url": DEFAULT_ANTHROPIC_BASE, "api_key": "", "enabled": false}
 
 
-## The ready-to-fill Google Gemini source row, shared by the first-run seed and the one-time append for installs that predate it. Carries an AI Studio API key (`AIza...`, sent as `x-goog-api-key`) on the BYOK native surface — independent of the Antigravity OAuth route, which is its own kind, base, and credentials row.
+## The ready-to-fill Google AI Studio BYOK source row, shared by the first-run seed and the one-time append for installs that predate it. Carries an AI Studio API key (`AIza...`, sent as `x-goog-api-key`) on the BYOK native surface — independent of the Antigravity subscription route, which is its own kind, base, and credentials row.
 static func _gemini_template() -> Dictionary:
-	return {"id": "gemini", "name": "Google Gemini (BYOK)", "kind": KIND_GEMINI, "base_url": DEFAULT_GEMINI_BASE, "api_key": "", "enabled": false}
+	return {"id": "gemini", "name": "Google AI Studio (BYOK)", "kind": KIND_GEMINI, "base_url": DEFAULT_GEMINI_BASE, "api_key": "", "enabled": false}
 
 
-## The ready-to-fill Google Gemini Antigravity OAuth source row, distinct from the BYOK row above. Auth is a Google OAuth sign-in (see GDLLMGeminiOAuth) — not an API key; the row's `api_key` field stays empty. Disabled until the user signs in and flips it on. Available only to accounts with a Cloud Code Assist whitelisted tenant.
+## The ready-to-fill Google AI Studio Subscription source row (the Antigravity route, gated by the user's Cloud Code Assist whitelist). Labeled "Google AI Studio Subscription" to mirror the existing "OpenAI ChatGPT Subscription" row — both kinds consume a paid subscription via browser sign-in instead of an API key. Disabled until the user signs in and flips it on.
 static func _gemini_oauth_template() -> Dictionary:
-	return {"id": "gemini-antigravity", "name": "Google Gemini (Antigravity)", "kind": KIND_GEMINI_OAUTH, "base_url": DEFAULT_GEMINI_OAUTH_BASE, "api_key": "", "enabled": false}
+	return {"id": "gemini-antigravity", "name": "Google AI Studio Subscription", "kind": KIND_GEMINI_OAUTH, "base_url": DEFAULT_GEMINI_OAUTH_BASE, "api_key": "", "enabled": false}
+
+
+## The ready-to-fill OpenRouter source row. OpenRouter is a router over 100+ models — OpenAI, Anthropic, Google, Meta, Mistral, etc. — and exposes them on a single OpenAI-compatible endpoint at `https://openrouter.ai/api/v1` with one API key. Useful as a single-billing fallback when direct vendor keys aren't set up.
+static func _openrouter_template() -> Dictionary:
+	return {"id": "openrouter", "name": "OpenRouter", "kind": KIND_OPENAI, "base_url": DEFAULT_OPENROUTER_BASE, "api_key": "", "enabled": false}
 
 
 ## Append each post-release template row for an install whose sources predate it — a first run already carries them all via default_sources. Each is offered exactly once, tracked by its id in TEMPLATES_SEEDED_KEY, so a deleted row never resurrects; a source the user already points at the provider — by the template's id or by its kind — counts as offered too.
@@ -96,7 +103,7 @@ static func ensure_templates() -> void:
 	var sources := get_sources()
 	var seeded_changed := false
 	var sources_changed := false
-	for template: Dictionary in [_anthropic_template(), _openai_template(), _chatgpt_template(), _gemini_template(), _gemini_oauth_template()]:
+	for template: Dictionary in [_anthropic_template(), _openai_template(), _chatgpt_template(), _gemini_template(), _gemini_oauth_template(), _openrouter_template()]:
 		var template_id := String(template["id"])
 		if seeded.has(template_id):
 			continue

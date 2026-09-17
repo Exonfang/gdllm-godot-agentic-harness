@@ -103,7 +103,15 @@ Gemini's `OpenApi` schema dialect rejects 22 common JSON-Schema keywords (`$sche
 
 ### Currently shipping Gemini models (as of 2026-09)
 
-`gemini-3.6-flash`, `gemini-3.7-flash`, `gemini-3.8-flash` — each with a 1M-token context window, vision input, and tool calling. There is no Gemini Pro model in the current catalogue; Gemini 2.5 / 2.0 generations are retired on Google's side.
+The Google AI Studio catalogue currently lists (alongside their Gemini 2.5 predecessors):
+
+- **`gemini-3.1-pro-preview`** — top-of-line reasoning, 1M context, vision, tool calling, 12k output. Replaces Gemini 2.5 Pro as the high-capability choice.
+- **`gemini-3.8-flash`** / `3.7-flash` / `3.6-flash` — Flash generation, 1M context, vision, tool calling. The default coding/agentic workhorses.
+- **`gemini-3.5-flash`** + `gemini-3.5-flash-lite` — preview generation, 1M context, lower cost.
+- **`gemini-3.1-flash-lite`** + preview — fastest and cheapest, 1M context.
+- **`gemini-2.5-pro`** / `gemini-2.5-flash` / `flash-lite` — still served; choose these when you need an extra-stable response shape.
+
+OpenRouter (`https://openrouter.ai/api/v1`) exposes all of the above plus the dedicated image models (Gemini 3 Pro Image / Nano Banana Pro, Gemini 3.1 Flash Image / Nano Banana 2, Gemini 2.5 Flash Image / Nano Banana) under the `google/` prefix, behind a single OpenAI-compatible endpoint.
 
 ### Setting up Antigravity OAuth
 

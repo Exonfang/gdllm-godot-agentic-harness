@@ -277,10 +277,8 @@ static func _post_json_for_project(source_id: String, url: String, access_token:
 
 
 static func _post_json(_source_id: String, url: String, access_token: String, body: String) -> String:
-	# Use the most recent live host — the LLMClient/dock holds one. Falls back to a temporary host if needed.
+	# Use the most recent live host — the LLMClient/dock holds one. _live_host returns the SceneTree's root window, which is always a Node when in editor or play. In headless tests where no scene tree exists yet, return "" rather than trying to cast MainLoop to Node (the cast fails by design — MainLoop is not a Node).
 	var host := _live_host()
-	if host == null:
-		host = Engine.get_main_loop() as Node
 	if host == null:
 		push_warning("GDLLMGeminiOAuth: no live host available for loadCodeAssist POST; skipping project resolution.")
 		return ""

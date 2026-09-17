@@ -167,6 +167,8 @@ var _no_sources_notice: Control ## The standing "no source enabled" guidance row
 var _unknown_window_notice: Control ## The standing "context window unknown" guidance row, or null while the window is known, a probe is still in flight, or a debug threshold stands in. A condition like its siblings above (see _refresh_unknown_window_notice).
 var _chatgpt_signin_notice: Control ## The standing "not signed in" guidance row for a ChatGPT-subscription model, or null while another kind is selected or the source holds a sign-in. A condition like its siblings, but carrying a live Sign in with ChatGPT button so the fix is one click away, not a dialog hunt (see _refresh_chatgpt_signin_notice).
 var _chatgpt_signin_source: String = "" ## The source id the standing sign-in row was built for; a switch to a different unsigned subscription source must rebuild the row, or its label and button would keep signing into the model the session already left.
+var _gemini_signin_notice: Control ## Same role as _chatgpt_signin_notice but for the Google AI Studio Subscription source kind (Cloud Code Assist / Antigravity). The row carries a "Sign in with Google" button that opens the OAuth flow via GDLLMGeminiOAuth.launch; see _refresh_gemini_signin_notice.
+var _gemini_signin_source: String = "" ## Source id the standing Google sign-in row was built for; same cross-source isolation guarantee as _chatgpt_signin_source.
 var _window_probe_failed := "" ## Qualified id whose latest context-window probe answered with nothing — the "we asked and the source doesn't know" evidence the unknown-window row requires, so it never flashes while a probe is merely still in flight. Cleared by a model switch (the id no longer matches) or a window arriving.
 var _downshift_from: String = "" ## The model this session most recently switched away from, purely so the downshift row can name it; runtime-only, since after a reload there is no swap to attribute.
 
@@ -584,6 +586,7 @@ func _apply_qualified_model(qid: String, switched: bool = false) -> void:
 	_refresh_no_sources_notice() # the dock re-applies the model on every settings change, so a Connections edit lands here
 	_refresh_unknown_window_notice() # and an Effort Configuration edit (declaring or clearing a window) lands here the same way
 	_refresh_chatgpt_signin_notice() # and a sign-in or sign-out (the token store is a setting too) lands here as well
+	_refresh_gemini_signin_notice() # and the Google AI Studio Subscription row's standing sign-in mirror (see GDLLMGeminiOAuth)
 	_update_model_select_button()
 
 
@@ -716,6 +719,7 @@ func _replay_history() -> void:
 	_refresh_no_sources_notice()
 	_refresh_unknown_window_notice()
 	_refresh_chatgpt_signin_notice()
+	_refresh_gemini_signin_notice()
 	_send_button.disabled = false
 	_follow_to_bottom()
 
@@ -1182,6 +1186,55 @@ func _start_chatgpt_signin(source_id: String, notice: Label, sign_in: Button) ->
 		if is_instance_valid(sign_in):
 			sign_in.disabled = false
 			sign_in.text = "Sign in with ChatGPT")
+
+
+## Mirror of _refresh_chatgpt_signin_notice for the Google AI Studio Subscription source kind (Antigravity / Cloud Code Assist). Same ephemeral-row pattern: built only when the active model routes through an unsigned Gemini OAuth source, carries the Sign in with Google button, restamps on model or settings change.
+func _refresh_gemini_signin_notice() -> void:
+	var resolved := GDLLMSources.resolve_qualified(_qualified_model)
+	var source_id := String(resolved.get("source_id", ""))
+	var applies := String(resolved.get("kind", "")) == GDLLMSources.KIND_GEMINI_OAUTH \
+			and not bool(resolved.get("stale", false)) \
+			and not GDLLMGeminiOAuth.is_configured(source_id)
+	if not applies or not is_instance_valid(_message_list):
+		_gemini_signin_notice = _drop_notice(_gemini_signin_notice)
+		return
+	if is_instance_valid(_gemini_signin_notice):
+		if _gemini_signin_source == source_id:
+			return # already up for this source; the condition is unchanged
+		_gemini_signin_notice = _drop_notice(_gemini_signin_notice) # up for a source the session left; rebuild for the current one
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 8)
+	var notice := Label.new()
+	notice.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_apply_caption_style(notice, GDLLMColors.color(GDLLMColors.WARNING_CAPTION))
+	notice.text = "This model runs on the Google AI Studio Subscription source \"%s\", which isn't signed in — every send will fail until it is. Sign in here, or from the ⚙ Connections dialog." % source_id
+	row.add_child(notice)
+	var sign_in := Button.new()
+	sign_in.text = "Sign in with Google"
+	sign_in.pressed.connect(func() -> void:
+		sign_in.disabled = true
+		sign_in.text = "Waiting for the browser…"
+		_start_gemini_signin(source_id, notice, sign_in))
+	row.add_child(sign_in)
+	_message_list.add_child(row)
+	_gemini_signin_notice = row
+	_gemini_signin_source = source_id
+	_follow_to_bottom()
+
+
+## Run one browser sign-in for `source_id` (see GDLLMGeminiOAuth.launch). Same shape as _start_chatgpt_signin, swapped store and label.
+func _start_gemini_signin(source_id: String, notice: Label, sign_in: Button) -> void:
+	GDLLMGeminiOAuth.launch(self, source_id, func(ok: bool, detail: String) -> void:
+		if ok:
+			_refresh_gemini_signin_notice()
+			return
+		if is_instance_valid(notice):
+			notice.text = "Sign-in failed: %s" % detail
+		if is_instance_valid(sign_in):
+			sign_in.disabled = false
+			sign_in.text = "Sign in with Google")
 
 
 ## Drop one standing guidance row, detached immediately so the freed row doesn't linger a frame; returns null for the caller's handle. Safe against a log rebuild having freed it already. Every condition row's teardown routes through here.
@@ -3947,6 +4000,7 @@ func _clear_message_log() -> void:
 	_no_sources_notice = null # same for the no-sources guidance row
 	_unknown_window_notice = null # and the unknown-window one
 	_chatgpt_signin_notice = null # and the sign-in one
+	_gemini_signin_notice = null # and the Google sign-in mirror
 	# Same again for a compaction event's live panels: a rebuild replays them from their records, so the handles into the freed nodes must go.
 	_compaction_panel_body = null
 	_compaction_run_body = null

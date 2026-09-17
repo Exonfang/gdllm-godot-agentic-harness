@@ -1229,7 +1229,7 @@ class GeminiAdapter extends LLMAdapter:
 							args = {}
 						pending_names.append(name)
 						var fc_part: Dictionary = {"functionCall": {"name": name, "args": args}}
-						# thought_signature is a SIBLING of functionCall, never inside it. The plug-in upstream store is responsible for round-tripping the value (it lives on a canonical tool_call dict as the `thought_signature` key, picked up here); see the response-side read at parse_line for how it's first acquired.
+						# thought_signature is a SIBLING of functionCall, never inside it. Required for the Gemini 3.x generation (3.1 Pro Preview, 3.8/3.7/3.6 Flash) and the Gemini 2.5+ generation — these thinking models reject the next request with `400 Function call is missing a thought_signature` when the signature isn't replayed. The plug-in upstream store is responsible for round-tripping the value (it lives on a canonical tool_call dict as the `thought_signature` key, picked up here); see the response-side read at parse_line for how it's first acquired.
 						var signature := _text(tc.get("thought_signature", ""))
 						if signature != "":
 							fc_part["thoughtSignature"] = signature

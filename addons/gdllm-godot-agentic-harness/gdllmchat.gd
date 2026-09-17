@@ -15,7 +15,8 @@ const CONNECTION_BASE_URL_HINTS := {
 	},
 	GDLLMSources.KIND_OPENAI: {
 		"placeholder": "http://localhost:1234/v1/chat/completions",
-		"tooltip": "Paste the URL your server hands out, a full endpoint like http://localhost:1234/v1/chat/completions, a base ending in /v1, or a bare host and port (/v1 is then added automatically) all work.",
+		"tooltip": "Paste the URL your server hands out — a full endpoint like http://localhost:1234/v1/chat/completions, a base ending in /v1, or a bare host and port (/v1 is then added automatically) all work. OpenAI-compatible servers covered by this kind include LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, and OpenRouter (https://openrouter.ai/api/v1) which routes 100+ models (OpenAI, Anthropic, Google, Meta, Mistral, etc.) behind a single key.",
+		"prefill": GDLLMSources.DEFAULT_OPENROUTER_BASE,
 	},
 	GDLLMSources.KIND_OPENAI_RESPONSES: {
 		"placeholder": "https://api.openai.com/v1",
@@ -31,6 +32,16 @@ const CONNECTION_BASE_URL_HINTS := {
 		"placeholder": "https://api.anthropic.com",
 		"tooltip": "Anthropic's endpoint is the same for everyone: https://api.anthropic.com — pasting the full …/v1/messages endpoint works too.",
 		"prefill": GDLLMSources.DEFAULT_ANTHROPIC_BASE,
+	},
+	GDLLMSources.KIND_GEMINI: {
+		"placeholder": "https://generativelanguage.googleapis.com/v1beta",
+		"tooltip": "Google AI Studio's public Gemini API. Paste an AI Studio API key (AIza…) — paid per token on your GCP project, independent of any AI Studio Pro subscription. Use the BYOK kind for this; for the subscription route use the 'Google AI Studio Subscription' kind instead.",
+		"prefill": GDLLMSources.DEFAULT_GEMINI_BASE,
+	},
+	GDLLMSources.KIND_GEMINI_OAUTH: {
+		"placeholder": "https://cloudcode-pa.googleapis.com",
+		"tooltip": "Google Cloud Code Assist / Antigravity's API base — same for everyone. Auth is a Google OAuth sign-in (no API key); the 'Sign in with Google' button in this row starts the browser flow. Plan-covered against your Google AI plan, not per-token. Available only to accounts on a Cloud Code Assist whitelisted tenant.",
+		"prefill": GDLLMSources.DEFAULT_GEMINI_OAUTH_BASE,
 	},
 }
 const EFFORT_LEVEL_COL_WIDTH := 62 ## Fixed width of each level column in the Effort Configuration table; the header label and each row's checkbox share it so columns line up, wide enough for "minimal".
@@ -618,7 +629,7 @@ func _ensure_connections_dialog() -> void:
 	content.add_theme_constant_override("separation", 8)
 
 	var hint := Label.new()
-	hint.text = "Each source is a place models come from. Kind sets the wire format and auth: Ollama (local or cloud), OpenAI-Compatible (Chat Completions — LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, most others...), OpenAI Responses API (api.openai.com with an API key), OpenAI ChatGPT Subscription (your Plus/Pro account via Sign in with ChatGPT — no key), or Anthropic (Claude models). For the URL, paste what your provider hands you — the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one — keys (and ChatGPT sign-in tokens) are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
+	hint.text = "Each source is a place models come from. Kind sets the wire format and auth: Ollama (local or cloud), OpenAI-Compatible (Chat Completions — LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, OpenRouter with its 100+ models, most others...), OpenAI Responses API (api.openai.com with an API key), OpenAI ChatGPT Subscription (your Plus/Pro account via Sign in with ChatGPT — no key), Anthropic (Claude models), Google AI Studio (BYOK) (paste an AI Studio API key — paid on your GCP project), or Google AI Studio Subscription (Cloud Code Assist / Antigravity — Sign in with Google, plan-covered). For the URL, paste what your provider hands you — the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one — keys (and ChatGPT / Google sign-in tokens) are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(hint)
 
@@ -686,7 +697,7 @@ func _add_connection_row(source: Dictionary) -> void:
 	row.add_child(name_edit)
 
 	var kind_select := OptionButton.new()
-	var kinds: Array = [["Ollama", GDLLMSources.KIND_OLLAMA], ["OpenAI-Compatible (Chat Completions)", GDLLMSources.KIND_OPENAI], ["OpenAI Responses API", GDLLMSources.KIND_OPENAI_RESPONSES], ["OpenAI ChatGPT Subscription", GDLLMSources.KIND_OPENAI_CHATGPT], ["Anthropic", GDLLMSources.KIND_ANTHROPIC]]
+	var kinds: Array = [["Ollama", GDLLMSources.KIND_OLLAMA], ["OpenAI-Compatible (Chat Completions)", GDLLMSources.KIND_OPENAI], ["OpenAI Responses API", GDLLMSources.KIND_OPENAI_RESPONSES], ["OpenAI ChatGPT Subscription", GDLLMSources.KIND_OPENAI_CHATGPT], ["Anthropic", GDLLMSources.KIND_ANTHROPIC], ["Google AI Studio (BYOK)", GDLLMSources.KIND_GEMINI], ["Google AI Studio Subscription", GDLLMSources.KIND_GEMINI_OAUTH]]
 	for i in kinds.size():
 		kind_select.add_item(String(kinds[i][0]))
 		kind_select.set_item_metadata(i, kinds[i][1])
@@ -722,8 +733,9 @@ func _add_connection_row(source: Dictionary) -> void:
 
 	var apply_kind := func(kind: String) -> void:
 		_apply_base_url_hint(base_edit, kind)
-		key_edit.visible = kind != GDLLMSources.KIND_OPENAI_CHATGPT
-		auth_button.visible = kind == GDLLMSources.KIND_OPENAI_CHATGPT
+		# Subscription / OAuth kinds authenticate with a browser sign-in, not a pasted key — their rows swap the key field for the auth button. The Gemini subscription route (Antigravity) needs the same treatment as ChatGPT.
+		key_edit.visible = kind != GDLLMSources.KIND_OPENAI_CHATGPT and kind != GDLLMSources.KIND_GEMINI_OAUTH
+		auth_button.visible = kind == GDLLMSources.KIND_OPENAI_CHATGPT or kind == GDLLMSources.KIND_GEMINI_OAUTH
 	apply_kind.call(current_kind)
 	_refresh_connection_auth_button(auth_button, String(source.get("id", "")))
 	kind_select.item_selected.connect(func(index: int) -> void:
@@ -756,19 +768,56 @@ func _add_connection_row(source: Dictionary) -> void:
 	auth_button.pressed.connect(func() -> void: _on_connection_auth_pressed(entry, auth_button))
 
 
-## Stamp the subscription auth button with its row's sign-in state: an offer to sign in, or the signed-in account with sign-out on click.
+## Stamp the subscription auth button with its row's sign-in state: an offer to sign in, or the signed-in account with sign-out on click. Mirrors the ChatGPT and Google AI Studio sign-in flows — each kind drives the same button with its own store.
 func _refresh_connection_auth_button(auth_button: Button, source_id: String) -> void:
-	if source_id != "" and GDLLMOAuth.is_signed_in(source_id):
-		auth_button.text = "Sign out (%s)" % GDLLMOAuth.account_label(source_id)
+	# Look up the row's kind by id so the button label and tooltip describe the right provider — ChatGPT vs Google AI Studio Subscription.
+	var kind := ""
+	for existing in _connection_rows:
+		if String(existing.get("id", "")) == source_id:
+			kind = String(existing.get("kind_select", null).get_selected_metadata()) if existing.get("kind_select") else ""
+			break
+	var is_gemini_oauth := kind == GDLLMSources.KIND_GEMINI_OAUTH
+	if source_id != "" and _is_source_signed_in(source_id, kind):
+		auth_button.text = "Sign out (%s)" % _signed_in_account_label(source_id, kind)
 		auth_button.tooltip_text = "Signed in. Click to sign out and forget this source's stored tokens."
-	else:
-		auth_button.text = "Sign in with ChatGPT"
-		auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your ChatGPT account (Plus/Pro) — your subscription covers usage, no API key involved. Tokens are stored in Editor Settings with the same custody as API keys."
+		return
+	if is_gemini_oauth:
+		auth_button.text = "Sign in with Google"
+		auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your Google account (for Cloud Code Assist / Antigravity) — your Google AI plan covers usage on whitelisted tenants, no API key involved. Tokens are stored in Editor Settings with the same custody as API keys."
+		return
+	auth_button.text = "Sign in with ChatGPT"
+	auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your ChatGPT account (Plus/Pro) — your subscription covers usage, no API key involved. Tokens are stored in Editor Settings with the same custody as API keys."
 
 
-## The row's sign-in/sign-out click. A fresh unsaved row has no id yet for tokens to key on, so it saves and rebuilds first, then resumes this click on the rebuilt row now carrying the assigned id — one click starts the browser either way. Sign-out is immediate; sign-in runs one GDLLMOAuth flow (see GDLLMOAuth.launch) and restamps the button on completion.
+## Look up the kind for `source_id` by scanning the current rows; returns the kind from the OptionButton metadata when found, or "" when the row isn't loaded (e.g. mid-save). Used to route auth-button state when the same source row carries different OAuth kinds (ChatGPT vs Google AI Studio).
+func _kind_for_source_id(source_id: String) -> String:
+	for existing in _connection_rows:
+		if String(existing.get("id", "")) == source_id:
+			var sel: OptionButton = existing.get("kind_select")
+			if sel != null:
+				return String(sel.get_selected_metadata())
+	return ""
+
+
+## True when `source_id` is signed in for its row's `kind` — ChatGPT uses GDLLMOAuth; Google AI Studio Subscription uses GDLLMGeminiOAuth.
+func _is_source_signed_in(source_id: String, kind: String) -> bool:
+	if kind == GDLLMSources.KIND_GEMINI_OAUTH:
+		return GDLLMGeminiOAuth.is_configured(source_id)
+	return GDLLMOAuth.is_signed_in(source_id)
+
+
+## The user-facing "signed in as X" label for the row's auth button.
+func _signed_in_account_label(source_id: String, kind: String) -> String:
+	if kind == GDLLMSources.KIND_GEMINI_OAUTH:
+		return GDLLMGeminiOAuth.account_label(source_id)
+	return GDLLMOAuth.account_label(source_id)
+
+
+## The row's sign-in/sign-out click. A fresh unsaved row has no id yet for tokens to key on, so it saves and rebuilds first, then resumes this click on the rebuilt row now carrying the assigned id — one click starts the browser either way. Sign-out is immediate; sign-in runs one OAuth flow (GDLLMOAuth for ChatGPT, GDLLMGeminiOAuth for Google AI Studio Subscription) and restamps the button on completion.
 func _on_connection_auth_pressed(entry: Dictionary, auth_button: Button) -> void:
 	var source_id := String(entry.get("id", ""))
+	var kind_select: OptionButton = entry.get("kind_select")
+	var kind := String(kind_select.get_selected_metadata()) if kind_select != null else ""
 	if source_id == "":
 		# The save assigns the row its id (a blank name included — _gather_sources falls back to a generated one), so the resume matches on ids that didn't exist before the save, never on the editable name.
 		var known_ids := {}
@@ -778,17 +827,31 @@ func _on_connection_auth_pressed(entry: Dictionary, auth_button: Button) -> void
 		_save_connections()
 		_refresh_connections_list()
 		for new_entry in _connection_rows:
-			var kind_select: OptionButton = new_entry["kind_select"]
-			if not known_ids.has(String(new_entry["id"])) and String(kind_select.get_item_metadata(kind_select.selected)) == GDLLMSources.KIND_OPENAI_CHATGPT:
+			var new_kind_select: OptionButton = new_entry["kind_select"]
+			var new_kind := String(new_kind_select.get_selected_metadata()) if new_kind_select != null else ""
+			if not known_ids.has(String(new_entry["id"])) and (new_kind == GDLLMSources.KIND_OPENAI_CHATGPT or new_kind == GDLLMSources.KIND_GEMINI_OAUTH):
 				_on_connection_auth_pressed(new_entry, new_entry["auth_button"])
 				return
 		return
-	if GDLLMOAuth.is_signed_in(source_id):
-		GDLLMOAuth.clear_tokens(source_id)
+	if _is_source_signed_in(source_id, kind):
+		if kind == GDLLMSources.KIND_GEMINI_OAUTH:
+			GDLLMGeminiOAuth.clear_credentials(source_id)
+		else:
+			GDLLMOAuth.clear_tokens(source_id)
 		_refresh_connection_auth_button(auth_button, source_id)
 		return
 	auth_button.disabled = true
 	auth_button.text = "Waiting for the browser…"
+	if kind == GDLLMSources.KIND_GEMINI_OAUTH:
+		GDLLMGeminiOAuth.launch(self, source_id, func(ok: bool, detail: String) -> void:
+			if is_instance_valid(auth_button):
+				auth_button.disabled = false
+				_refresh_connection_auth_button(auth_button, source_id)
+				if not ok:
+					auth_button.tooltip_text = "Sign-in failed: %s" % detail
+			if not ok:
+				push_warning("GDLLM: Google AI Studio sign-in failed: %s" % detail))
+		return
 	GDLLMOAuth.launch(self, source_id, func(ok: bool, detail: String) -> void:
 		if is_instance_valid(auth_button):
 			auth_button.disabled = false

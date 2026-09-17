@@ -108,19 +108,28 @@ func _make_adapter() -> LLMAdapter:
 	return LLMAdapter.for_kind(adapter_kind)
 
 
-## For a ChatGPT-subscription source, adopt a current access token as this request's api_key — refreshed silently through the stored refresh token when stale, since access tokens expire within hours and a long-idle session's next send must not ride a dead one. True to proceed; false when the request must not go out (never signed in, the refresh failed, or a cancel landed during it), the failure emitted with sign-in as the named fix (goal 3). Any other kind passes straight through.
+## For a subscription source (ChatGPT or Google AI Studio Antigravity), adopt a current access token as this request's api_key — refreshed silently through the stored refresh token when stale, since access tokens expire within hours and a long-idle session's next send must not ride a dead one. True to proceed; false when the request must not go out (never signed in, the refresh failed, or a cancel landed during it), the failure emitted with sign-in as the named fix (goal 3). Any other kind passes straight through.
 func _adopt_fresh_subscription_token() -> bool:
-	if adapter_kind != GDLLMSources.KIND_OPENAI_CHATGPT:
+	if adapter_kind != GDLLMSources.KIND_OPENAI_CHATGPT and adapter_kind != GDLLMSources.KIND_GEMINI_OAUTH:
 		return true
 	# Busy is latched across the await so a second send can't slip in mid-refresh; a cancel() during it bumps the epoch, which reads here as "stand down" — the flag alone can't be the sentinel, since a send issued after the cancel re-latches it and must not be hijacked by this stale continuation.
 	_busy = true
 	var epoch := _auth_epoch
-	var token := await GDLLMOAuth.ensure_fresh(source_id, self)
+	var token: String = ""
+	if adapter_kind == GDLLMSources.KIND_GEMINI_OAUTH:
+		token = await GDLLMGeminiOAuth.ensure_fresh(source_id, self)
+	else:
+		token = await GDLLMOAuth.ensure_fresh(source_id, self)
 	if epoch != _auth_epoch or not _busy:
 		return false # cancelled while refreshing; silence is the cancel contract
 	_busy = false
 	if token == "":
-		call_deferred("_emit_request_failed", "Not signed in to ChatGPT for source \"%s\" (or the sign-in expired and couldn't refresh). Use Sign in with ChatGPT in the Connections dialog — the ⚙ beside the model picker." % source_id)
+		var hint: String
+		if adapter_kind == GDLLMSources.KIND_GEMINI_OAUTH:
+			hint = "Not signed in to Google AI Studio Subscription for source \"%s\" (or the sign-in expired and couldn't refresh). Use Sign in with Google in the Connections dialog — the ⚙ beside the model picker." % source_id
+		else:
+			hint = "Not signed in to ChatGPT for source \"%s\" (or the sign-in expired and couldn't refresh). Use Sign in with ChatGPT in the Connections dialog — the ⚙ beside the model picker." % source_id
+		call_deferred("_emit_request_failed", hint)
 		return false
 	api_key = token
 	return true
@@ -225,6 +234,10 @@ func _kind_404_hint() -> String:
 		return "check the source's URL: the ChatGPT subscription backend lives at %s, which the Connections dialog prefills — a 404 usually means the URL was edited" % GDLLMSources.DEFAULT_CHATGPT_BASE
 	if adapter_kind == GDLLMSources.KIND_ANTHROPIC:
 		return "check the source's URL: Anthropic wants https://api.anthropic.com (pasting the full …/v1/messages endpoint works too)"
+	if adapter_kind == GDLLMSources.KIND_GEMINI:
+		return "check the source's URL and key: Google AI Studio's Gemini API lives at %s — a 401 means the key isn't an AI Studio API key or the project lacks the Generative Language API enabled" % GDLLMSources.DEFAULT_GEMINI_BASE
+	if adapter_kind == GDLLMSources.KIND_GEMINI_OAUTH:
+		return "check the source's URL: Cloud Code Assist / Antigravity lives at %s — a 404 usually means the URL was edited, the sign-in is on a non-whitelisted tenant, or the stored project id is stale" % GDLLMSources.DEFAULT_GEMINI_OAUTH_BASE
 	return "check the source's URL and Kind: an Ollama server takes a bare http://host:port or a full endpoint like …/api/chat — an OpenAI-compatible server (LM Studio, llama.cpp, koboldcpp, vLLM, most others...) needs the OpenAI-Compatible (Chat Completions) kind instead"
 
 
