@@ -1471,7 +1471,7 @@ class GeminiOAuthAdapter extends LLMAdapter:
 		var body := {}
 		if _current_project != "":
 			body["project"] = _current_project
-		return {"path": GDLLMGeminiOAuth.CLOUDCODE_FETCH_MODELS_URL, "method": HTTPClient.METHOD_POST, "body": body}
+		return {"path": "/v1internal:fetchAvailableModels", "method": HTTPClient.METHOD_POST, "body": body}
 
 	## The catalog response — `{models: [{name, displayName, maxInputTokens, maxOutputTokens, capabilities}]}` — translated to the bare `name` (e.g. `gemini-3.8-flash`) the model picker expects. Falls back to the AIFlowBridge hardcoded model list when the gateway returns nothing or errors, so a tenant with no models doesn't render an empty picker.
 	func parse_models(data: Variant) -> PackedStringArray:
