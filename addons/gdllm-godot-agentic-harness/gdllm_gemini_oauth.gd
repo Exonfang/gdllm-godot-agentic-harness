@@ -29,10 +29,22 @@ const GOOGLE_OAUTH_AUTH_URL := "https://accounts.google.com/o/oauth2/v2/auth"
 const GOOGLE_OAUTH_TOKEN_URL := "https://oauth2.googleapis.com/token"
 const GOOGLE_USERINFO_URL := "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"
 
-## Cloud Code Assist endpoints — distinct from the BYOK Gemini base (`generativelanguage.googleapis.com`).
+## Cloud Code Assist endpoints — distinct from the BYOK Gemini base (`generativelanguage.googleapis.com`). The `:v1internal` prefix and the colon-separated method names are part of the same contract; both prefixes are tried against the same host in AIFlowBridge's reference impl.
 const CLOUDCODE_LOAD_CODE_ASSIST_URL := "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
 const CLOUDCODE_FETCH_MODELS_URL := "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
 const CLOUDCODE_STREAM_URL := "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+
+## Cloud Code Assist hard-coded client identity. Public by design — they're the same strings shipped in the official Antigravity binary; see the SECURITY block at the top of this file.
+const AGY_USER_AGENT := "antigravity" ## User-Agent header value Antigravity's gateway inspects (per AIFlowBridge constants.ts).
+const AGY_GOOG_API_CLIENT := "gl-kiloCode/10.4.1" ## X-Goog-Api-Client header value — Google's internal client identifier for the Antigravity/Kilo CLI client; the gateway checks this on every request.
+const AGY_CLIENT_METADATA := '{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}' ## Client-Metadata header value — JSON blob the gateway inspects to scope tenant features (model access, plan, quotas). Mandatory on loadCodeAssist; carried on every request for consistency with AIFlowBridge.
+
+## Hardcoded fallback model list — used when the gateway returns an empty catalog on first sign-in (tenant not provisioned yet, or no allowedTiers). Mirrors AIFlowBridge's DEFAULT_FALLBACK_MODELS exactly so the picker seeded from this list stays consistent with the upstream until the next successful refresh.
+const DEFAULT_FALLBACK_MODELS: Array[Dictionary] = [
+	{"name": "gemini-3.8-flash", "displayName": "Gemini 3.8 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
+	{"name": "gemini-3.7-flash", "displayName": "Gemini 3.7 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
+	{"name": "gemini-3.6-flash", "displayName": "Gemini 3.6 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
+]
 
 ## OAuth scopes — `cloud-platform` for the Cloud Code Assist API, the userinfo pair for the email label, `cclog` and `experimentsandconfigs` for the on-by-default Antigravity capabilities.
 const CLOUDCODE_SCOPES: Array[String] = [
@@ -207,11 +219,17 @@ static func launch(host: Node, source_id: String, on_finished: Callable) -> void
 	flow.begin(source_id)
 
 
-## The current access token for `source_id`, refreshed through `host` when stale. "" when the source was never signed in or the refresh failed.
+## The current access token for `source_id`, refreshed through `host` when stale. "" when the source was never signed in or the refresh failed. On every successful fresh-token path, also opportunistically re-resolves the Cloud Code Assist project id when it's missing — covers the install flow where loadCodeAssist failed at sign-in (network blip) but the token store landed cleanly, so a future Refresh Models / send would otherwise build an envelope with an empty project and get a 4xx with no actionable detail.
 static func ensure_fresh(source_id: String, host: Node) -> String:
 	var creds := credentials_for(source_id)
 	if creds.is_empty():
 		return ""
+	# Opportunistic project id resolution — happens once after sign-in or after a 403. The cost is one extra POST the first time; the cached value sticks across refreshes.
+	if String(creds.get("project_id", "")) == "":
+		var fresh_for_project := String(creds.get("access_token", ""))
+		if fresh_for_project != "":
+			await load_code_assist_project(source_id, fresh_for_project)
+			creds = credentials_for(source_id)
 	var cached_access := String(creds.get("access_token", ""))
 	var cached_expires := int(creds.get("expires_at", 0))
 	if cached_access != "" and cached_expires > int(Time.get_unix_time_from_system()) + REFRESH_MARGIN_SECONDS:
@@ -272,41 +290,46 @@ static func load_code_assist_project(source_id: String, access_token: String = "
 
 ## One-shot helper: POST a JSON body at `url` with Bearer `access_token`, look for `cloudaicompanionProject` in the reply, store it. Returns "" on any failure (HTTP, missing field, etc.).
 static func _post_json_for_project(source_id: String, url: String, access_token: String, body: String) -> String:
-	# Implementation lives in a sibling static to avoid dragging Node references into the helper. Done inline below; see _post_json.
-	return await _post_json(source_id, url, access_token, body)
-
-
-static func _post_json(_source_id: String, url: String, access_token: String, body: String) -> String:
-	# Use the most recent live host — the LLMClient/dock holds one. _live_host returns the SceneTree's root window, which is always a Node when in editor or play. In headless tests where no scene tree exists yet, return "" rather than trying to cast MainLoop to Node (the cast fails by design — MainLoop is not a Node).
-	var host := _live_host()
-	if host == null:
-		push_warning("GDLLMGeminiOAuth: no live host available for loadCodeAssist POST; skipping project resolution.")
-		return ""
-	var request := HTTPRequest.new()
-	request.timeout = TOKEN_REQUEST_TIMEOUT
-	host.add_child(request)
-	var headers := PackedStringArray([
-		"Authorization: Bearer " + access_token,
-		"Content-Type: application/json",
-		"User-Agent: " + DEFAULT_USER_AGENT,
-	])
-	var err := request.request(url, headers, HTTPClient.METHOD_POST, body)
-	if err != OK:
-		request.queue_free()
-		return ""
-	var result: Array = await request.request_completed
-	request.queue_free()
-	if int(result[0]) != HTTPRequest.RESULT_SUCCESS or int(result[1]) != 200:
-		return ""
-	var parsed: Variant = JSON.parse_string((result[3] as PackedByteArray).get_string_from_utf8())
+	var parsed: Variant = await _post_json(url, access_token, body)
 	if not (parsed is Dictionary):
 		return ""
 	# Cloud Code Assist returns the project id at the top level (most rev) or under .cloudaicompanionProject / .projectId in newer revisions — accept whichever the field uses.
 	for key in ["cloudaicompanionProject", "projectId", "project"]:
 		var value: Variant = parsed.get(key, "")
 		if value is String and value != "":
+			set_project_id(source_id, value)
 			return value
 	return ""
+
+
+## POST a JSON body to a Cloud Code Assist URL with Bearer + the AGY identity headers. Returns the parsed JSON dictionary, or null on transport failure, or a synthetic `{_status, _body}` dict on non-2xx HTTP responses so the caller can surface a useful error. The headers — `Authorization`, `User-Agent`, `X-Goog-Api-Client`, `Client-Metadata` — match AIFlowBridge's reference impl; without them the gateway returns a generic 4xx without naming the missing client identity.
+static func _post_json(url: String, access_token: String, body: String) -> Variant:
+	var host := _live_host()
+	if host == null:
+		push_warning("GDLLMGeminiOAuth: no live host available for AGY POST; skipping.")
+		return null
+	var request := HTTPRequest.new()
+	request.timeout = TOKEN_REQUEST_TIMEOUT
+	host.add_child(request)
+	var headers := PackedStringArray([
+		"Authorization: Bearer " + access_token,
+		"Content-Type: application/json",
+		"User-Agent: " + AGY_USER_AGENT,
+		"X-Goog-Api-Client: " + AGY_GOOG_API_CLIENT,
+		"Client-Metadata: " + AGY_CLIENT_METADATA,
+	])
+	var err := request.request(url, headers, HTTPClient.METHOD_POST, body)
+	if err != OK:
+		request.queue_free()
+		return null
+	var result: Array = await request.request_completed
+	request.queue_free()
+	if int(result[0]) != HTTPRequest.RESULT_SUCCESS:
+		return null
+	var status := int(result[1])
+	if status < 200 or status >= 300:
+		return {"_status": status, "_body": (result[3] as PackedByteArray).get_string_from_utf8()}
+	return JSON.parse_string((result[3] as PackedByteArray).get_string_from_utf8())
 
 
 ## A walking-around-helper: looks up the first live host on the scene tree to ride the HTTPRequest on. "" in headless tests (no tree yet).

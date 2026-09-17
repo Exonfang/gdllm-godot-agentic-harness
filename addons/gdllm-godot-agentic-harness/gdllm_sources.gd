@@ -82,9 +82,9 @@ static func _gemini_template() -> Dictionary:
 	return {"id": "gemini", "name": "Google AI Studio (BYOK)", "kind": KIND_GEMINI, "base_url": DEFAULT_GEMINI_BASE, "api_key": "", "enabled": false}
 
 
-## The ready-to-fill Google AI Studio Subscription source row (the Antigravity route, gated by the user's Cloud Code Assist whitelist). Labeled "Google AI Studio Subscription" to mirror the existing "OpenAI ChatGPT Subscription" row — both kinds consume a paid subscription via browser sign-in instead of an API key. Disabled until the user signs in and flips it on.
+## The ready-to-fill Google AI Studio Subscription source row (the Antigravity route, gated by the user's Cloud Code Assist whitelist). Labeled "Google AI Studio Subscription" to mirror the existing "OpenAI ChatGPT Subscription" row — both kinds consume a paid subscription via browser sign-in instead of an API key. Disabled until the user signs in and flips it on. The `project_id` slot is filled by GDLLMGeminiOAuth.load_code_assist_project at sign-in (and refreshed automatically on a 401/403) — LLMClient forwards it to GeminiOAuthAdapter.set_project_id so the AGY envelope carries it.
 static func _gemini_oauth_template() -> Dictionary:
-	return {"id": "gemini-antigravity", "name": "Google AI Studio Subscription", "kind": KIND_GEMINI_OAUTH, "base_url": DEFAULT_GEMINI_OAUTH_BASE, "api_key": "", "enabled": false}
+	return {"id": "gemini-antigravity", "name": "Google AI Studio Subscription", "kind": KIND_GEMINI_OAUTH, "base_url": DEFAULT_GEMINI_OAUTH_BASE, "api_key": "", "project_id": "", "enabled": false}
 
 
 ## The ready-to-fill OpenRouter source row. OpenRouter is a router over 100+ models — OpenAI, Anthropic, Google, Meta, Mistral, etc. — and exposes them on a single OpenAI-compatible endpoint at `https://openrouter.ai/api/v1` with one API key. Useful as a single-billing fallback when direct vendor keys aren't set up.
@@ -158,6 +158,13 @@ static func resolve_qualified(qualified: String) -> Dictionary:
 	var source_id := String(parsed["source_id"])
 	var source := resolve(source_id)
 	var stale := source.is_empty()
+	# The AGY project id lives in the OAuth token store (see GDLLMGeminiOAuth.credentials_for), not on the source row — the row's slot is the optimistic mirror written at sign-in, but the source of truth is the token store. Read from it on every resolve so an opportunistic resolve mid-session lands in the next request without waiting for a re-save.
+	var resolved_project_id := String(source.get("project_id", ""))
+	if String(source.get("kind", "")) == KIND_GEMINI_OAUTH:
+		var creds: Dictionary = GDLLMGeminiOAuth.credentials_for(source_id)
+		var stored: String = String(creds.get("project_id", ""))
+		if stored != "":
+			resolved_project_id = stored
 	return {
 		"source_id": source_id,
 		"source_name": String(source.get("name", "")),
@@ -165,6 +172,7 @@ static func resolve_qualified(qualified: String) -> Dictionary:
 		"api_key": String(source.get("api_key", "")),
 		"kind": String(source.get("kind", KIND_OLLAMA)),
 		"model": String(parsed["model"]),
+		"project_id": resolved_project_id,
 		"stale": stale,
 	}
 

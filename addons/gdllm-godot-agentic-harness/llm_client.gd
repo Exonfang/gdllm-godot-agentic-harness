@@ -21,6 +21,7 @@ var effort: String = "" ## Reasoning-effort level for chat requests (a GDLLMEffo
 var cache_ttl: int = 0 ## The session's effective prompt-cache TTL in seconds, adopted from configure_from beside effort; only the Anthropic adapter acts on it (past the default tier it requests the 1-hour cache lifetime — see AnthropicAdapter.cache_control_for), the rest ignore it.
 var source_id: String = "" ## Id of the configured source, carried from configure_from so a stale-source refusal can name it.
 var source_stale: bool = false ## The configured source id no longer resolves (deleted or renamed; see GDLLMSources.resolve_qualified); every send refuses loudly instead of running on rerouted connection details.
+var _source_project_id: String = "" ## Cloud Code Assist `cloudaicompanionProject` resolved by GDLLMGeminiOAuth.load_code_assist_project at sign-in. Forwarded to GeminiOAuthAdapter.set_project_id on every adapter build so the AGY envelope carries it. Empty for every other kind.
 var http_request: HTTPRequest
 var last_assistant_blocks: Array = [] ## The provider's raw assistant content blocks for the request that just finished in tool calls, when its adapter needs them echoed back to continue the loop (Anthropic, the OpenAI Responses API; see LLMAdapter's assistant_blocks event). Empty for providers whose canonical echo suffices. Read it right after tool_calls_received and store it beside the turn.
 var last_models_error: String = "" ## Why the latest fetch_models resolved empty ("" = no failure, the source is genuinely bare); the model sweep reads it so an empty source is reported with its cause instead of a bare "returned nothing".
@@ -82,6 +83,8 @@ func configure_from(resolved: Dictionary) -> void:
 	cache_ttl = maxi(0, int(resolved.get("cache_ttl", 0)))
 	source_id = String(resolved.get("source_id", ""))
 	source_stale = bool(resolved.get("stale", false))
+	# Stash the AGY project id from the source row (set by GDLLMGeminiOAuth.load_code_assist_project at sign-in / after a 401). It's a no-op for every other kind — _apply_source_overrides below ignores an empty project on adapters that don't expose set_project_id.
+	_source_project_id = String(resolved.get("project_id", ""))
 
 
 ## Refuse to send when the configured source is stale, resolving the request as a failure that names what's missing. The emit is deferred so an await-based caller (GDLLMSubagent._send) reaches its await before the failure lands.
@@ -103,9 +106,17 @@ func _emit_request_failed(reason: String) -> void:
 	request_failed.emit(reason)
 
 
-## A fresh adapter for this client's current wire format.
+## A fresh adapter for this client's current wire format. Every call site that builds a request also needs the per-source overrides applied (AGY project id); centralizing it here keeps the overrides in sync with the adapter build so a model-list fetch, a context probe, a one-shot completion and a streamed chat all see the same project id.
 func _make_adapter() -> LLMAdapter:
-	return LLMAdapter.for_kind(adapter_kind)
+	var adapter := LLMAdapter.for_kind(adapter_kind)
+	_apply_source_overrides(adapter)
+	return adapter
+
+
+## Per-adapter overrides that need to be applied before the request builder runs — currently just the AGY project id. Cheap to call, safe to call before any adapter that doesn't expose the override (the `has_method` guard makes it a no-op there).
+func _apply_source_overrides(adapter: LLMAdapter) -> void:
+	if _source_project_id != "" and adapter.has_method("set_project_id"):
+		adapter.set_project_id(_source_project_id)
 
 
 ## For a subscription source (ChatGPT or Google AI Studio Antigravity), adopt a current access token as this request's api_key — refreshed silently through the stored refresh token when stale, since access tokens expire within hours and a long-idle session's next send must not ride a dead one. True to proceed; false when the request must not go out (never signed in, the refresh failed, or a cancel landed during it), the failure emitted with sign-in as the named fix (goal 3). Any other kind passes straight through.
@@ -181,7 +192,10 @@ func fetch_models() -> void:
 		if not _tags_pending:
 			return # the deadline already resolved this fetch as empty while we waited
 	var adapter := _make_adapter()
-	var err := _tags_http_request.request(adapter.normalize_base(api_base) + adapter.models_path(), _request_headers(adapter), HTTPClient.METHOD_GET)
+	# Adapters whose listing endpoint is a POST with a body (GeminiOAuthAdapter's :v1internal:fetchAvailableModels) ship models_request() returning {path, method, body}; others fall back to models_path() + GET. The project id, when the source row has one, is applied to the adapter here so the AGY envelope carries it.
+	_apply_source_overrides(adapter)
+	var req := adapter.models_request()
+	var err := _tags_http_request.request(adapter.normalize_base(api_base) + String(req.get("path", "")), _request_headers(adapter), int(req.get("method", HTTPClient.METHOD_GET)), JSON.stringify(req.get("body", {})))
 	if err != OK:
 		last_models_error = "the request could not be sent (%s)" % error_string(err)
 		push_warning("LLMClient: model list request error: %s" % error_string(err))
