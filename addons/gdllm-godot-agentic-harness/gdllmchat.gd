@@ -737,7 +737,7 @@ func _add_connection_row(source: Dictionary) -> void:
 		key_edit.visible = kind != GDLLMSources.KIND_OPENAI_CHATGPT and kind != GDLLMSources.KIND_GEMINI_OAUTH
 		auth_button.visible = kind == GDLLMSources.KIND_OPENAI_CHATGPT or kind == GDLLMSources.KIND_GEMINI_OAUTH
 	apply_kind.call(current_kind)
-	_refresh_connection_auth_button(auth_button, String(source.get("id", "")))
+	_refresh_connection_auth_button(auth_button, String(source.get("id", "")), current_kind)
 	kind_select.item_selected.connect(func(index: int) -> void:
 		var kind := String(kind_select.get_item_metadata(index))
 		apply_kind.call(kind)
@@ -769,13 +769,15 @@ func _add_connection_row(source: Dictionary) -> void:
 
 
 ## Stamp the subscription auth button with its row's sign-in state: an offer to sign in, or the signed-in account with sign-out on click. Mirrors the ChatGPT and Google AI Studio sign-in flows — each kind drives the same button with its own store.
-func _refresh_connection_auth_button(auth_button: Button, source_id: String) -> void:
-	# Look up the row's kind by id so the button label and tooltip describe the right provider — ChatGPT vs Google AI Studio Subscription.
-	var kind := ""
-	for existing in _connection_rows:
-		if String(existing.get("id", "")) == source_id:
-			kind = String(existing.get("kind_select", null).get_selected_metadata()) if existing.get("kind_select") else ""
-			break
+func _refresh_connection_auth_button(auth_button: Button, source_id: String, kind: String = "") -> void:
+	# Look up the row's kind by id so the button label and tooltip describe the right provider — ChatGPT vs Google AI Studio. The kind comes from the row's source dict (passed by the caller); falling back to scanning _connection_rows is unreliable at the construction call site, where the row isn't appended yet.
+	if kind == "":
+		for existing in _connection_rows:
+			if String(existing.get("id", "")) == source_id:
+				var sel: OptionButton = existing.get("kind_select")
+				if sel != null:
+					kind = String(sel.get_selected_metadata())
+				break
 	var is_gemini_oauth := kind == GDLLMSources.KIND_GEMINI_OAUTH
 	if source_id != "" and _is_source_signed_in(source_id, kind):
 		auth_button.text = "Sign out (%s)" % _signed_in_account_label(source_id, kind)
