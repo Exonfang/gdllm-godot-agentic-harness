@@ -4,7 +4,7 @@ A fully transparent in-editor agentic harness for large language models inside t
 
 Compared to Opencode, GDLLM completes the same tasks in roughly **half as many tokens**.
 
-Designed around *progressive disclosure*, the main agent starts with almost nothing and pulls in deeper knowledge only as a task demands it, so the conversation stays token light and on-topic. 
+Designed around *progressive disclosure*, the main agent starts with almost nothing and pulls in deeper knowledge only as a task demands it, so the conversation stays token light and on-topic.
 
 The plugin lives under [addons/gdllm-godot-agentic-harness/](addons/gdllm-godot-agentic-harness/).
 
@@ -26,7 +26,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 - Give your agents full access to all Godot engine features.
 - Every action an agent takes is fully surfaced and transparent. Optionally toggle to a condensed feed which folds each tool call and its result into expandable one-line summaries.
 - Inspect complete model context at any turn.
-- Edits, whenever possible, are automatically engine-validated after changes and errors are surfaced to agents. 
+- Edits, whenever possible, are automatically engine-validated after changes and errors are surfaced to agents.
 - Integrated engine documentation, pulling from the same cached data the in-editor documentation browser uses.
 - Respects `AGENTS.md`. `GDLLM.md` optionally overrides any `AGENTS.md` file if present.
 - Supports user-defined `/skills/`, dynamically added for appropriate tasks, similar to most other harnesses.
@@ -39,7 +39,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 - Send-safety gates - notices regarding unsaved work before prompts are sent.
 - Attachment support (selected nodes, scripts, and script selections)
 - [MarkdownLabel](https://github.com/daenvil/MarkdownLabel) support for improved model output styling.
-- Comprehensive editor settings. _(*It's strongly recommended to leave most of these at defaults unless you know what you're doing!)_
+- Comprehensive editor settings. *(*It's strongly recommended to leave most of these at defaults unless you know what you're doing!)*
 - Configurable colors.
 
 ## Tools
@@ -69,6 +69,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 `run_subagent`
 
 ## First-time Setup
+
 - Download and extract the release zip of your choice (GDLLM + MarkdownLabel recommended) directly into your Godot project directory.
 - Using the **Connections** button in the session panel, link up your inference providers: pick the Kind (OpenAI-Compatible (Chat Completions), OpenAI Responses API, OpenAI ChatGPT Subscription, Anthropic, Google Gemini (BYOK), Google Gemini (Antigravity), or Ollama), paste the URL your provider hands you (the full endpoint or just the server address, either works) and add API keys where needed. Any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, koboldcpp, most others...) uses the OpenAI-Compatible (Chat Completions) kind. OpenAI's own API (api.openai.com) works best as the **OpenAI Responses API** kind — its newest models (GPT-5.6 and up) require the Responses API to combine reasoning effort with tools.
 - A ChatGPT Plus/Pro subscription can drive the harness without API billing: use the **OpenAI ChatGPT Subscription** kind and press its **Sign in with ChatGPT** button (a browser sign-in; no API key).
@@ -78,7 +79,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 - After the model list refreshes, use the **Effort Configuration** to specify the available thinking levels, cache TTL, and context windows. No provider has an API to retrieve model effort/thinking levels, so they need to be manually identified and added, or the default effort level for the model will be used.
   - Context window size and cache TTL are used to inform context compaction.
   - For providers that report it, context window size is automatically fetched via API.
-  - For Anthropic models, setting the cache above 300s uses Anthropic's 1 hour cache declaration. _(Other providers don't currently publish cache times.)_
+  - For Anthropic models, setting the cache above 300s uses Anthropic's 1 hour cache declaration. *(Other providers don't currently publish cache times.)*
 - In Editor Settings > GDLLM > Models, specify your preferred default chat model and tasks model. The tasks model powers summarization and title generation.
 - Review Editor Settings > GDLLM and update to your preference. Some color-blind users may want to adjust their colors.
 
@@ -86,10 +87,10 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 
 Two kinds, two routes, two distinct bases — picked automatically from each source row's `kind`:
 
-| Kind | Base | Auth | Surface | Billing |
-|---|---|---|---|---|
-| `gemini` (BYOK) | `https://generativelanguage.googleapis.com/v1beta` | `x-goog-api-key: AIza…` | native `:streamGenerateContent?alt=sse` | Per-token on your GCP project |
-| `gemini-oauth` | `https://cloudcode-pa.googleapis.com` | `Authorization: Bearer ya29…/1//…` (Google OAuth) | Cloud Code Assist envelope at `/v1internal:streamGenerateContent?alt=sse` | Plan-covered (Google AI plan), whitelist-gated |
+| Kind            | Base                                               | Auth                                              | Surface                                                                   | Billing                                        |
+| --------------- | -------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------- |
+| `gemini` (BYOK) | `https://generativelanguage.googleapis.com/v1beta` | `x-goog-api-key: AIza…`                           | native `:streamGenerateContent?alt=sse`                                   | Per-token on your GCP project                  |
+| `gemini-oauth`  | `https://cloudcode-pa.googleapis.com`              | `Authorization: Bearer ya29…/1//…` (Google OAuth) | Cloud Code Assist envelope at `/v1internal:streamGenerateContent?alt=sse` | Plan-covered (Google AI plan), whitelist-gated |
 
 Both kinds share the **native Gemini wire shape** (`contents[]` + `parts[]`, `systemInstruction`, `functionCall` / `functionResponse`, `usageMetadata`). The OAuth route only diverges by wrapping the same body in the Cloud Code Assist envelope `{project, model, request, requestType, userAgent, requestId}`.
 
@@ -120,7 +121,6 @@ OpenRouter (`https://openrouter.ai/api/v1`) exposes all of the above plus the de
 3. Pick a model from `fetchAvailableModels` once the sign-in finishes.
 
 The default client id / secret are the official Antigravity CLI public credentials (intentionally public, see `gdllm_gemini_oauth.gd`'s header comment). To use a private Google Cloud OAuth client, set `gdllm/connection/gemini_oauth_client_id` and `gdllm/connection/gemini_oauth_client_secret` in Editor Settings before signing in.
-
 
 ## Roadmap
 
