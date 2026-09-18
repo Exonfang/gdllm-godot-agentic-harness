@@ -755,6 +755,8 @@ func _request_span(start: int, stop: int, prune_limit: int) -> Array:
 			entry["tool_calls"] = _sanitize_tool_calls(msg["tool_calls"])
 		if msg.has("tool_name"):
 			entry["tool_name"] = msg["tool_name"]
+		if msg.has("thought_signature"):
+			entry["thought_signature"] = msg["thought_signature"]
 		# A provider's raw echo blocks ride along so its adapter can replay the turn verbatim inside an active tool loop; adapters that don't need them strip or ignore the field (see LLMAdapter).
 		if msg.has("assistant_blocks"):
 			entry["assistant_blocks"] = msg["assistant_blocks"]
@@ -3174,7 +3176,10 @@ func _on_tool_calls_received(tool_calls: Array, content: String, stats: Dictiona
 		# A long-file map this session already delivered, for content unchanged on disk, is not re-mapped: the spec's short cached_note stands in for the whole subagent run (goal 1 — the map already sits in this conversation).
 		if result.has("subagent") and _served_maps.has(String(result["subagent"].get("map_key", "-"))):
 			result = {"content": String(result["subagent"].get("cached_note", ""))}
-		var slot := {"tool_name": tool_name, "content": String(result.get("content", "")), "handle": null}
+		# var slot := {"tool_name": tool_name, "content": String(result.get("content", "")), "handle": null}
+		var tc_dict: Dictionary = tc if tc is Dictionary else {}
+		var sig: String = String(tc_dict.get("thought_signature", ""))
+		var slot := {"tool_name": tool_name, "content": String(result.get("content", "")), "handle": null, "thought_signature": sig}
 		if result.has("subagent"):
 			slot["handle"] = _launch_subagent(result["subagent"])
 			if i == tool_calls.size() - 1:
@@ -3210,6 +3215,9 @@ func _on_tool_calls_received(tool_calls: Array, content: String, stats: Dictiona
 		var handle: RunningSubagent = slot["handle"]
 		var result_content: String = slot["content"]
 		var tool_entry := {"role": "tool", "content": result_content, "tool_name": tool_name}
+		var sig: String = String(slot.get("thought_signature", ""))
+		if sig != "":
+			tool_entry["thought_signature"] = sig
 		if handle != null:
 			result_content = handle.result_text
 			# A delivered map is remembered so a re-read of the unchanged file skips the re-map; recorded only once its result is committed to history, so the map and the record can't drift apart. The key rides the entry so a compaction prune can forget the served map (see _prune_tool_results).
@@ -3629,6 +3637,8 @@ func _add_compaction_stalled_notice(entry: Dictionary, scroll: bool = true) -> v
 func _truncated_notice_text(stop_reason: String) -> String:
 	if stop_reason == "length":
 		return "⚠ The reply hit the model's output-token limit and was cut off — it is incomplete. Ask for a continuation, or lower the reasoning effort if one is set (thinking and reply share the limit)."
+	if stop_reason == "MALFORMED_FUNCTION_CALL":
+		return "⚠ The provider ended this reply early (stop reason \"MALFORMED_FUNCTION_CALL\"): the model attempted to call a tool, but tools were disabled or undeclared for this request. Enable the 'Tools' checkbox in the bottom toolbar to allow the model to explore the project."
 	if stop_reason != "":
 		return "⚠ The provider ended this reply early (stop reason \"%s\"); the reply above may be incomplete." % stop_reason
 	return "⚠ The connection dropped before the model finished this turn; the reply above may be incomplete."
@@ -3661,8 +3671,13 @@ func _replay_notice(msg: Dictionary, history_index: int) -> void:
 ## Persist an interrupted tool round exactly as it ran, so the stored transcript never disagrees with what already happened on disk (goal 2): each completed call keeps its real result (edit_file mutations included), while the call Stop caught mid-run and any calls that never ran get explicit cancellation markers — the markers double as the tool results a resend needs, keeping every provider's tool loop coherent (each call answered, assistant_blocks echo intact). A finished subagent keeps its real result and a cancelled one its captured partial activity. Runs synchronously inside the Stop handler because a tab close frees this session before the aborted tool loop's coroutine ever resumes. No-op when no tool round is mid-flight.
 func _commit_interrupted_tool_turn() -> void:
 	for i in _turn_tool_calls.size():
-		var tool_name := _tool_call_name(_turn_tool_calls[i])
+		var tc_raw: Variant = _turn_tool_calls[i]
+		var tc_dict: Dictionary = tc_raw if tc_raw is Dictionary else {}
+		var tool_name := _tool_call_name(tc_raw)
 		var tool_entry := {"role": "tool", "tool_name": tool_name}
+		var sig := String(tc_dict.get("thought_signature", ""))
+		if sig != "":
+			tool_entry["thought_signature"] = sig
 		if i < _turn_slots.size():
 			var slot: Dictionary = _turn_slots[i]
 			var handle: RunningSubagent = slot["handle"]
@@ -4563,6 +4578,8 @@ func _composed_system_prompt(include_skills: bool) -> String:
 	for part in [GDLLMSettings.get_chat_system_prompt(), GDLLMInstructions.agents_block(_agents_path, _agents_text), _skills_roster if include_skills else ""]:
 		if String(part) != "":
 			parts.append(String(part))
+	if not include_skills:
+		parts.append("IMPORTANT: Tools are currently disabled for this conversation. You do NOT have access to any tools (including tool_search, run_subagent, describe_class, or project exploration tools) and you MUST NOT attempt to invoke any tool or function call. Answer using only the context provided in this prompt, conversation history, and your general knowledge.")
 	return "\n\n".join(parts)
 
 

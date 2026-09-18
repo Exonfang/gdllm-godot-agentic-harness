@@ -30,9 +30,9 @@ const GOOGLE_OAUTH_TOKEN_URL := "https://oauth2.googleapis.com/token"
 const GOOGLE_USERINFO_URL := "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"
 
 ## Cloud Code Assist endpoints — distinct from the BYOK Gemini base (`generativelanguage.googleapis.com`). The `:v1internal` prefix and the colon-separated method names are part of the same contract; both prefixes are tried against the same host in AIFlowBridge's reference impl.
-const CLOUDCODE_LOAD_CODE_ASSIST_URL := "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
-const CLOUDCODE_FETCH_MODELS_URL := "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
-const CLOUDCODE_STREAM_URL := "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+const CLOUDCODE_LOAD_CODE_ASSIST_URL := "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+const CLOUDCODE_FETCH_MODELS_URL := "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
+const CLOUDCODE_STREAM_URL := "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
 
 ## Cloud Code Assist hard-coded client identity. Public by design — they're the same strings shipped in the official Antigravity binary; see the SECURITY block at the top of this file.
 const AGY_USER_AGENT := "antigravity" ## User-Agent header value Antigravity's gateway inspects (per AIFlowBridge constants.ts).
@@ -41,9 +41,9 @@ const AGY_CLIENT_METADATA := '{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSP
 
 ## Hardcoded fallback model list — used when the gateway returns an empty catalog on first sign-in (tenant not provisioned yet, or no allowedTiers). Mirrors AIFlowBridge's DEFAULT_FALLBACK_MODELS exactly so the picker seeded from this list stays consistent with the upstream until the next successful refresh.
 const DEFAULT_FALLBACK_MODELS: Array[Dictionary] = [
-	{"name": "gemini-3.8-flash", "displayName": "Gemini 3.8 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
-	{"name": "gemini-3.7-flash", "displayName": "Gemini 3.7 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
-	{"name": "gemini-3.6-flash", "displayName": "Gemini 3.6 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
+	{"name": "gemini-3.8-flash-tiered", "displayName": "Gemini 3.8 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
+	{"name": "gemini-3.7-flash-tiered", "displayName": "Gemini 3.7 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
+	{"name": "gemini-3.6-flash-tiered", "displayName": "Gemini 3.6 Flash (Google AI)", "maxInputTokens": 1048576, "maxOutputTokens": 65536},
 ]
 
 ## OAuth scopes — `cloud-platform` for the Cloud Code Assist API, the userinfo pair for the email label, `cclog` and `experimentsandconfigs` for the on-by-default Antigravity capabilities.
@@ -299,6 +299,11 @@ static func _post_json_for_project(source_id: String, url: String, access_token:
 		if value is String and value != "":
 			set_project_id(source_id, value)
 			return value
+		if value is Dictionary:
+			var sub_id := String((value as Dictionary).get("id", (value as Dictionary).get("name", "")))
+			if sub_id != "":
+				set_project_id(source_id, sub_id)
+				return sub_id
 	return ""
 
 

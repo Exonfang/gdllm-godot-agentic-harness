@@ -20,7 +20,7 @@ const DEFAULT_ANTHROPIC_BASE := "https://api.anthropic.com" ## Anthropic's API h
 const DEFAULT_OPENAI_BASE := "https://api.openai.com/v1" ## OpenAI's own API base; the same for every account, so the Connections dialog prefills it when a row switches to the Responses kind (third-party servers speak the chat-completions kind instead).
 const DEFAULT_CHATGPT_BASE := "https://chatgpt.com/backend-api/codex" ## The ChatGPT subscription backend; the same for every account, prefilled like its siblings when a row switches to the subscription kind.
 const DEFAULT_GEMINI_BASE := "https://generativelanguage.googleapis.com/v1beta" ## Google AI Studio's Gemini API base; the same for every account, prefilled when a row switches to the BYOK Gemini kind.
-const DEFAULT_GEMINI_OAUTH_BASE := "https://cloudcode-pa.googleapis.com" ## Google Cloud Code Assist / Antigravity's API base. Distinct from the BYOK base (different tenant) — every Gemini OAuth request, including model discovery (`fetchAvailableModels`) and the streaming endpoint (`streamGenerateContent`), runs through this host.
+const DEFAULT_GEMINI_OAUTH_BASE := "https://daily-cloudcode-pa.googleapis.com" ## Google Cloud Code Assist / Antigravity's API base. Distinct from the BYOK base (different tenant) — every Gemini OAuth request, including model discovery (`fetchAvailableModels`) and the streaming endpoint (`streamGenerateContent`), runs through this host.
 const DEFAULT_OPENROUTER_BASE := "https://openrouter.ai/api/v1" ## OpenRouter's single endpoint that exposes 100+ models (OpenAI, Anthropic, Google, Meta, Mistral, etc.) on the OpenAI Chat Completions wire format. One API key covers every model behind the `/api/v1` path; `HTTP-Referer` and `X-Title` headers (free, opt-in from your OpenRouter dashboard) tag your app in their analytics.
 
 
@@ -158,19 +158,23 @@ static func resolve_qualified(qualified: String) -> Dictionary:
 	var source_id := String(parsed["source_id"])
 	var source := resolve(source_id)
 	var stale := source.is_empty()
+	var base_url := String(source.get("base_url", ""))
+	var kind := String(source.get("kind", KIND_OLLAMA))
 	# The AGY project id lives in the OAuth token store (see GDLLMGeminiOAuth.credentials_for), not on the source row — the row's slot is the optimistic mirror written at sign-in, but the source of truth is the token store. Read from it on every resolve so an opportunistic resolve mid-session lands in the next request without waiting for a re-save.
 	var resolved_project_id := String(source.get("project_id", ""))
-	if String(source.get("kind", "")) == KIND_GEMINI_OAUTH:
+	if kind == KIND_GEMINI_OAUTH:
 		var creds: Dictionary = GDLLMGeminiOAuth.credentials_for(source_id)
 		var stored: String = String(creds.get("project_id", ""))
 		if stored != "":
 			resolved_project_id = stored
+		if base_url == "" or base_url == "https://cloudcode-pa.googleapis.com" or base_url == "https://cloudcode-pa.googleapis.com/":
+			base_url = DEFAULT_GEMINI_OAUTH_BASE
 	return {
 		"source_id": source_id,
 		"source_name": String(source.get("name", "")),
-		"base_url": String(source.get("base_url", "")),
+		"base_url": base_url,
 		"api_key": String(source.get("api_key", "")),
-		"kind": String(source.get("kind", KIND_OLLAMA)),
+		"kind": kind,
 		"model": String(parsed["model"]),
 		"project_id": resolved_project_id,
 		"stale": stale,

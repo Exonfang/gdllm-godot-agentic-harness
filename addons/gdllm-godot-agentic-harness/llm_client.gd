@@ -21,7 +21,6 @@ var effort: String = "" ## Reasoning-effort level for chat requests (a GDLLMEffo
 var cache_ttl: int = 0 ## The session's effective prompt-cache TTL in seconds, adopted from configure_from beside effort; only the Anthropic adapter acts on it (past the default tier it requests the 1-hour cache lifetime — see AnthropicAdapter.cache_control_for), the rest ignore it.
 var source_id: String = "" ## Id of the configured source, carried from configure_from so a stale-source refusal can name it.
 var source_stale: bool = false ## The configured source id no longer resolves (deleted or renamed; see GDLLMSources.resolve_qualified); every send refuses loudly instead of running on rerouted connection details.
-var _source_project_id: String = "" ## Cloud Code Assist `cloudaicompanionProject` resolved by GDLLMGeminiOAuth.load_code_assist_project at sign-in. Forwarded to GeminiOAuthAdapter.set_project_id on every adapter build so the AGY envelope carries it. Empty for every other kind.
 var http_request: HTTPRequest
 var last_assistant_blocks: Array = [] ## The provider's raw assistant content blocks for the request that just finished in tool calls, when its adapter needs them echoed back to continue the loop (Anthropic, the OpenAI Responses API; see LLMAdapter's assistant_blocks event). Empty for providers whose canonical echo suffices. Read it right after tool_calls_received and store it beside the turn.
 var last_models_error: String = "" ## Why the latest fetch_models resolved empty ("" = no failure, the source is genuinely bare); the model sweep reads it so an empty source is reported with its cause instead of a bare "returned nothing".
@@ -33,6 +32,9 @@ var _context_model: String = "" ## The bare model the pending probe asked about,
 var _context_probe_serial: int = 0 ## Bumped per probe; a superseded probe's timeout timer keeps ticking after its request is cancelled, and the serial keeps it from resolving the newer probe as empty.
 var _busy: bool = false
 var _auth_epoch: int = 0 ## Bumped by cancel(), so a subscription token refresh that outlives its request's cancellation stands down instead of resurrecting it — the shared _busy flag alone can't tell "cancelled" from "a newer send re-latched busy" (see _adopt_fresh_subscription_token).
+## Cloud Code Assist `cloudaicompanionProject` resolved at sign-in. Forwarded to
+## GeminiOAuthAdapter.set_project_id on every adapter build. Empty for other kinds.
+var _source_project_id: String = ""
 var _completion_est_in: int = 0 ## chars-per-token estimate of the completion request payload (taken in _post), the non-streamed counterpart of _stream_est_in.
 
 ## Streaming chat state. HTTPRequest buffers the whole body, so chat runs on an owned transport polled from _process instead — that's the only way to read a reply (thinking + content) chunk by chunk. The transport is LLMStreamTransport rather than a raw HTTPClient because HTTPClient reads only the Content-Length and chunked body framings, filing an unframed (connection-delimited) streaming body — the shape koboldcpp's built-in server sends — as empty.
@@ -83,7 +85,7 @@ func configure_from(resolved: Dictionary) -> void:
 	cache_ttl = maxi(0, int(resolved.get("cache_ttl", 0)))
 	source_id = String(resolved.get("source_id", ""))
 	source_stale = bool(resolved.get("stale", false))
-	# Stash the AGY project id from the source row (set by GDLLMGeminiOAuth.load_code_assist_project at sign-in / after a 401). It's a no-op for every other kind — _apply_source_overrides below ignores an empty project on adapters that don't expose set_project_id.
+	# Stash the AGY project id from the source row (resolved at sign-in).
 	_source_project_id = String(resolved.get("project_id", ""))
 
 
@@ -106,20 +108,25 @@ func _emit_request_failed(reason: String) -> void:
 	request_failed.emit(reason)
 
 
-## A fresh adapter for this client's current wire format. Every call site that builds a request also needs the per-source overrides applied (AGY project id); centralizing it here keeps the overrides in sync with the adapter build so a model-list fetch, a context probe, a one-shot completion and a streamed chat all see the same project id.
+## A fresh adapter for this client's current wire format, with per-source overrides applied
+## (AGY project id). Centralized so every request path sees the same project id.
 func _make_adapter() -> LLMAdapter:
 	var adapter := LLMAdapter.for_kind(adapter_kind)
 	_apply_source_overrides(adapter)
 	return adapter
 
 
-## Per-adapter overrides that need to be applied before the request builder runs — currently just the AGY project id. Cheap to call, safe to call before any adapter that doesn't expose the override (the `has_method` guard makes it a no-op there).
+## Per-adapter overrides applied before the request builder runs — currently just the
+## AGY project id. No-op on adapters that don't expose the override.
 func _apply_source_overrides(adapter: LLMAdapter) -> void:
 	if _source_project_id != "" and adapter.has_method("set_project_id"):
 		adapter.set_project_id(_source_project_id)
 
 
-## For a subscription source (ChatGPT or Google AI Studio Antigravity), adopt a current access token as this request's api_key — refreshed silently through the stored refresh token when stale, since access tokens expire within hours and a long-idle session's next send must not ride a dead one. True to proceed; false when the request must not go out (never signed in, the refresh failed, or a cancel landed during it), the failure emitted with sign-in as the named fix (goal 3). Any other kind passes straight through.
+## For a subscription source (ChatGPT or Google AI Studio Antigravity), adopt a current
+## access token as this request's api_key — refreshed silently when stale. True to proceed;
+## false when the request must not go out (never signed in, refresh failed, or cancelled).
+## Any other kind passes straight through.
 func _adopt_fresh_subscription_token() -> bool:
 	if adapter_kind != GDLLMSources.KIND_OPENAI_CHATGPT and adapter_kind != GDLLMSources.KIND_GEMINI_OAUTH:
 		return true
@@ -137,9 +144,11 @@ func _adopt_fresh_subscription_token() -> bool:
 	if token == "":
 		var hint: String
 		if adapter_kind == GDLLMSources.KIND_GEMINI_OAUTH:
-			hint = "Not signed in to Google AI Studio Subscription for source \"%s\" (or the sign-in expired and couldn't refresh). Use Sign in with Google in the Connections dialog — the ⚙ beside the model picker." % source_id
+			hint = "Not signed in to Google AI Studio Subscription for source \"%s\"." % source_id
+			hint += " Use Sign in with Google in the Connections dialog."
 		else:
-			hint = "Not signed in to ChatGPT for source \"%s\" (or the sign-in expired and couldn't refresh). Use Sign in with ChatGPT in the Connections dialog — the ⚙ beside the model picker." % source_id
+			hint = "Not signed in to ChatGPT for source \"%s\"." % source_id
+			hint += " Use Sign in with ChatGPT in the Connections dialog."
 		call_deferred("_emit_request_failed", hint)
 		return false
 	api_key = token
@@ -161,7 +170,7 @@ func is_busy() -> bool:
 ## Abort any in-flight request without emitting a result (no response_received/request_failed). Returns true if something was actually cancelled. Used by the chat's Stop button to interrupt a stuck tool loop or a long generation — the caller owns its own UI teardown, since it asked for the stop.
 func cancel() -> bool:
 	if _streaming:
-		_teardown_stream() # closes the socket, stops polling, clears _busy — but stays silent
+		_teardown_stream()  # closes the socket, stops polling, clears _busy — but stays silent
 		return true
 	if _busy:
 		# Non-streaming path (completions), or a subscription token refresh still ahead of its request: drop the pending HTTPRequest and clear busy ourselves, since a cancelled request never fires request_completed; the epoch bump tells an in-flight refresh its request is dead (see _adopt_fresh_subscription_token).
@@ -184,18 +193,31 @@ func fetch_models() -> void:
 		call_deferred("_emit_models", names)
 		return
 	_tags_pending = true
+	# OAuth kinds need a refreshed bearer before each request — fetch_models skipped this
+	# and sent an empty Authorization header, which the AGY gateway rejects with 401.
+	if adapter_kind == GDLLMSources.KIND_OPENAI_CHATGPT or adapter_kind == GDLLMSources.KIND_GEMINI_OAUTH:
+		if not await _adopt_fresh_subscription_token():
+			last_models_error = "OAuth sign-in missing or expired — sign in from the Connections dialog"
+			_emit_models(PackedStringArray())
+			return
 	# The deadline is armed before anything can suspend, and through the main loop rather than get_tree() because this node may not be in the tree yet — it must cover the tree_entered wait below as well as an unreachable host that never sends a RST, or a fetch stuck on either would break the always-emits promise.
 	(Engine.get_main_loop() as SceneTree).create_timer(GDLLMTunables.getf(GDLLMTunables.MODEL_FETCH_TIMEOUT)).timeout.connect(_on_tags_timeout)
 	# request() needs the transport inside the scene tree; when called during setup (right after add_child) it isn't yet, so wait for it.
 	if not _tags_http_request.is_inside_tree():
 		await _tags_http_request.tree_entered
 		if not _tags_pending:
-			return # the deadline already resolved this fetch as empty while we waited
+			return  # the deadline already resolved this fetch as empty while we waited
 	var adapter := _make_adapter()
-	# Adapters whose listing endpoint is a POST with a body (GeminiOAuthAdapter's :v1internal:fetchAvailableModels) ship models_request() returning {path, method, body}; others fall back to models_path() + GET. The project id, when the source row has one, is applied to the adapter here so the AGY envelope carries it.
+	# Adapters whose listing endpoint is a POST with a body (GeminiOAuthAdapter's
+	# :v1internal:fetchAvailableModels) ship models_request() {path, method, body};
+	# others fall back to models_path() + GET.
 	_apply_source_overrides(adapter)
 	var req := adapter.models_request()
-	var err := _tags_http_request.request(adapter.normalize_base(api_base) + String(req.get("path", "")), _request_headers(adapter), int(req.get("method", HTTPClient.METHOD_GET)), JSON.stringify(req.get("body", {})))
+	var req_path := String(req.get("path", ""))
+	var req_method := int(req.get("method", HTTPClient.METHOD_GET))
+	var req_body := JSON.stringify(req.get("body", {}))
+	var req_url := adapter.normalize_base(api_base) + req_path
+	var err := _tags_http_request.request(req_url, _request_headers(adapter), req_method, req_body)
 	if err != OK:
 		last_models_error = "the request could not be sent (%s)" % error_string(err)
 		push_warning("LLMClient: model list request error: %s" % error_string(err))
@@ -238,21 +260,35 @@ func _on_tags_completed(result: int, response_code: int, _headers: PackedStringA
 	_emit_models(names)
 
 
-## The likely fix for a 404 on this kind's model-list path — in practice a URL or Kind that doesn't match the server (see each adapter's normalize_base and the Connections dialog's per-kind hints) — appended to last_models_error so the failure guides to the solution instead of only quoting the provider.
+## The likely fix for a 404 on this kind's model-list path — in practice a URL or Kind
+## that doesn't match the server. Appended to last_models_error so the failure guides
+## to the solution instead of only quoting the provider.
 func _kind_404_hint() -> String:
+	var hint := ""
 	if adapter_kind == GDLLMSources.KIND_OPENAI:
-		return "check the source's URL and Kind: a bare http://host:port, a base ending in /v1, or a full endpoint like …/v1/chat/completions all work for an OpenAI-compatible server — an Ollama server needs the Ollama kind instead"
-	if adapter_kind == GDLLMSources.KIND_OPENAI_RESPONSES:
-		return "check the source's URL and Kind: OpenAI's own API lives at https://api.openai.com/v1 (pasting the full …/v1/responses endpoint works too) — a third-party server usually wants the OpenAI-Compatible (Chat Completions) kind instead"
-	if adapter_kind == GDLLMSources.KIND_OPENAI_CHATGPT:
-		return "check the source's URL: the ChatGPT subscription backend lives at %s, which the Connections dialog prefills — a 404 usually means the URL was edited" % GDLLMSources.DEFAULT_CHATGPT_BASE
-	if adapter_kind == GDLLMSources.KIND_ANTHROPIC:
-		return "check the source's URL: Anthropic wants https://api.anthropic.com (pasting the full …/v1/messages endpoint works too)"
-	if adapter_kind == GDLLMSources.KIND_GEMINI:
-		return "check the source's URL and key: Google AI Studio's Gemini API lives at %s — a 401 means the key isn't an AI Studio API key or the project lacks the Generative Language API enabled" % GDLLMSources.DEFAULT_GEMINI_BASE
-	if adapter_kind == GDLLMSources.KIND_GEMINI_OAUTH:
-		return "check the source's URL: Cloud Code Assist / Antigravity lives at %s — a 404 usually means the URL was edited, the sign-in is on a non-whitelisted tenant, or the stored project id is stale" % GDLLMSources.DEFAULT_GEMINI_OAUTH_BASE
-	return "check the source's URL and Kind: an Ollama server takes a bare http://host:port or a full endpoint like …/api/chat — an OpenAI-compatible server (LM Studio, llama.cpp, koboldcpp, vLLM, most others...) needs the OpenAI-Compatible (Chat Completions) kind instead"
+		hint = "a bare http://host:port, a base ending in /v1, or a full endpoint like"
+		hint += " …/v1/chat/completions all work for an OpenAI-compatible server —"
+		hint += " an Ollama server needs the Ollama kind instead"
+	elif adapter_kind == GDLLMSources.KIND_OPENAI_RESPONSES:
+		hint = "OpenAI's own API lives at https://api.openai.com/v1 — a third-party server"
+		hint += " usually wants the OpenAI-Compatible kind instead"
+	elif adapter_kind == GDLLMSources.KIND_OPENAI_CHATGPT:
+		hint = "the ChatGPT subscription backend lives at "
+		hint += GDLLMSources.DEFAULT_CHATGPT_BASE + " — a 404 usually means the URL was edited"
+	elif adapter_kind == GDLLMSources.KIND_GEMINI:
+		hint = "Google AI Studio's Gemini API lives at "
+		hint += GDLLMSources.DEFAULT_GEMINI_BASE + " — a 401 means the key isn't an AI Studio API key"
+	elif adapter_kind == GDLLMSources.KIND_GEMINI_OAUTH:
+		hint = "Cloud Code Assist / Antigravity lives at "
+		hint += GDLLMSources.DEFAULT_GEMINI_OAUTH_BASE + " — a 404 usually means the URL"
+		hint += " was edited, the sign-in is on a non-whitelisted tenant, or the stored"
+		hint += " project id is stale"
+	elif adapter_kind == GDLLMSources.KIND_ANTHROPIC:
+		hint = "Anthropic wants https://api.anthropic.com"
+	else:
+		hint = "an Ollama server takes a bare http://host:port — an OpenAI-compatible"
+		hint += " server needs the OpenAI-Compatible kind instead"
+	return "check the source's URL and Kind: " + hint
 
 
 ## Emit the model list exactly once per fetch, so a late response and the timeout can't both fire models_received (which would double-count the source in a sweep).

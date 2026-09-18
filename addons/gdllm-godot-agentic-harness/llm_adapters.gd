@@ -153,6 +153,58 @@ func _system_text(messages: Array) -> String:
 	return "\n\n".join(parts)
 
 
+## Fuse consecutive same-role turns into one entry (content joined with a blank line).
+## Mirrors AIFlowBridge's `pushMerged` in `toAntigravityEnvelope`/`toGeminiNativeRequest`:
+## the native surface rejects back-to-back turns with the same role, and the plugin's
+## own history (system prompt prepended + first user turn, or consecutive tool results)
+## produces exactly those runs. System turns are dropped (they ride `systemInstruction`);
+## assistant tool_calls merge by concatenation; anything else merges as text.
+static func _merged_messages(messages: Array) -> Array:
+	var out: Array = []
+	for msg in messages:
+		if not (msg is Dictionary):
+			continue
+		if String(msg.get("role", "")) == "system":
+			continue
+		if out.is_empty():
+			out.append(msg)
+			continue
+		var prev: Dictionary = out[out.size() - 1]
+		if String(prev.get("role", "")) != String(msg.get("role", "")):
+			out.append(msg)
+			continue
+		var fused: Dictionary = prev.duplicate(true)
+		var prev_text := _text(prev.get("content"))
+		var next_text := _text(msg.get("content"))
+		var joined := prev_text
+		if next_text.strip_edges() != "":
+			joined = next_text if joined.strip_edges() == "" else joined + "\n\n" + next_text
+		fused["content"] = joined
+		if msg.get("tool_calls") is Array:
+			var calls: Array = []
+			if prev.get("tool_calls") is Array:
+				calls.append_array(prev["tool_calls"])
+			calls.append_array(msg["tool_calls"])
+			fused["tool_calls"] = calls
+		out[out.size() - 1] = fused
+	return out
+
+
+## Merge parts into contents, fusing consecutive turns with the same role into one turn.
+## Matches AIFlowBridge's pushMerged in envelope.ts / gemini-native.ts:
+## Gemini rejects consecutive turns with the same role.
+static func _push_merged(out: Array, role: String, parts: Array) -> void:
+	if parts.is_empty():
+		return
+	if not out.is_empty():
+		var last: Dictionary = out[out.size() - 1]
+		if String(last.get("role", "")) == role:
+			var last_parts: Array = last.get("parts", [])
+			last_parts.append_array(parts)
+			return
+	out.append({"role": role, "parts": parts.duplicate(true)})
+
+
 ## One assistant tool-call turn as plain text — its preamble plus a "[called name(args)]" line per call — for tool-less requests on providers that reject tool blocks/items they didn't declare (see each echoing adapter's translate).
 func _flatten_call_text(msg: Dictionary) -> String:
 	var lines: Array = []
@@ -1211,44 +1263,76 @@ class GeminiAdapter extends LLMAdapter:
 	## A canonical tool_call may carry an opaque `thought_signature` (read back from a previous Gemini response); when set, it rides on the request as a sibling of `functionCall`. The native API rejects a replayed `functionCall` part without its matching signature with `400 Function call is missing a thought_signature` on thinking models (gemini-3.6/3.7/3.8 Flash and newer), so this is not optional for tool-using turns.
 	func _translate_contents(messages: Array) -> Array:
 		var out: Array = []
-		var pending_names: Array = [] # names of the last assistant turn's calls, awaiting their function responses in order
+		var pending_names: Array = []
+		var pending_signatures: Dictionary = {}
 		for msg in messages:
 			if not (msg is Dictionary):
 				continue
 			var role := String(msg.get("role", ""))
 			if role == "system":
-				continue # lifted to top-level systemInstruction by build_chat_body
+				continue
 			if role == "assistant":
 				var parts: Array = []
 				var text := _text(msg.get("content"))
 				if text.strip_edges() != "":
 					parts.append({"text": text})
 				pending_names = []
+				pending_signatures = {}
 				if msg.get("tool_calls") is Array:
 					for tc in msg["tool_calls"]:
 						var fn: Dictionary = tc["function"] if tc is Dictionary and tc.get("function") is Dictionary else {}
 						var name := _text(fn.get("name"))
+						if name == "":
+							continue
 						var raw_args: Variant = fn.get("arguments", {})
 						var args: Dictionary = raw_args if raw_args is Dictionary else (JSON.parse_string(_text(raw_args)) if _text(raw_args) != "" else {})
 						if not (args is Dictionary):
 							args = {}
 						pending_names.append(name)
 						var fc_part: Dictionary = {"functionCall": {"name": name, "args": args}}
-						# thought_signature is a SIBLING of functionCall, never inside it. Required for the Gemini 3.x generation (3.1 Pro Preview, 3.8/3.7/3.6 Flash) and the Gemini 2.5+ generation — these thinking models reject the next request with `400 Function call is missing a thought_signature` when the signature isn't replayed. The plug-in upstream store is responsible for round-tripping the value (it lives on a canonical tool_call dict as the `thought_signature` key, picked up here); see the response-side read at parse_line for how it's first acquired.
 						var signature := _text(tc.get("thought_signature", ""))
 						if signature != "":
 							fc_part["thoughtSignature"] = signature
+							pending_signatures[name] = signature
 						parts.append(fc_part)
 				if parts.is_empty():
-					parts.append({"text": "(empty)"}) # Gemini rejects empty contents
-				out.append({"role": "model", "parts": parts})
+					parts.append({"text": "(empty)"})
+				_push_merged(out, "model", parts)
 			elif role == "tool":
-				var name := String(pending_names.pop_front()) if not pending_names.is_empty() else "tool"
-				var content_text := _text(msg.get("content"))
-				out.append({"role": "user", "parts": [{"functionResponse": {"name": name, "response": {"result": content_text if content_text.strip_edges() != "" else "(no output)"}}}]})
+				var name := _text(msg.get("tool_name", msg.get("name", "")))
+				if name == "":
+					name = String(pending_names.pop_front()) if not pending_names.is_empty() else "tool"
+				var signature := _text(msg.get("thought_signature", ""))
+				if signature == "" and pending_signatures.has(name):
+					signature = _text(pending_signatures[name])
+				var content_val: Variant = msg.get("content", "")
+				var resp_dict: Dictionary = {}
+				if content_val is Dictionary:
+					resp_dict = content_val
+				else:
+					var content_text := _text(content_val)
+					var trimmed := content_text.strip_edges()
+					var parsed: Variant = null
+					if (trimmed.begins_with("{") and trimmed.ends_with("}")) or (trimmed.begins_with("[") and trimmed.ends_with("]")):
+						parsed = JSON.parse_string(trimmed)
+					if parsed is Dictionary:
+						resp_dict = parsed
+					elif parsed is Array:
+						resp_dict = {"items": parsed}
+					else:
+						resp_dict = {"result": content_text if trimmed != "" else "(no output)"}
+				var fr_part: Dictionary = {
+					"functionResponse": {
+						"name": name,
+						"response": resp_dict,
+					}
+				}
+				if signature != "":
+					fr_part["thoughtSignature"] = signature
+				_push_merged(out, "user", [fr_part])
 			else:
 				var user_text := _text(msg.get("content"))
-				out.append({"role": role, "parts": [{"text": user_text if user_text.strip_edges() != "" else "(empty)"}]})
+				_push_merged(out, "user", [{"text": user_text if user_text.strip_edges() != "" else "(empty)"}])
 		return out
 
 	## The canonical function-schema envelope unwrapped to Gemini's flat functionDeclarations shape.
@@ -1439,6 +1523,7 @@ class GeminiAdapter extends LLMAdapter:
 
 
 ## Google Cloud Code Assist / Antigravity (OAuth route) — distinct from the Gemini BYOK native surface. Talks to a separate host (`cloudcode-pa.googleapis.com`) on its own endpoints (`/v1internal:streamGenerateContent?alt=sse`, `/v1internal:fetchAvailableModels`, `/v1internal:loadCodeAssist`), with three client-identity headers every request must carry (`User-Agent: antigravity`, `X-Goog-Api-Client: gl-kiloCode/10.4.1`, `Client-Metadata: {...}` — the gateway returns a generic 4xx without naming the missing identity when any one is dropped), and a top-level envelope (`{project, model, request, requestType, userAgent, requestId}`) wrapping the same native Gemini request shape inside `request`. Each generated request must end up with `project` set to the `cloudaicompanionProject` from loadCodeAssist — set_project_id wires that in.
+## Google Cloud Code Assist / Antigravity (OAuth route) — distinct from the Gemini BYOK native surface. Talks to a separate host (`daily-cloudcode-pa.googleapis.com`) on its own endpoints (`/v1internal:streamGenerateContent?alt=sse`, `/v1internal:fetchAvailableModels`, `/v1internal:loadCodeAssist`), with three client-identity headers every request must carry (`User-Agent: antigravity`, `X-Goog-Api-Client: gl-kiloCode/10.4.1`, `Client-Metadata: {...}` — the gateway returns a generic 4xx without naming the missing identity when any one is dropped), and a top-level envelope (`{project, model, request, requestType, userAgent, requestId}`) wrapping the same native Gemini request shape inside `request`. Each generated request must end up with `project` set to the `cloudaicompanionProject` from loadCodeAssist — set_project_id wires that in.
 ## The response wire shape on `:streamGenerateContent?alt=sse` is the Gemini native format **enveloped one level deeper** than the BYOK surface: each SSE frame is `data: {response: {candidates: [...]}}` (the AGY gateway adds the `response` wrapper). parse_line unwraps it before falling through to GeminiAdapter's per-frame handling.
 ## Why a separate adapter (not `extends GeminiAdapter`): the request envelope, the response envelope, the headers, the endpoint paths, and the model discovery (POST with body) all diverge from the BYOK native surface — inheriting would be cheaper but every shared method would need overrides, defeating the point. The contents/parts translation is the only piece in common, and it lives once in _translate_contents/_translate_tools below, called from build_chat_body.
 class GeminiOAuthAdapter extends LLMAdapter:
@@ -1450,9 +1535,17 @@ class GeminiOAuthAdapter extends LLMAdapter:
 	var _finish_reason: String = "" ## finishReason from the last candidate; surfaced verbatim (STOP / MAX_TOKENS / SAFETY / etc.).
 	var _finished := false ## Guards _finish_events so a malformed trailing frame can't double-emit.
 
-	## AGY's streaming endpoint — distinct from the BYOK `/v1beta/models/...:streamGenerateContent` path. Same `:streamGenerateContent?alt=sse` query (sse), different host and `:v1internal` prefix.
+	## AGY's streaming endpoint — POST `/v1internal:streamGenerateContent?alt=sse`
+	## (distinct from the BYOK `/v1beta/models/...` path; model rides the envelope).
 	func chat_path() -> String:
-		return "/v1internal:streamGenerateContent?alt=sse" % []
+		return "/v1internal:streamGenerateContent?alt=sse"
+
+	## Ensure the base endpoint points to daily-cloudcode-pa.googleapis.com (the Antigravity gateway); remap legacy cloudcode-pa.googleapis.com.
+	func normalize_base(base: String) -> String:
+		var normalized := super.normalize_base(base)
+		if normalized == "" or normalized == "https://cloudcode-pa.googleapis.com":
+			return GDLLMSources.DEFAULT_GEMINI_OAUTH_BASE
+		return normalized
 
 	## Cloud Code Assist authenticates with a Google OAuth access token as Bearer; the upstream rejects `x-goog-api-key`. Three AGY identity headers ride on every request (User-Agent, X-Goog-Api-Client, Client-Metadata) — without any one, the gateway returns a generic 4xx without naming the missing identity. Mirrors AIFlowBridge's reference impl constants (User-Agent "antigravity", X-Goog-Api-Client "gl-kiloCode/10.4.1", Client-Metadata the JSON blob identifying the client as ANTIGRAVITY/GEMINI).
 	func auth_headers(api_key: String) -> PackedStringArray:
@@ -1467,6 +1560,7 @@ class GeminiOAuthAdapter extends LLMAdapter:
 		])
 
 	## AGY's catalog endpoint — POST (not GET like the BYOK native surface) with `{project: project_id}` as body (omit project if not resolved yet; the gateway still answers, scoped to the tenant). LLMClient.post_models_request reads this shape and the matching parse_models translates the reply — see models_request and parse_models below. Without this override, GeminiAdapter's parent `/v1beta/models?pageSize=100` hits `cloudcode-pa.googleapis.com` and returns a 404 (the cause of the user-visible "Source Google Gemini (Antigravity) returned nothing" on Refresh Models).
+	## AGY's catalog endpoint — POST (not GET like the BYOK native surface) with `{project: project_id}` as body (omit project if not resolved yet; the gateway still answers, scoped to the tenant). LLMClient.post_models_request reads this shape and the matching parse_models translates the reply — see models_request and parse_models below. Without this override, GeminiAdapter's parent `/v1beta/models?pageSize=100` hits `daily-cloudcode-pa.googleapis.com` and returns a 404 (the cause of the user-visible "Source Google Gemini (Antigravity) returned nothing" on Refresh Models).
 	func models_request() -> Dictionary:
 		var body := {}
 		if _current_project != "":
@@ -1474,12 +1568,22 @@ class GeminiOAuthAdapter extends LLMAdapter:
 		return {"path": "/v1internal:fetchAvailableModels", "method": HTTPClient.METHOD_POST, "body": body}
 
 	## The catalog response — `{models: [{name, displayName, maxInputTokens, maxOutputTokens, capabilities}]}` — translated to the bare `name` (e.g. `gemini-3.8-flash`) the model picker expects. Falls back to the AIFlowBridge hardcoded model list when the gateway returns nothing or errors, so a tenant with no models doesn't render an empty picker.
+	## The catalog response — `{models: {model_id: {displayName, maxTokens, ...}}}` or `{models: [{name, ...}]}` — translated to the bare model name (e.g. `gemini-3.8-flash-tiered`) the model picker expects.
 	func parse_models(data: Variant) -> PackedStringArray:
 		var names := PackedStringArray()
 		if data is Dictionary and data.get("models") is Array:
 			for entry in data["models"]:
 				if entry is Dictionary and entry.has("name"):
 					names.append(String(entry["name"]))
+		if data is Dictionary:
+			var models_val: Variant = data.get("models")
+			if models_val is Dictionary:
+				for key in (models_val as Dictionary).keys():
+					names.append(String(key))
+			elif models_val is Array:
+				for entry in (models_val as Array):
+					if entry is Dictionary and entry.has("name"):
+						names.append(String(entry["name"]))
 		if names.is_empty():
 			# The fallback list comes from AIFlowBridge's DEFAULT_FALLBACK_MODELS — same names, same context windows. The gateway sometimes returns an empty catalog on first sign-in before the tenant is fully provisioned; the fallback gives the picker something to choose from until the next refresh.
 			for m in GDLLMGeminiOAuth.DEFAULT_FALLBACK_MODELS:
@@ -1487,7 +1591,22 @@ class GeminiOAuthAdapter extends LLMAdapter:
 		return names
 
 	## AGY's per-model context window probe — POST `/v1internal:fetchAvailableModels`, filtered to the model entry by name. The AGY gateway doesn't expose a per-model probe endpoint the way the BYOK surface does (`/v1beta/models/{model}`); the catalog entry's `maxInputTokens` is the only public window value, so the probe reuses the catalog request and lets parse_context_window pick the field.
-	func context_probe(_model: String) -> Dictionary:
+	## Map user-facing or legacy model ids to the exact id expected by the Antigravity backend (e.g. gemini-3.8-flash -> gemini-3.8-flash-tiered).
+	static func _resolve_model(model: String) -> String:
+		match model:
+			"gemini-3.8-flash":
+				return "gemini-3.8-flash-tiered"
+			"gemini-3.7-flash":
+				return "gemini-3.7-flash-tiered"
+			"gemini-3.6-flash":
+				return "gemini-3.6-flash-tiered"
+			_:
+				return model
+
+	## AGY's per-model context window probe — POST `/v1internal:fetchAvailableModels`, filtered to the model entry by name. The AGY gateway doesn't expose a per-model probe endpoint the way the BYOK surface does (`/v1beta/models/{model}`); the catalog entry's `maxTokens` or `maxInputTokens` is the window value.
+	func context_probe(model: String) -> Dictionary:
+		_current_model = model
+		_current_model = _resolve_model(model)
 		return models_request()
 
 	func parse_context_window(data: Variant, model: String = "") -> int:
@@ -1495,11 +1614,27 @@ class GeminiOAuthAdapter extends LLMAdapter:
 			for entry in data["models"]:
 				if entry is Dictionary and String(entry.get("name", "")) == model:
 					return int(entry.get("maxInputTokens", 0))
+		if data is Dictionary:
+			var models_val: Variant = data.get("models")
+			if models_val is Dictionary:
+				var target_model := _resolve_model(model)
+				var entry: Variant = (models_val as Dictionary).get(target_model, (models_val as Dictionary).get(model))
+				if entry is Dictionary:
+					return int(entry.get("maxTokens", entry.get("maxInputTokens", 0)))
+			elif models_val is Array:
+				for entry in (models_val as Array):
+					if entry is Dictionary and (String(entry.get("name", "")) == model or String(entry.get("name", "")) == _resolve_model(model)):
+						return int(entry.get("maxInputTokens", entry.get("maxTokens", 0)))
 		return 0
 
-	## The native Gemini request body (contents / systemInstruction / generationConfig / tools — with JSON-Schema tools already cleaned) wrapped in the Cloud Code Assist envelope `{ project, model, request, requestType: "agent", userAgent, requestId }`. Caller-side fields (project id) come from LLMClient via set_project_id. Without a project id AGY replies with a 401/403 and no actionable detail; the upstream `Refresh Models` flow resolves one via loadCodeAssist before any chat send (see LLMClient._adopt_fresh_subscription_token).
-	func build_chat_body(model: String, messages: Array, tools: Array, effort: String = "", _cache_ttl: int = 0) -> Dictionary:
+	## Native Gemini body in the Cloud Code Assist envelope. Mirrors AIFlowBridge's
+	## `toAntigravityEnvelope` exactly: contents + systemInstruction (system turns land
+	## there, never folded into user text) + tools when present. No generationConfig,
+	## no thinking knob — the gateway gates those behind plan checks (429).
+	func build_chat_body(model: String, messages: Array, tools: Array, _effort: String = "", _cache_ttl: int = 0) -> Dictionary:
 		_current_model = model
+		var effective_model := _resolve_model(model)
+		_current_model = effective_model
 		var native_body := {
 			"contents": _translate_contents(messages),
 		}
@@ -1508,31 +1643,26 @@ class GeminiOAuthAdapter extends LLMAdapter:
 			native_body["systemInstruction"] = {"parts": [{"text": system}]}
 		if not tools.is_empty():
 			native_body["tools"] = [{"functionDeclarations": _translate_tools(tools)}]
-		# AGY rejects a chat send on thinking models when the body declares no `generationConfig` at all (the default sampler is treated as "free", which the gateway gates behind a plan check). Carry the same generationConfig GeminiAdapter uses so an explicit config lands on the wire for every effort level — `thinkingBudget: -1` is the gateway's documented "let the model decide" sentinel.
-		if effort != "":
-			native_body["generationConfig"] = {"thinkingConfig": {"thinkingBudget": -1}, "thinkingLevel": effort}
-		else:
-			native_body["generationConfig"] = {"thinkingConfig": {"thinkingBudget": -1}}
 		return {
 			"project": _current_project,
-			"model": model,
+			"model": effective_model,
 			"request": native_body,
 			"requestType": "agent",
 			"userAgent": GDLLMGeminiOAuth.AGY_USER_AGENT,
 			"requestId": "gdllm-" + str(Time.get_ticks_msec()) + "-" + _hex(6),
 		}
 
-	## One-shot (non-streamed) completion for session-title generation — same envelope shape as the streamed path, but addressed at the same `:streamGenerateContent` endpoint with the SSE query dropped (gateway returns the full body once). We address the same AGY endpoint without `?alt=sse` and let the gateway decide; a 0-byte streaming response is treated as a one-shot by the same parser.
+	## One-shot (non-streamed) completion for session-title generation — same envelope shape as the streamed path. No generationConfig: like build_chat_body's unset-effort case, a title probe must not declare a sampler the caller never asked for.
 	func completion_request(model: String, system_prompt: String, prompt: String) -> Dictionary:
+		var effective_model := _resolve_model(model)
 		var native := {
 			"contents": [{"role": "user", "parts": [{"text": prompt}]}],
 		}
 		if system_prompt != "":
 			native["systemInstruction"] = {"parts": [{"text": system_prompt}]}
-		native["generationConfig"] = {"thinkingConfig": {"thinkingBudget": -1}}
 		return {
 			"project": _current_project,
-			"model": model,
+			"model": effective_model,
 			"request": native,
 			"requestType": "agent",
 			"userAgent": GDLLMGeminiOAuth.AGY_USER_AGENT,
@@ -1659,6 +1789,7 @@ class GeminiOAuthAdapter extends LLMAdapter:
 	func _translate_contents(messages: Array) -> Array:
 		var out: Array = []
 		var pending_names: Array = []
+		var pending_signatures: Dictionary = {}
 		for msg in messages:
 			if not (msg is Dictionary):
 				continue
@@ -1671,10 +1802,13 @@ class GeminiOAuthAdapter extends LLMAdapter:
 				if text.strip_edges() != "":
 					parts.append({"text": text})
 				pending_names = []
+				pending_signatures = {}
 				if msg.get("tool_calls") is Array:
 					for tc in msg["tool_calls"]:
 						var fn: Dictionary = tc["function"] if tc is Dictionary and tc.get("function") is Dictionary else {}
 						var name := _text(fn.get("name"))
+						if name == "":
+							continue
 						var raw_args: Variant = fn.get("arguments", {})
 						var args: Dictionary = raw_args if raw_args is Dictionary else (JSON.parse_string(_text(raw_args)) if _text(raw_args) != "" else {})
 						if not (args is Dictionary):
@@ -1684,17 +1818,46 @@ class GeminiOAuthAdapter extends LLMAdapter:
 						var signature := _text(tc.get("thought_signature", ""))
 						if signature != "":
 							fc_part["thoughtSignature"] = signature
+							pending_signatures[name] = signature
 						parts.append(fc_part)
 				if parts.is_empty():
 					parts.append({"text": "(empty)"})
-				out.append({"role": "model", "parts": parts})
+				_push_merged(out, "model", parts)
 			elif role == "tool":
-				var name := String(pending_names.pop_front()) if not pending_names.is_empty() else "tool"
-				var content_text := _text(msg.get("content"))
-				out.append({"role": "user", "parts": [{"functionResponse": {"name": name, "response": {"result": content_text if content_text.strip_edges() != "" else "(no output)"}}}]})
+				var name := _text(msg.get("tool_name", msg.get("name", "")))
+				if name == "":
+					name = String(pending_names.pop_front()) if not pending_names.is_empty() else "tool"
+				var signature := _text(msg.get("thought_signature", ""))
+				if signature == "" and pending_signatures.has(name):
+					signature = _text(pending_signatures[name])
+				var content_val: Variant = msg.get("content", "")
+				var resp_dict: Dictionary = {}
+				if content_val is Dictionary:
+					resp_dict = content_val
+				else:
+					var content_text := _text(content_val)
+					var trimmed := content_text.strip_edges()
+					var parsed: Variant = null
+					if (trimmed.begins_with("{") and trimmed.ends_with("}")) or (trimmed.begins_with("[") and trimmed.ends_with("]")):
+						parsed = JSON.parse_string(trimmed)
+					if parsed is Dictionary:
+						resp_dict = parsed
+					elif parsed is Array:
+						resp_dict = {"items": parsed}
+					else:
+						resp_dict = {"result": content_text if trimmed != "" else "(no output)"}
+				var fr_part: Dictionary = {
+					"functionResponse": {
+						"name": name,
+						"response": resp_dict,
+					}
+				}
+				if signature != "":
+					fr_part["thoughtSignature"] = signature
+				_push_merged(out, "user", [fr_part])
 			else:
 				var user_text := _text(msg.get("content"))
-				out.append({"role": role, "parts": [{"text": user_text if user_text.strip_edges() != "" else "(empty)"}]})
+				_push_merged(out, "user", [{"text": user_text if user_text.strip_edges() != "" else "(empty)"}])
 		return out
 
 	func _translate_tools(tools: Array) -> Array:
@@ -1704,10 +1867,14 @@ class GeminiOAuthAdapter extends LLMAdapter:
 			if fn.is_empty():
 				continue
 			var schema: Variant = fn.get("parameters")
+			# AGY expects native Gemini functionDeclarations: flat {name, description,
+			# parameters{type, properties, required?}} — NOT the OpenAI {function: {...}}
+			# wrapper and NOT parametersJsonSchema. The wrong shape is schema-rejected
+			# as a generic 429.
 			out.append({
 				"name": _text(fn.get("name")),
 				"description": _text(fn.get("description")),
-				"parametersJsonSchema": _clean_json_schema(schema) if schema is Dictionary and not schema.is_empty() else {"type": "object", "properties": {}},
+				"parameters": _clean_json_schema(schema) if schema is Dictionary and not schema.is_empty() else {"type": "object", "properties": {}},
 			})
 		return out
 

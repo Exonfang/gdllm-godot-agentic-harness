@@ -146,6 +146,11 @@ func run(source: Dictionary, system_prompt: String, prompt: String, use_tools: b
 						content += brakes.oscillation_nudge(used_this_round, round_repeated)
 					_emit({"type": "tool_result", "name": tool_name, "content": content})
 					messages.append({"role": "tool", "content": content, "tool_name": tool_name})
+					var tool_msg := {"role": "tool", "content": content, "tool_name": tool_name}
+					var sig := String(tc.get("thought_signature", "")) if tc is Dictionary else ""
+					if sig != "":
+						tool_msg["thought_signature"] = sig
+					messages.append(tool_msg)
 				# The same escalations the main chat redirects on; with no UI to redirect, the run ends with the model's account of its progress as its answer.
 				var repeats := brakes.take_escalation()
 				if repeats > 0:

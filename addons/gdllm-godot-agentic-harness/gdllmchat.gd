@@ -7,7 +7,7 @@ const MANAGE_COL_DELETE := 11 ## Column in the manage table holding each row's t
 const MANAGE_RESIZE_MARGIN := 5.0 ## Half-width in px of the grab zone around a column boundary in the manage table's title strip.
 const MANAGE_COL_MIN_WIDTH := 40 ## Narrowest a manage-table column can be drag-resized down to.
 const CONNECTION_TOGGLE_WIDTH := 34 ## Fixed width of the Connections dialog's per-source enabled column; the header label and each row's checkbox share it so columns line up (mirrors the delete button's 34px).
-## Per-kind guidance for the Connections dialog's URL field — placeholder for a blank field, tooltip for a filled one, and for a kind whose endpoint is the same for everyone, the `prefill` a still-blank row adopts on switching to it. The field takes the URL the provider's own UI hands out, full endpoint or bare base alike (each adapter derives its routes from the server root; see LLMAdapter._root_from_endpoint), so the guidance shows the form users actually copy.
+## Per-kind guidance for the Connections dialog's URL field - placeholder for a blank field, tooltip for a filled one, and for a kind whose endpoint is the same for everyone, the `prefill` a still-blank row adopts on switching to it. The field takes the URL the provider's own UI hands out, full endpoint or bare base alike (each adapter derives its routes from the server root; see LLMAdapter._root_from_endpoint), so the guidance shows the form users actually copy.
 const CONNECTION_BASE_URL_HINTS := {
 	GDLLMSources.KIND_OLLAMA: {
 		"placeholder": "http://localhost:11434",
@@ -15,32 +15,32 @@ const CONNECTION_BASE_URL_HINTS := {
 	},
 	GDLLMSources.KIND_OPENAI: {
 		"placeholder": "http://localhost:1234/v1/chat/completions",
-		"tooltip": "Paste the URL your server hands out — a full endpoint like http://localhost:1234/v1/chat/completions, a base ending in /v1, or a bare host and port (/v1 is then added automatically) all work. OpenAI-compatible servers covered by this kind include LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, and OpenRouter (https://openrouter.ai/api/v1) which routes 100+ models (OpenAI, Anthropic, Google, Meta, Mistral, etc.) behind a single key.",
+		"tooltip": "Paste the URL your server hands out - a full endpoint like http://localhost:1234/v1/chat/completions, a base ending in /v1, or a bare host and port (/v1 is then added automatically) all work. OpenAI-compatible servers covered by this kind include LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, and OpenRouter (https://openrouter.ai/api/v1) which routes 100+ models (OpenAI, Anthropic, Google, Meta, Mistral, etc.) behind a single key.",
 		"prefill": GDLLMSources.DEFAULT_OPENROUTER_BASE,
 	},
 	GDLLMSources.KIND_OPENAI_RESPONSES: {
 		"placeholder": "https://api.openai.com/v1",
-		"tooltip": "OpenAI's newer Responses API — what GPT-5.6-class models need for reasoning effort with tools. OpenAI's own endpoint is the same for everyone: https://api.openai.com/v1 (pasting the full …/v1/responses endpoint works too). Third-party servers usually speak the OpenAI-Compatible (Chat Completions) kind instead.",
+		"tooltip": "OpenAI's newer Responses API - what GPT-5.6-class models need for reasoning effort with tools. OpenAI's own endpoint is the same for everyone: https://api.openai.com/v1 (pasting the full …/v1/responses endpoint works too). Third-party servers usually speak the OpenAI-Compatible (Chat Completions) kind instead.",
 		"prefill": GDLLMSources.DEFAULT_OPENAI_BASE,
 	},
 	GDLLMSources.KIND_OPENAI_CHATGPT: {
 		"placeholder": "https://chatgpt.com/backend-api/codex",
-		"tooltip": "OpenAI's ChatGPT backend — the same for everyone; your Plus/Pro subscription covers usage, so no API key is needed. Use the Sign in with ChatGPT button instead of a key.",
+		"tooltip": "OpenAI's ChatGPT backend - the same for everyone; your Plus/Pro subscription covers usage, so no API key is needed. Use the Sign in with ChatGPT button instead of a key.",
 		"prefill": GDLLMSources.DEFAULT_CHATGPT_BASE,
 	},
 	GDLLMSources.KIND_ANTHROPIC: {
 		"placeholder": "https://api.anthropic.com",
-		"tooltip": "Anthropic's endpoint is the same for everyone: https://api.anthropic.com — pasting the full …/v1/messages endpoint works too.",
+		"tooltip": "Anthropic's endpoint is the same for everyone: https://api.anthropic.com - pasting the full …/v1/messages endpoint works too.",
 		"prefill": GDLLMSources.DEFAULT_ANTHROPIC_BASE,
 	},
 	GDLLMSources.KIND_GEMINI: {
 		"placeholder": "https://generativelanguage.googleapis.com/v1beta",
-		"tooltip": "Google AI Studio's public Gemini API. Paste an AI Studio API key (AIza…) — paid per token on your GCP project, independent of any AI Studio Pro subscription. Use the BYOK kind for this; for the subscription route use the 'Google AI Studio Subscription' kind instead.",
+		"tooltip": "Google AI Studio's public Gemini API. Paste an AI Studio API key (AIza…) - paid per token on your GCP project, independent of any AI Studio Pro subscription. Use the BYOK kind for this; for the subscription route use the 'Google AI Studio Subscription' kind instead.",
 		"prefill": GDLLMSources.DEFAULT_GEMINI_BASE,
 	},
 	GDLLMSources.KIND_GEMINI_OAUTH: {
-		"placeholder": "https://cloudcode-pa.googleapis.com",
-		"tooltip": "Google Cloud Code Assist / Antigravity's API base — same for everyone. Auth is a Google OAuth sign-in (no API key); the 'Sign in with Google' button in this row starts the browser flow. Plan-covered against your Google AI plan, not per-token. Available only to accounts on a Cloud Code Assist whitelisted tenant.",
+		"placeholder": "https://daily-cloudcode-pa.googleapis.com",
+		"tooltip": "Google Cloud Code Assist / Antigravity's API base - same for everyone. Auth is a Google OAuth sign-in (no API key); the 'Sign in with Google' button in this row starts the browser flow. Plan-covered against your Google AI plan, not per-token. Available only to accounts on a Cloud Code Assist whitelisted tenant.",
 		"prefill": GDLLMSources.DEFAULT_GEMINI_OAUTH_BASE,
 	},
 }
@@ -134,8 +134,8 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
-	# Plugin disable or editor shutdown: land anything the store's save debounce is still holding. Never before the restore has run — flushing the still-unloaded (empty) roster would erase sessions.json.
-	# Also reached by a mere reparent (dock drag to another slot, make-floating, layout apply), so live sessions must not be disturbed here — the mid-turn unwind waits for PREDELETE, which only a real free reaches.
+	# Plugin disable or editor shutdown: land anything the store's save debounce is still holding. Never before the restore has run - flushing the still-unloaded (empty) roster would erase sessions.json.
+	# Also reached by a mere reparent (dock drag to another slot, make-floating, layout apply), so live sessions must not be disturbed here - the mid-turn unwind waits for PREDELETE, which only a real free reaches.
 	if _store != null and _restored:
 		_store.flush()
 
@@ -145,7 +145,7 @@ func _notification(what: int) -> void:
 		_commit_open_sessions()
 
 
-## Last chance before the dock is freed (plugin disable or editor shutdown): unwind any mid-turn session exactly like a tab close — the Stop path synchronously commits executed tool calls and the interruption notice — then flush, so the persisted roster can't miss work that already hit disk. The sessions are the dock's descendants, so they are still whole here.
+## Last chance before the dock is freed (plugin disable or editor shutdown): unwind any mid-turn session exactly like a tab close - the Stop path synchronously commits executed tool calls and the interruption notice - then flush, so the persisted roster can't miss work that already hit disk. The sessions are the dock's descendants, so they are still whole here.
 func _commit_open_sessions() -> void:
 	if _store == null or not _restored:
 		return
@@ -157,7 +157,7 @@ func _commit_open_sessions() -> void:
 	_store.flush()
 
 
-## Load the roster from disk and reopen its sessions, two frames after _ready — the first frame's work still lands before the editor's first paint, so waiting out both keeps boot free of the JSON parse. Each reopened tab defers its own history rendering until it is actually shown (see GDLLMChatSession._apply_record), so restoring many open sessions stays cheap here too.
+## Load the roster from disk and reopen its sessions, two frames after _ready - the first frame's work still lands before the editor's first paint, so waiting out both keeps boot free of the JSON parse. Each reopened tab defers its own history rendering until it is actually shown (see GDLLMChatSession._apply_record), so restoring many open sessions stays cheap here too.
 func _restore_sessions() -> void:
 	for i in 2:
 		await get_tree().process_frame
@@ -178,7 +178,7 @@ func _restore_sessions() -> void:
 	_restored = true
 
 
-## Ctrl+W (Cmd+W on macOS) closes the current session's tab, but only while focus is inside the dock — elsewhere the editor's own Close shortcuts keep working. Consumed even with no tab open, so the keypress can't fall through and close the user's script instead.
+## Ctrl+W (Cmd+W on macOS) closes the current session's tab, but only while focus is inside the dock - elsewhere the editor's own Close shortcuts keep working. Consumed even with no tab open, so the keypress can't fall through and close the user's script instead.
 func _shortcut_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.is_echo():
@@ -314,7 +314,7 @@ func _on_tab_close_pressed(tab: int) -> void:
 	var session := _tabs.get_tab_control(tab) as GDLLMChatSession
 	if session == null:
 		return
-	# Closing a tab hides the session but keeps its record — it stays in the dropdown and reopens with full history. A pristine one has no history to reopen, so its record is discarded outright instead of stranding another empty "New chat" in the roster.
+	# Closing a tab hides the session but keeps its record - it stays in the dropdown and reopens with full history. A pristine one has no history to reopen, so its record is discarded outright instead of stranding another empty "New chat" in the roster.
 	session.abort_in_flight() # unwind any in-flight request/tool coroutine before the free, so nothing resumes into a dead node
 	if GDLLMSessionStore.is_pristine(_store.get_session(session.session_id)):
 		_store.delete(session.session_id)
@@ -471,7 +471,7 @@ func _on_tasks_request_failed(reason: String) -> void:
 	_process_title_queue()
 
 
-## Land a finished title job's outcome in its session's task panel — an open session owns its in-memory history, so it appends the display-only record itself — or, when the tab closed mid-run, straight onto the stored record, so the run persists on reload either way (goal 2). `raw` is the model's reply verbatim ("" when the request failed outright), kept so the debug inspection can show what sanitization saw; `stats` is the request's usage, feeding the panel's footer.
+## Land a finished title job's outcome in its session's task panel - an open session owns its in-memory history, so it appends the display-only record itself - or, when the tab closed mid-run, straight onto the stored record, so the run persists on reload either way (goal 2). `raw` is the model's reply verbatim ("" when the request failed outright), kept so the debug inspection can show what sanitization saw; `stats` is the request's usage, feeding the panel's footer.
 func _settle_title_job(job: Dictionary, result: String, failed: bool, raw: String = "", stats: Dictionary = {}) -> void:
 	var id := String(job["id"])
 	var seconds := (Time.get_ticks_msec() - int(job.get("started_ms", Time.get_ticks_msec()))) / 1000.0
@@ -539,17 +539,17 @@ func _announce_sweep_problem(text: String) -> void:
 
 # --- Model sweep across sources ---
 
-## Fetch every enabled source's model list and merge into one qualified ("source::model") list, then publish it so the settings-page dropdowns and every open session picker rebuild (and GDLLMSettings caches it for next boot). Runs only on demand; a call while another sweep is in flight is ignored (the _models_sweeping guard). Every source is fetched concurrently, so the sweep costs the slowest source's latency, not their sum; a source that errors, times out, or lacks a needed key contributes nothing — named in an ephemeral note backed by an editor toast, so the failure survives even when no tab is showing (see _announce_sweep_problem).
+## Fetch every enabled source's model list and merge into one qualified ("source::model") list, then publish it so the settings-page dropdowns and every open session picker rebuild (and GDLLMSettings caches it for next boot). Runs only on demand; a call while another sweep is in flight is ignored (the _models_sweeping guard). Every source is fetched concurrently, so the sweep costs the slowest source's latency, not their sum; a source that errors, times out, or lacks a needed key contributes nothing - named in an ephemeral note backed by an editor toast, so the failure survives even when no tab is showing (see _announce_sweep_problem).
 func refresh_all_models() -> void:
 	if _models_sweeping:
 		return
 	_models_sweeping = true
-	# Announce the sweep where the user is looking, ephemerally — every trigger path funnels through here, and a moment-scoped action needs no history entry (see GDLLMChatSession.add_ephemeral_notice).
+	# Announce the sweep where the user is looking, ephemerally - every trigger path funnels through here, and a moment-scoped action needs no history entry (see GDLLMChatSession.add_ephemeral_notice).
 	_announce_ephemeral("Refreshing model list...")
 	# Start every source's fetch before awaiting any, so they run in parallel; each handle carries its source id and the box its result lands in.
 	var pending: Array = []
 	for source in GDLLMSources.get_sources():
-		# Skip sources the user toggled off in the Connections dialog — a down or unwanted endpoint contributes nothing and isn't contacted.
+		# Skip sources the user toggled off in the Connections dialog - a down or unwanted endpoint contributes nothing and isn't contacted.
 		if source is Dictionary and GDLLMSources.is_enabled(source):
 			pending.append(_start_source_fetch(source))
 	var merged := PackedStringArray()
@@ -566,7 +566,7 @@ func refresh_all_models() -> void:
 			merged.append(GDLLMSources.make_qualified(String(handle["source_id"]), model_name))
 	merged.sort()
 	_models_sweeping = false
-	# Every source came back empty — almost always a transient outage, not a genuine "no models installed". Keep the last known-good list rather than blanking every picker back to just its current model, and say so — keeping stale data is a decision, not a non-event.
+	# Every source came back empty - almost always a transient outage, not a genuine "no models installed". Keep the last known-good list rather than blanking every picker back to just its current model, and say so - keeping stale data is a decision, not a non-event.
 	if merged.is_empty() and not GDLLMSettings.get_available_models().is_empty():
 		_announce_sweep_problem("All sources returned nothing; keeping the previous model list.")
 		return
@@ -579,9 +579,13 @@ func refresh_all_models() -> void:
 func _start_source_fetch(source: Dictionary) -> Dictionary:
 	var probe := LLMClient.new()
 	add_child(probe)
-	probe.api_base = String(source.get("base_url", ""))
-	probe.api_key = String(source.get("api_key", ""))
-	probe.adapter_kind = String(source.get("kind", GDLLMSources.KIND_OLLAMA))
+	# Resolve through the full qualified path (not raw row fields): this is the single
+	# path every consumer uses to configure a client, so the probe inherits source_id,
+	# the AGY project id (GDLLMGeminiOAuth store), and any effort/cache stamping.
+	# Raw assignment skipped those - the AGY fetch then sent no project and, for a
+	# throwaway client with no source_id, ensure_fresh found no credentials (AIFlowBridge
+	# always resolves its token store by auth route before any fetchAvailableModels).
+	probe.configure_from(GDLLMSources.resolve_qualified(GDLLMSources.make_qualified(String(source.get("id", "")), "")))
 	var box: Array = [] # filled with the names array once received; a one-shot connect so a synchronous emit (request error) still lands here
 	probe.models_received.connect(func(names: PackedStringArray) -> void: box.append(names), CONNECT_ONE_SHOT)
 	probe.fetch_models()
@@ -589,7 +593,7 @@ func _start_source_fetch(source: Dictionary) -> Dictionary:
 	return {"source_id": String(source.get("id", "")), "source_name": String(source.get("name", source.get("id", ""))), "probe": probe, "box": box}
 
 
-## Await one started fetch's result, free its throwaway client, and return the bare model names — empty on any failure or timeout, so the sweep never stalls. fetch_models always resolves within the configured model-fetch timeout (GDLLMTunables.MODEL_FETCH_TIMEOUT), so awaiting the signal is enough; the box covers an emit that already fired (synchronously, or while an earlier source was being awaited).
+## Await one started fetch's result, free its throwaway client, and return the bare model names - empty on any failure or timeout, so the sweep never stalls. fetch_models always resolves within the configured model-fetch timeout (GDLLMTunables.MODEL_FETCH_TIMEOUT), so awaiting the signal is enough; the box covers an emit that already fired (synchronously, or while an earlier source was being awaited).
 func _finish_source_fetch(handle: Dictionary) -> PackedStringArray:
 	var box: Array = handle["box"]
 	var probe: LLMClient = handle["probe"]
@@ -613,7 +617,7 @@ func _ensure_connections_dialog() -> void:
 	if is_instance_valid(_connections_dialog):
 		return
 	_connections_dialog = ConfirmationDialog.new()
-	# Screen-capped like every plugin dialog holding an autowrapped label — an unsettled label's zero-width wrapped height once sized a native window past the GPU's surface limit and crashed the editor (see GDLLMChatSession.cap_dialog_to_screen).
+	# Screen-capped like every plugin dialog holding an autowrapped label - an unsettled label's zero-width wrapped height once sized a native window past the GPU's surface limit and crashed the editor (see GDLLMChatSession.cap_dialog_to_screen).
 	GDLLMChatSession.cap_dialog_to_screen(_connections_dialog)
 	_connections_dialog.title = "Connections"
 	_connections_dialog.ok_button_text = "Save & Close"
@@ -629,7 +633,7 @@ func _ensure_connections_dialog() -> void:
 	content.add_theme_constant_override("separation", 8)
 
 	var hint := Label.new()
-	hint.text = "Each source is a place models come from. Kind sets the wire format and auth: Ollama (local or cloud), OpenAI-Compatible (Chat Completions — LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, OpenRouter with its 100+ models, most others...), OpenAI Responses API (api.openai.com with an API key), OpenAI ChatGPT Subscription (your Plus/Pro account via Sign in with ChatGPT — no key), Anthropic (Claude models), Google AI Studio (BYOK) (paste an AI Studio API key — paid on your GCP project), or Google AI Studio Subscription (Cloud Code Assist / Antigravity — Sign in with Google, plan-covered). For the URL, paste what your provider hands you — the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one — keys (and ChatGPT / Google sign-in tokens) are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
+	hint.text = "Each source is a place models come from. Kind sets the wire format and auth: Ollama (local or cloud), OpenAI-Compatible (Chat Completions - LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, OpenRouter with its 100+ models, most others...), OpenAI Responses API (api.openai.com with an API key), OpenAI ChatGPT Subscription (your Plus/Pro account via Sign in with ChatGPT - no key), Anthropic (Claude models), Google AI Studio (BYOK) (paste an AI Studio API key - paid on your GCP project), or Google AI Studio Subscription (Cloud Code Assist / Antigravity - Sign in with Google, plan-covered). For the URL, paste what your provider hands you - the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one - keys (and ChatGPT / Google sign-in tokens) are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(hint)
 
@@ -686,7 +690,7 @@ func _add_connection_row(source: Dictionary) -> void:
 	var enabled_check := CheckBox.new()
 	enabled_check.button_pressed = GDLLMSources.is_enabled(source)
 	enabled_check.custom_minimum_size = Vector2(CONNECTION_TOGGLE_WIDTH, 0)
-	enabled_check.tooltip_text = "When off, this source is skipped when fetching models — use it for a connection that's down or one you don't want queried."
+	enabled_check.tooltip_text = "When off, this source is skipped when fetching models - use it for a connection that's down or one you don't want queried."
 	row.add_child(enabled_check)
 
 	var name_edit := LineEdit.new()
@@ -733,7 +737,7 @@ func _add_connection_row(source: Dictionary) -> void:
 
 	var apply_kind := func(kind: String) -> void:
 		_apply_base_url_hint(base_edit, kind)
-		# Subscription / OAuth kinds authenticate with a browser sign-in, not a pasted key — their rows swap the key field for the auth button. The Gemini subscription route (Antigravity) needs the same treatment as ChatGPT.
+		# Subscription / OAuth kinds authenticate with a browser sign-in, not a pasted key - their rows swap the key field for the auth button. The Gemini subscription route (Antigravity) needs the same treatment as ChatGPT.
 		key_edit.visible = kind != GDLLMSources.KIND_OPENAI_CHATGPT and kind != GDLLMSources.KIND_GEMINI_OAUTH
 		auth_button.visible = kind == GDLLMSources.KIND_OPENAI_CHATGPT or kind == GDLLMSources.KIND_GEMINI_OAUTH
 	apply_kind.call(current_kind)
@@ -741,7 +745,7 @@ func _add_connection_row(source: Dictionary) -> void:
 	kind_select.item_selected.connect(func(index: int) -> void:
 		var kind := String(kind_select.get_item_metadata(index))
 		apply_kind.call(kind)
-		# A kind whose endpoint is the same for everyone carries a prefill (see CONNECTION_BASE_URL_HINTS), so switching a still-blank row to it fills the URL in — one less thing to look up when adding the source by hand.
+		# A kind whose endpoint is the same for everyone carries a prefill (see CONNECTION_BASE_URL_HINTS), so switching a still-blank row to it fills the URL in - one less thing to look up when adding the source by hand.
 		var prefill := String(CONNECTION_BASE_URL_HINTS.get(kind, {}).get("prefill", ""))
 		if base_edit.text.strip_edges() == "" and prefill != "":
 			base_edit.text = prefill)
@@ -768,9 +772,9 @@ func _add_connection_row(source: Dictionary) -> void:
 	auth_button.pressed.connect(func() -> void: _on_connection_auth_pressed(entry, auth_button))
 
 
-## Stamp the subscription auth button with its row's sign-in state: an offer to sign in, or the signed-in account with sign-out on click. Mirrors the ChatGPT and Google AI Studio sign-in flows — each kind drives the same button with its own store.
+## Stamp the subscription auth button with its row's sign-in state: an offer to sign in, or the signed-in account with sign-out on click. Mirrors the ChatGPT and Google AI Studio sign-in flows - each kind drives the same button with its own store.
 func _refresh_connection_auth_button(auth_button: Button, source_id: String, kind: String = "") -> void:
-	# Look up the row's kind by id so the button label and tooltip describe the right provider — ChatGPT vs Google AI Studio. The kind comes from the row's source dict (passed by the caller); falling back to scanning _connection_rows is unreliable at the construction call site, where the row isn't appended yet.
+	# Look up the row's kind by id so the button label and tooltip describe the right provider - ChatGPT vs Google AI Studio. The kind comes from the row's source dict (passed by the caller); falling back to scanning _connection_rows is unreliable at the construction call site, where the row isn't appended yet.
 	if kind == "":
 		for existing in _connection_rows:
 			if String(existing.get("id", "")) == source_id:
@@ -785,10 +789,10 @@ func _refresh_connection_auth_button(auth_button: Button, source_id: String, kin
 		return
 	if is_gemini_oauth:
 		auth_button.text = "Sign in with Google"
-		auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your Google account (for Cloud Code Assist / Antigravity) — your Google AI plan covers usage on whitelisted tenants, no API key involved. Tokens are stored in Editor Settings with the same custody as API keys."
+		auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your Google account (for Cloud Code Assist / Antigravity) - your Google AI plan covers usage on whitelisted tenants, no API key involved. Tokens are stored in Editor Settings with the same custody as API keys."
 		return
 	auth_button.text = "Sign in with ChatGPT"
-	auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your ChatGPT account (Plus/Pro) — your subscription covers usage, no API key involved. Tokens are stored in Editor Settings with the same custody as API keys."
+	auth_button.tooltip_text = "Opens your browser to authorize GDLLM with your ChatGPT account (Plus/Pro) - your subscription covers usage, no API key involved. Tokens are stored in Editor Settings with the same custody as API keys."
 
 
 ## Look up the kind for `source_id` by scanning the current rows; returns the kind from the OptionButton metadata when found, or "" when the row isn't loaded (e.g. mid-save). Used to route auth-button state when the same source row carries different OAuth kinds (ChatGPT vs Google AI Studio).
@@ -801,7 +805,7 @@ func _kind_for_source_id(source_id: String) -> String:
 	return ""
 
 
-## True when `source_id` is signed in for its row's `kind` — ChatGPT uses GDLLMOAuth; Google AI Studio Subscription uses GDLLMGeminiOAuth.
+## True when `source_id` is signed in for its row's `kind` - ChatGPT uses GDLLMOAuth; Google AI Studio Subscription uses GDLLMGeminiOAuth.
 func _is_source_signed_in(source_id: String, kind: String) -> bool:
 	if kind == GDLLMSources.KIND_GEMINI_OAUTH:
 		return GDLLMGeminiOAuth.is_configured(source_id)
@@ -815,13 +819,13 @@ func _signed_in_account_label(source_id: String, kind: String) -> String:
 	return GDLLMOAuth.account_label(source_id)
 
 
-## The row's sign-in/sign-out click. A fresh unsaved row has no id yet for tokens to key on, so it saves and rebuilds first, then resumes this click on the rebuilt row now carrying the assigned id — one click starts the browser either way. Sign-out is immediate; sign-in runs one OAuth flow (GDLLMOAuth for ChatGPT, GDLLMGeminiOAuth for Google AI Studio Subscription) and restamps the button on completion.
+## The row's sign-in/sign-out click. A fresh unsaved row has no id yet for tokens to key on, so it saves and rebuilds first, then resumes this click on the rebuilt row now carrying the assigned id - one click starts the browser either way. Sign-out is immediate; sign-in runs one OAuth flow (GDLLMOAuth for ChatGPT, GDLLMGeminiOAuth for Google AI Studio Subscription) and restamps the button on completion.
 func _on_connection_auth_pressed(entry: Dictionary, auth_button: Button) -> void:
 	var source_id := String(entry.get("id", ""))
 	var kind_select: OptionButton = entry.get("kind_select")
 	var kind := String(kind_select.get_selected_metadata()) if kind_select != null else ""
 	if source_id == "":
-		# The save assigns the row its id (a blank name included — _gather_sources falls back to a generated one), so the resume matches on ids that didn't exist before the save, never on the editable name.
+		# The save assigns the row its id (a blank name included - _gather_sources falls back to a generated one), so the resume matches on ids that didn't exist before the save, never on the editable name.
 		var known_ids := {}
 		for existing in _connection_rows:
 			if String(existing["id"]) != "":
@@ -864,7 +868,7 @@ func _on_connection_auth_pressed(entry: Dictionary, auth_button: Button) -> void
 			push_warning("GDLLM: ChatGPT sign-in failed: %s" % detail))
 
 
-## Stamp `base_edit` with `kind`'s URL guidance (see CONNECTION_BASE_URL_HINTS) — the placeholder shows on a blank field, the tooltip on hover either way. Re-applied whenever the row's kind changes, so the guidance always describes the selected wire format.
+## Stamp `base_edit` with `kind`'s URL guidance (see CONNECTION_BASE_URL_HINTS) - the placeholder shows on a blank field, the tooltip on hover either way. Re-applied whenever the row's kind changes, so the guidance always describes the selected wire format.
 func _apply_base_url_hint(base_edit: LineEdit, kind: String) -> void:
 	var hint: Dictionary = CONNECTION_BASE_URL_HINTS.get(kind, {})
 	base_edit.placeholder_text = String(hint.get("placeholder", "http://host:port"))
@@ -924,7 +928,7 @@ func _on_connections_confirmed() -> void:
 
 func _on_connections_custom_action(action: StringName) -> void:
 	if action == "add_source":
-		# Fresh rows default to the OpenAI-Compatible kind — the common case when adding a third-party server by hand
+		# Fresh rows default to the OpenAI-Compatible kind - the common case when adding a third-party server by hand
 		_add_connection_row({"kind": GDLLMSources.KIND_OPENAI})
 	elif action == "refresh_models":
 		_save_connections() # persist edits first so the sweep hits the current URLs and keys
@@ -954,7 +958,7 @@ func _ensure_effort_dialog() -> void:
 	content.add_theme_constant_override("separation", 8)
 
 	var hint := Label.new()
-	hint.text = "Check the reasoning-effort levels each model actually supports — no API reports them, so they're maintained by hand here. A configured model offers its levels in the session's effort dropdown; an unconfigured one offers only Default and sends no effort, letting the model's own behavior prevail. Each provider's adapter translates a level to its own knob (Ollama think, OpenAI reasoning_effort, Anthropic output_config.effort / disabled thinking), so check only levels the model's provider documents — an unsupported one fails loudly at request time (e.g. Anthropic has no minimal, and Claude Fable rejects none). The cache TTL column sets how many idle seconds until the model's provider prompt cache is presumed cold (free context-trimming moments ride these boundaries); 0 means unset, applying the Cache TTL Fallback editor setting on the Compaction page (default 300 s, Anthropic's 5-minute TTL). On an Anthropic source the value is also enforced on the wire, not just presumed: Anthropic's cache has exactly two lifetimes, so a value at or under 300 uses the default 5-minute cache and any larger value requests the 1-hour tier with every request — costlier to write (2x the input price instead of 1.25x, paying off from roughly three reuses) but held for the full hour, and the session then presumes the enforced lifetime (300 or 3600) rather than the raw figure. Other providers' caches accept no requested lifetime, so there the value stays a presumption only. The context column declares the model's maximum context window in tokens; a set value overrides whatever the provider's API reports, and for a source that reports none — an OpenAI-compatible server without a vendor window field in its model list (vLLM, OpenRouter, and Groq do carry one) — it is the only way the context meter, automatic compaction, and the over-window warnings get a ceiling to judge against. 0 means unset: the source's reported window applies, or an honest unknown where none is reported."
+	hint.text = "Check the reasoning-effort levels each model actually supports - no API reports them, so they're maintained by hand here. A configured model offers its levels in the session's effort dropdown; an unconfigured one offers only Default and sends no effort, letting the model's own behavior prevail. Each provider's adapter translates a level to its own knob (Ollama think, OpenAI reasoning_effort, Anthropic output_config.effort / disabled thinking), so check only levels the model's provider documents - an unsupported one fails loudly at request time (e.g. Anthropic has no minimal, and Claude Fable rejects none). The cache TTL column sets how many idle seconds until the model's provider prompt cache is presumed cold (free context-trimming moments ride these boundaries); 0 means unset, applying the Cache TTL Fallback editor setting on the Compaction page (default 300 s, Anthropic's 5-minute TTL). On an Anthropic source the value is also enforced on the wire, not just presumed: Anthropic's cache has exactly two lifetimes, so a value at or under 300 uses the default 5-minute cache and any larger value requests the 1-hour tier with every request - costlier to write (2x the input price instead of 1.25x, paying off from roughly three reuses) but held for the full hour, and the session then presumes the enforced lifetime (300 or 3600) rather than the raw figure. Other providers' caches accept no requested lifetime, so there the value stays a presumption only. The context column declares the model's maximum context window in tokens; a set value overrides whatever the provider's API reports, and for a source that reports none - an OpenAI-compatible server without a vendor window field in its model list (vLLM, OpenRouter, and Groq do carry one) - it is the only way the context meter, automatic compaction, and the over-window warnings get a ceiling to judge against. 0 means unset: the source's reported window applies, or an honest unknown where none is reported."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(hint)
 
@@ -1030,7 +1034,7 @@ func _refresh_effort_dialog() -> void:
 	_refresh_effort_add_select()
 
 
-## Fill the add-picker with every known model that has no row yet, behind a placeholder item — every adapter translates effort now, so any source's models are configurable. Only a stale id (its source was deleted) is withheld, since nothing can run on it.
+## Fill the add-picker with every known model that has no row yet, behind a placeholder item - every adapter translates effort now, so any source's models are configurable. Only a stale id (its source was deleted) is withheld, since nothing can run on it.
 func _refresh_effort_add_select() -> void:
 	_effort_add_select.clear()
 	_effort_add_select.add_item("Add a model…")
@@ -1090,7 +1094,7 @@ func _add_effort_row(qualified: String, levels: PackedStringArray, cache_cold_ga
 	cache_spin.allow_greater = true
 	cache_spin.suffix = "s"
 	cache_spin.value = cache_cold_gap
-	cache_spin.tooltip_text = "Idle seconds until this model's provider prompt cache is presumed cold (the provider's cache TTL). 0 = unset: the Cache TTL Fallback editor setting on the Compaction page applies. On an Anthropic source the value is enforced, not just presumed — at or under 300 uses the default 5-minute cache, anything larger requests the 1-hour tier (2x write cost, paying off from about three reuses), and the session presumes that enforced lifetime."
+	cache_spin.tooltip_text = "Idle seconds until this model's provider prompt cache is presumed cold (the provider's cache TTL). 0 = unset: the Cache TTL Fallback editor setting on the Compaction page applies. On an Anthropic source the value is enforced, not just presumed - at or under 300 uses the default 5-minute cache, anything larger requests the 1-hour tier (2x write cost, paying off from about three reuses), and the session presumes that enforced lifetime."
 	row.add_child(cache_spin)
 
 	var context_spin := SpinBox.new()
@@ -1100,7 +1104,7 @@ func _add_effort_row(qualified: String, levels: PackedStringArray, cache_cold_ga
 	context_spin.step = 1
 	context_spin.allow_greater = true
 	context_spin.value = context_window
-	context_spin.tooltip_text = "This model's maximum context window in tokens, declared by hand. A set value overrides the window the provider's API reports; for a source that reports none — an OpenAI-compatible server without a vendor window field in its model list — it is what arms the context meter, automatic compaction, and the over-window warnings. 0 = unset: the reported window applies, or an honest unknown where none is reported."
+	context_spin.tooltip_text = "This model's maximum context window in tokens, declared by hand. A set value overrides the window the provider's API reports; for a source that reports none - an OpenAI-compatible server without a vendor window field in its model list - it is what arms the context meter, automatic compaction, and the over-window warnings. 0 = unset: the reported window applies, or an honest unknown where none is reported."
 	row.add_child(context_spin)
 
 	var del := Button.new()
@@ -1123,7 +1127,7 @@ func _remove_effort_row(entry: Dictionary) -> void:
 	_refresh_effort_add_select() # the removed model becomes addable again
 
 
-## Read the rows back into the per-model map and persist it (see GDLLMEfforts.make_entry for the level-array vs dict entry shapes). A row with nothing checked is kept — it stays editable here while behaving exactly like an unconfigured model (Default only). Saving emits settings_changed, which revalidates every open session's selection, rebuilds its effort picker, and re-derives its context meter and downshift row against any newly declared window (see _on_editor_settings_changed → reapply_source).
+## Read the rows back into the per-model map and persist it (see GDLLMEfforts.make_entry for the level-array vs dict entry shapes). A row with nothing checked is kept - it stays editable here while behaving exactly like an unconfigured model (Default only). Saving emits settings_changed, which revalidates every open session's selection, rebuilds its effort picker, and re-derives its context meter and downshift row against any newly declared window (see _on_editor_settings_changed → reapply_source).
 func _on_effort_confirmed() -> void:
 	var config := {}
 	for entry in _effort_rows:
@@ -1164,7 +1168,7 @@ func _ensure_favorites_dialog() -> void:
 	content.add_theme_constant_override("separation", 8)
 
 	var hint := Label.new()
-	hint.text = "Favorites sit starred at the top of every model picker, in the order below — reorder with the arrows. Removing one only unpins it; the model stays available in the picker's main list."
+	hint.text = "Favorites sit starred at the top of every model picker, in the order below - reorder with the arrows. Removing one only unpins it; the model stays available in the picker's main list."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(hint)
 
@@ -1197,7 +1201,7 @@ func _ensure_favorites_dialog() -> void:
 	add_child(_favorites_dialog)
 
 
-## Rebuild the list rows from the stored favorites — kept in stored order, since that order is the feature — and the add-picker from the models not yet listed.
+## Rebuild the list rows from the stored favorites - kept in stored order, since that order is the feature - and the add-picker from the models not yet listed.
 func _refresh_favorites_dialog() -> void:
 	for entry in _favorites_rows:
 		var container: Control = entry["container"]
@@ -1375,7 +1379,7 @@ func _ensure_manage_dialog() -> void:
 	content.add_child(_manage_tree)
 
 	_manage_totals = Label.new()
-	_manage_totals.tooltip_text = "Tokens in/out summed across every session in the table, subagent threads included — estimated (chars-per-token of the traffic actually exchanged) and endpoint-reported counts kept apart."
+	_manage_totals.tooltip_text = "Tokens in/out summed across every session in the table, subagent threads included - estimated (chars-per-token of the traffic actually exchanged) and endpoint-reported counts kept apart."
 	content.add_child(_manage_totals)
 
 	_manage_dialog.add_child(content)
@@ -1400,7 +1404,7 @@ func _refresh_manage_list() -> void:
 		var model := _dominant_models(record.get("history", []))
 		item.set_text(3, String(model["text"]))
 		item.set_tooltip_text(3, String(model["tooltip"]))
-		# Token columns derive from the record's stored per-request stats — the same sums the session header shows (see GDLLMChatSession.token_usage) — with the plugin's chars-per-token estimates and the endpoints' own reported counts in separate columns.
+		# Token columns derive from the record's stored per-request stats - the same sums the session header shows (see GDLLMChatSession.token_usage) - with the plugin's chars-per-token estimates and the endpoints' own reported counts in separate columns.
 		var usage := GDLLMChatSession.token_usage(record.get("history", []))
 		var est_in := int(usage["est_in"]) + int(usage["subagent_est_in"])
 		var est_out := int(usage["est_out"]) + int(usage["subagent_est_out"])
@@ -1411,23 +1415,23 @@ func _refresh_manage_list() -> void:
 		total_est_out += est_out
 		total_rep_in += rep_in
 		total_rep_out += rep_out
-		item.set_text(4, "~%s" % _abbrev_tokens(est_in) if est_in > 0 else "—")
-		item.set_tooltip_text(4, "Cumulative prompt tokens estimated (chars-per-token) from the request payloads actually sent this session, subagent threads included: %s. Sessions saved before the estimates existed show —." % _comma(est_in))
-		item.set_text(5, "~%s" % _abbrev_tokens(est_out) if est_out > 0 else "—")
-		item.set_tooltip_text(5, "Cumulative reply tokens estimated (chars-per-token) from the replies streamed back this session, subagent threads included: %s. Sessions saved before the estimates existed show —." % _comma(est_out))
-		item.set_text(6, _abbrev_tokens(rep_in) if rep_in > 0 else "—")
-		item.set_tooltip_text(6, "Cumulative prompt tokens the endpoints themselves reported across every request this session, subagent threads included: %s. Providers that report no usage show —." % _comma(rep_in))
-		item.set_text(7, _abbrev_tokens(rep_out) if rep_out > 0 else "—")
-		item.set_tooltip_text(7, "Cumulative reply tokens the endpoints themselves reported across every request this session, subagent threads included: %s. Providers that report no usage show —." % _comma(rep_out))
-		item.set_text(8, _abbrev_tokens(context) if context > 0 else "—")
-		item.set_tooltip_text(8, "The session's current context size — its newest request's context (prompt + reply tokens), which the next request re-sends — preferring each request's reported counts and falling back to its estimates: %s. A session compacted after its last reply shows — until its next request reports the smaller context." % _comma(context))
+		item.set_text(4, "~%s" % _abbrev_tokens(est_in) if est_in > 0 else "-")
+		item.set_tooltip_text(4, "Cumulative prompt tokens estimated (chars-per-token) from the request payloads actually sent this session, subagent threads included: %s. Sessions saved before the estimates existed show -." % _comma(est_in))
+		item.set_text(5, "~%s" % _abbrev_tokens(est_out) if est_out > 0 else "-")
+		item.set_tooltip_text(5, "Cumulative reply tokens estimated (chars-per-token) from the replies streamed back this session, subagent threads included: %s. Sessions saved before the estimates existed show -." % _comma(est_out))
+		item.set_text(6, _abbrev_tokens(rep_in) if rep_in > 0 else "-")
+		item.set_tooltip_text(6, "Cumulative prompt tokens the endpoints themselves reported across every request this session, subagent threads included: %s. Providers that report no usage show -." % _comma(rep_in))
+		item.set_text(7, _abbrev_tokens(rep_out) if rep_out > 0 else "-")
+		item.set_tooltip_text(7, "Cumulative reply tokens the endpoints themselves reported across every request this session, subagent threads included: %s. Providers that report no usage show -." % _comma(rep_out))
+		item.set_text(8, _abbrev_tokens(context) if context > 0 else "-")
+		item.set_tooltip_text(8, "The session's current context size - its newest request's context (prompt + reply tokens), which the next request re-sends - preferring each request's reported counts and falling back to its estimates: %s. A session compacted after its last reply shows - until its next request reports the smaller context." % _comma(context))
 		for col in [4, 5, 6, 7, 8]:
 			item.set_text_alignment(col, HORIZONTAL_ALIGNMENT_RIGHT)
 		var think_bytes := _thinking_size(record)
 		var total_bytes := JSON.stringify(record).to_utf8_buffer().size()
 		item.set_text(9, _format_bytes(maxi(0, total_bytes - think_bytes)))
 		item.set_text_alignment(9, HORIZONTAL_ALIGNMENT_RIGHT)
-		item.set_text(10, _format_bytes(think_bytes) if think_bytes > 0 else "—")
+		item.set_text(10, _format_bytes(think_bytes) if think_bytes > 0 else "-")
 		item.set_text_alignment(10, HORIZONTAL_ALIGNMENT_RIGHT)
 		# Metadata lives on column 0; the whole row shares one session id.
 		item.set_metadata(0, record["id"])
@@ -1448,7 +1452,7 @@ func _dominant_models(history: Array) -> Dictionary:
 			var qualified := String(msg["model"])
 			counts[qualified] = int(counts.get(qualified, 0)) + 1
 	if counts.is_empty():
-		return {"text": "—", "tooltip": "No assistant turn in this session carries a model stamp."}
+		return {"text": "-", "tooltip": "No assistant turn in this session carries a model stamp."}
 	var best := 0
 	for qualified in counts:
 		best = maxi(best, int(counts[qualified]))
@@ -1530,7 +1534,7 @@ func _on_manage_row_delete(item: TreeItem, column: int, _id: int, _mouse_button_
 		_delete_sessions.bind([id]))
 
 
-## Handle the dialog's custom buttons — each is a permanent action, so all route through the "Are you sure?" interstitial before touching anything.
+## Handle the dialog's custom buttons - each is a permanent action, so all route through the "Are you sure?" interstitial before touching anything.
 func _on_manage_custom_action(action: StringName) -> void:
 	if action == "delete_all":
 		if _store.sessions.is_empty():
@@ -1555,7 +1559,7 @@ func _on_manage_custom_action(action: StringName) -> void:
 			_clear_thinking_all, "Clear")
 
 
-## Drop stored reasoning traces from one session. An open session's live view is cleared too (its in-memory history and rendered blocks), then the stored record is stripped directly — which, unlike routing through set_history, leaves the "Last message" timestamp untouched. A busy session is skipped WHOLE, disk record included, and reported false: its in-flight loop keeps the echo thinking the API needs to finish (see GDLLMChatSession.clear_thinking), and stripping the record alone would be undone the moment that turn persists.
+## Drop stored reasoning traces from one session. An open session's live view is cleared too (its in-memory history and rendered blocks), then the stored record is stripped directly - which, unlike routing through set_history, leaves the "Last message" timestamp untouched. A busy session is skipped WHOLE, disk record included, and reported false: its in-flight loop keeps the echo thinking the API needs to finish (see GDLLMChatSession.clear_thinking), and stripping the record alone would be undone the moment that turn persists.
 func _clear_session_thinking(id: String) -> bool:
 	if _open_sessions.has(id) and _open_sessions[id].is_busy():
 		return false
@@ -1594,10 +1598,10 @@ func _apply_editor_icon(button: Button, icon_name: String, fallback_text: String
 		button.text = fallback_text
 
 
-## A short "Jul 6, 2026" date from a Unix timestamp, or "—" when unset (e.g. a session with no messages yet).
+## A short "Jul 6, 2026" date from a Unix timestamp, or "-" when unset (e.g. a session with no messages yet).
 func _format_date(unix: int) -> String:
 	if unix <= 0:
-		return "—"
+		return "-"
 	var d := Time.get_datetime_dict_from_unix_time(unix)
 	return "%s %d, %d" % [MONTHS[int(d.month) - 1], int(d.day), int(d.year)]
 
@@ -1610,7 +1614,7 @@ func _format_bytes(bytes: int) -> String:
 	return "%.1f KB" % kb if kb < 1024.0 else "%.1f MB" % (kb / 1024.0)
 
 
-## Total bytes of the reasoning traces stored in a session — the space "Clear Thinking" would reclaim, the thinking blocks inside provider echoes included (see GDLLMSessionStore.strip_echo_thinking).
+## Total bytes of the reasoning traces stored in a session - the space "Clear Thinking" would reclaim, the thinking blocks inside provider echoes included (see GDLLMSessionStore.strip_echo_thinking).
 func _thinking_size(record: Dictionary) -> int:
 	var bytes := 0
 	for msg in record.get("history", []):
@@ -1649,7 +1653,7 @@ func _delete_session(id: String) -> void:
 	if _open_sessions.has(id):
 		var session: GDLLMChatSession = _open_sessions[id]
 		_open_sessions.erase(id)
-		session.abort_in_flight() # same unwind the tab-close path does — freeing mid-request would strand the transport's resolver slot and resume coroutines into a dead node
+		session.abort_in_flight() # same unwind the tab-close path does - freeing mid-request would strand the transport's resolver slot and resume coroutines into a dead node
 		session.queue_free()
 	_store.delete(id)
 	_rebuild_session_dropdown()
@@ -1681,7 +1685,7 @@ func _clear_thinking_for(ids: Array) -> void:
 		_announce_skipped_clear(skipped)
 
 
-## Report the sessions "Clear Thinking" skipped for being busy, naming each and the action that finishes the job. Ephemeral rather than a history entry — the skip is a moment's outcome of a button press, not something that happened to the conversation — and toast-backed like every other ephemeral warning, because the manage dialog is covering the log the note lands in (see _announce_sweep_problem).
+## Report the sessions "Clear Thinking" skipped for being busy, naming each and the action that finishes the job. Ephemeral rather than a history entry - the skip is a moment's outcome of a button press, not something that happened to the conversation - and toast-backed like every other ephemeral warning, because the manage dialog is covering the log the note lands in (see _announce_sweep_problem).
 func _announce_skipped_clear(titles: Array[String]) -> void:
 	var text := "Reasoning traces kept in %d busy session%s (%s): a request or tool run is still in flight. Clear again once it's idle." % [
 		titles.size(), _plural(titles.size()), ", ".join(titles)]
@@ -1722,7 +1726,7 @@ func _ensure_confirm_dialog() -> void:
 	add_child(_confirm_dialog)
 
 
-## "" for one, "s" otherwise — pluralizes "session" in the confirmation prompts.
+## "" for one, "s" otherwise - pluralizes "session" in the confirmation prompts.
 func _plural(count: int) -> String:
 	return "" if count == 1 else "s"
 
@@ -1740,7 +1744,7 @@ func _on_confirm_dialog_confirmed() -> void:
 ## Sync the dock when a source or model is changed from the settings page or the Connections dialog (or any other listener).
 func _on_editor_settings_changed() -> void:
 	_tasks_client.configure_from(GDLLMSettings.get_tasks_source_and_model())
-	# Rebuild pickers only on an actual favorites edit — this signal fires for every settings write (input-height drag ticks included), and each rebuild churns every open picker.
+	# Rebuild pickers only on an actual favorites edit - this signal fires for every settings write (input-height drag ticks included), and each rebuild churns every open picker.
 	var favorites := JSON.stringify(Array(GDLLMFavorites.get_list()))
 	var favorites_changed := favorites != _last_favorites
 	_last_favorites = favorites
@@ -1767,7 +1771,7 @@ func _on_editor_settings_changed() -> void:
 		_schedule_color_repaint()
 
 
-## Repaint every open session's log for the edited palette, at most once per COLOR_REPAINT_INTERVAL — a repaint rebuilds each log from its history, and the settings dialog's color picker writes on every tick of a drag through the color wheel.
+## Repaint every open session's log for the edited palette, at most once per COLOR_REPAINT_INTERVAL - a repaint rebuilds each log from its history, and the settings dialog's color picker writes on every tick of a drag through the color wheel.
 func _schedule_color_repaint() -> void:
 	if _color_repaint_pending:
 		return
@@ -1781,7 +1785,7 @@ func _schedule_color_repaint() -> void:
 
 # --- Editor selection tracking (routed to the active session) ---
 
-## Auto-check "Attach selection" on the active session when a selection appears in the editor and uncheck it when the selection clears; acts only on the transition so a manual toggle — or editing your message — is never overwritten.
+## Auto-check "Attach selection" on the active session when a selection appears in the editor and uncheck it when the selection clears; acts only on the transition so a manual toggle - or editing your message - is never overwritten.
 func _on_editor_caret_changed() -> void:
 	var code_edit := _current_code_edit()
 	var has_selection := code_edit != null and code_edit.has_selection()
@@ -1818,7 +1822,7 @@ func restore_editor_selection_behavior() -> void:
 	_selection_flips.clear()
 
 
-## Reapply _keep_editor_selections_alive() when a script is opened or switched — the only time a new CodeEdit (with the default focus-loss behavior) appears.
+## Reapply _keep_editor_selections_alive() when a script is opened or switched - the only time a new CodeEdit (with the default focus-loss behavior) appears.
 func _on_editor_script_changed(_script: Script) -> void:
 	_keep_editor_selections_alive()
 
