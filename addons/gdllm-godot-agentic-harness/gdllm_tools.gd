@@ -2329,7 +2329,6 @@ static func sanitize_tool_calls(tool_calls: Array) -> Array:
 	for tc in tool_calls:
 		var name := tool_call_name(tc)
 		if name != "":
-			out.append({"function": {"name": name, "arguments": tool_call_args(tc)}})
 			var call_entry: Dictionary = {"function": {"name": name, "arguments": tool_call_args(tc)}}
 			var sig := String(tc.get("thought_signature", "")) if tc is Dictionary else ""
 			if sig != "":

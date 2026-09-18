@@ -145,7 +145,6 @@ func run(source: Dictionary, system_prompt: String, prompt: String, use_tools: b
 					if i == tool_calls.size() - 1:
 						content += brakes.oscillation_nudge(used_this_round, round_repeated)
 					_emit({"type": "tool_result", "name": tool_name, "content": content})
-					messages.append({"role": "tool", "content": content, "tool_name": tool_name})
 					var tool_msg := {"role": "tool", "content": content, "tool_name": tool_name}
 					var sig := String(tc.get("thought_signature", "")) if tc is Dictionary else ""
 					if sig != "":

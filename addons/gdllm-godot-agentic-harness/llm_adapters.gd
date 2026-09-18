@@ -507,20 +507,29 @@ class OpenAIAdapter extends LLMAdapter:
 				var calls: Array = []
 				pending_ids = []
 				for tc in msg["tool_calls"]:
+					var fn: Dictionary = tc.get("function", {}) if tc is Dictionary else {}
+					var name := String(fn.get("name", ""))
+					if name == "":
+						continue
 					var id := "call_%d" % counter
 					counter += 1
 					pending_ids.append(id)
-					var fn: Dictionary = tc.get("function", {}) if tc is Dictionary else {}
 					var raw_args: Variant = fn.get("arguments", {})
 					var args_str: String = raw_args if raw_args is String else JSON.stringify(raw_args)
-					calls.append({"id": id, "type": "function", "function": {"name": String(fn.get("name", "")), "arguments": args_str}})
-				var assistant_msg := {"role": "assistant", "tool_calls": calls}
-				var preamble := String(msg.get("content", ""))
-				if preamble != "":
-					assistant_msg["content"] = preamble
-				out.append(assistant_msg)
+					calls.append({"id": id, "type": "function", "function": {"name": name, "arguments": args_str}})
+				if not calls.is_empty():
+					var assistant_msg := {"role": "assistant", "tool_calls": calls}
+					var preamble := String(msg.get("content", ""))
+					if preamble != "":
+						assistant_msg["content"] = preamble
+					out.append(assistant_msg)
+				elif String(msg.get("content", "")) != "":
+					out.append({"role": "assistant", "content": String(msg.get("content", ""))})
 			elif role == "tool":
-				var id := String(pending_ids.pop_front()) if not pending_ids.is_empty() else ""
+				var tool_name := String(msg.get("tool_name", ""))
+				if tool_name == "" or pending_ids.is_empty():
+					continue # Don't emit tool results without a valid function name or matching tool call id
+				var id := String(pending_ids.pop_front())
 				out.append({"role": "tool", "tool_call_id": id, "content": String(msg.get("content", ""))})
 			else:
 				out.append({"role": role, "content": String(msg.get("content", ""))})
@@ -563,11 +572,14 @@ class OpenAIAdapter extends LLMAdapter:
 	func _assembled_tool_calls() -> Array:
 		var out: Array = []
 		for slot in _tool_calls:
+			var name := _text(slot.get("name", ""))
+			if name == "":
+				continue
 			# A no-argument call streams "" for arguments; parsing that is a noisy failure, so treat empty as {}.
 			var args_text := _text(slot["args"])
 			var parsed: Variant = JSON.parse_string(args_text) if args_text != "" else {}
 			var args: Dictionary = parsed if parsed is Dictionary else {}
-			out.append({"function": {"name": _text(slot["name"]), "arguments": args}})
+			out.append({"function": {"name": name, "arguments": args}})
 		return out
 
 	## OpenAI usage mapped onto the plugin's stat keys; it reports no durations, so those stay 0. Static so the non-streamed completion path maps its body's usage through the same rule.
@@ -1294,6 +1306,9 @@ class GeminiAdapter extends LLMAdapter:
 						if signature != "":
 							fc_part["thoughtSignature"] = signature
 							pending_signatures[name] = signature
+						else:
+							fc_part["thoughtSignature"] = "skip_thought_signature_validator"
+							pending_signatures[name] = "skip_thought_signature_validator"
 						parts.append(fc_part)
 				if parts.is_empty():
 					parts.append({"text": "(empty)"})
@@ -1303,8 +1318,11 @@ class GeminiAdapter extends LLMAdapter:
 				if name == "":
 					name = String(pending_names.pop_front()) if not pending_names.is_empty() else "tool"
 				var signature := _text(msg.get("thought_signature", ""))
-				if signature == "" and pending_signatures.has(name):
-					signature = _text(pending_signatures[name])
+				if signature == "":
+					if pending_signatures.has(name):
+						signature = _text(pending_signatures[name])
+					else:
+						signature = "skip_thought_signature_validator"
 				var content_val: Variant = msg.get("content", "")
 				var resp_dict: Dictionary = {}
 				if content_val is Dictionary:
@@ -1819,6 +1837,9 @@ class GeminiOAuthAdapter extends LLMAdapter:
 						if signature != "":
 							fc_part["thoughtSignature"] = signature
 							pending_signatures[name] = signature
+						else:
+							fc_part["thoughtSignature"] = "skip_thought_signature_validator"
+							pending_signatures[name] = "skip_thought_signature_validator"
 						parts.append(fc_part)
 				if parts.is_empty():
 					parts.append({"text": "(empty)"})
@@ -1828,8 +1849,11 @@ class GeminiOAuthAdapter extends LLMAdapter:
 				if name == "":
 					name = String(pending_names.pop_front()) if not pending_names.is_empty() else "tool"
 				var signature := _text(msg.get("thought_signature", ""))
-				if signature == "" and pending_signatures.has(name):
-					signature = _text(pending_signatures[name])
+				if signature == "":
+					if pending_signatures.has(name):
+						signature = _text(pending_signatures[name])
+					else:
+						signature = "skip_thought_signature_validator"
 				var content_val: Variant = msg.get("content", "")
 				var resp_dict: Dictionary = {}
 				if content_val is Dictionary:
