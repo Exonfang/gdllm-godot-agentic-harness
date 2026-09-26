@@ -242,7 +242,12 @@ var _compact_focus_desc: Label ## Caption under the focus field, repainted per p
 var _compact_passes_box: VBoxContainer ## The confirmation gate's pass block — intro, checkbox rows, token target — held as one node so a typed focus can disable and dim everything it overrides at once (see _refresh_compact_dialog_state).
 var _unsaved_warning_dialog: ConfirmationDialog ## Built lazily on the first send that finds unsaved open files while edits are enabled; warns that the model could overwrite live work on disk
 var _unsaved_send_confirmed: bool = false ## One-shot bypass set by the warning dialog's buttons so the re-run send skips the check the user already answered
-var _model_select: OptionButton ## Model picker; each item's metadata is a qualified "source::model" id that sets this session's model (see _on_model_selected). Disabled while a request is in flight.
+var _model_select: Button ## Model picker button; displays the current model label and opens the searchable picker popup on click. Disabled while a request is in flight.
+var _model_picker_popup: PopupPanel ## Floating searchable picker popup containing a search LineEdit and an ItemList of models.
+var _model_search_edit: LineEdit ## Text search input filtering models in real-time.
+var _model_item_list: ItemList ## Scrollable list of available and filtered models.
+var _available_models_cache: PackedStringArray ## Cached ordered list of qualified model IDs for search filtering.
+var _filtered_models: PackedStringArray ## Currently displayed qualified model IDs in _model_item_list.
 var _effort_select: OptionButton ## Effort picker beside the model picker; each item's metadata is the level string ("" for Default). Offers only the levels the current model is configured to support (see GDLLMEfforts); locked alongside the model picker while a request is in flight.
 var _effort := "" ## This session's reasoning-effort selection ("" = Default: no effort is sent). Persisted per session on its record and revalidated on every model switch (see _apply_qualified_model).
 
@@ -385,15 +390,15 @@ func _build_ui() -> void:
 	var model_row := HBoxContainer.new()
 	add_child(model_row)
 
-	_model_select = OptionButton.new()
+	_model_select = Button.new()
 	_model_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# A long model name must never set this row's minimum width: the row's minimum is the dock's, and a dock too wide for its slot sends the editor's dock layout into an unconverging relayout loop that hangs the whole editor at boot (100% CPU in text-server errors). Clip instead — the popup still shows full names.
-	_model_select.fit_to_longest_item = false
+	_model_select.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_model_select.clip_text = true
 	_model_select.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_model_select.tooltip_text = "Model used for this chat, across every configured source. Edit sources with the ⚙ button."
-	_model_select.item_selected.connect(_on_model_selected)
+	_model_select.tooltip_text = "Model used for this chat, across every configured source. Click to search and select. Edit sources with the ⚙ button."
+	_model_select.pressed.connect(_open_model_picker_popup)
 	model_row.add_child(_model_select)
+	_update_model_select_button()
 
 	_effort_select = OptionButton.new()
 	# Fixed width sized for the longest level name; like the model picker it must never let content set the row's minimum width, so it clips instead of fitting (see the hazard note above).
@@ -577,6 +582,7 @@ func _apply_qualified_model(qid: String, switched: bool = false) -> void:
 	_refresh_no_sources_notice() # the dock re-applies the model on every settings change, so a Connections edit lands here
 	_refresh_unknown_window_notice() # and an Effort Configuration edit (declaring or clearing a window) lands here the same way
 	_refresh_chatgpt_signin_notice() # and a sign-in or sign-out (the token store is a setting too) lands here as well
+	_update_model_select_button()
 
 
 ## This session's model identity as a qualified "source::model" id (used by the dock to sync the global default).
@@ -1576,23 +1582,14 @@ func _comma(n: int) -> String:
 	return ("-" + out) if n < 0 else out
 
 
-## Fill the model picker from the dock's cached list of qualified ids — favorites first in the user's own order, each starred — keeping this session's model selected (and selectable even if no source reported it). Each item shows a friendly label but carries the qualified id as its metadata.
+## Cache available models from the dock's list of qualified ids — favorites first in the user's own order — and refresh the model button.
 func set_available_models(models: PackedStringArray) -> void:
-	if not is_instance_valid(_model_select):
-		return
 	var current := _qualified_model
-	var favorites := GDLLMFavorites.get_list()
-	_model_select.clear()
-	var selected := -1
-	for qid in GDLLMFavorites.apply_order(models):
-		_add_model_item(qid, favorites)
-		if qid == current:
-			selected = _model_select.item_count - 1
-	if selected == -1 and current != "":
-		_add_model_item(current, favorites)
-		selected = _model_select.item_count - 1
-	if selected != -1:
-		_model_select.select(selected)
+	var ordered := GDLLMFavorites.apply_order(models)
+	if current != "" and not ordered.has(current):
+		ordered.append(current)
+	_available_models_cache = ordered
+	_update_model_select_button()
 
 
 ## Adopt a qualified `model` id from an external change (e.g. the settings page) without re-broadcasting; the dock persists it separately. The dock only calls this when the id actually differs from the session's own, so it counts as a deliberate switch and gets the same window re-check the picker's does.
@@ -1616,30 +1613,213 @@ func has_attach_selection() -> bool:
 	return is_instance_valid(_attach_selection_check) and _attach_selection_check.button_pressed
 
 
-## Ensure the qualified `model` id is present in the picker and selected, appending it (with a friendly label) if the list doesn't carry it yet. Matches on the item metadata (the qualified id), not the displayed label.
+## Ensure the qualified `model` id is present in the cache and update the button.
 func _seed_model_picker(model: String) -> void:
-	if not is_instance_valid(_model_select) or model == "":
+	if model != "" and not _available_models_cache.has(model):
+		_available_models_cache.append(model)
+	_update_model_select_button()
+
+
+## Update the model button's text, icon, and tooltip to reflect the current qualified model and favorite status.
+func _update_model_select_button() -> void:
+	if not is_instance_valid(_model_select):
 		return
-	for i in _model_select.item_count:
-		if String(_model_select.get_item_metadata(i)) == model:
-			_model_select.select(i)
-			return
-	_add_model_item(model, GDLLMFavorites.get_list())
-	_model_select.select(_model_select.item_count - 1)
-
-
-## Append one picker item for `qualified` — starred when it's in `favorites` — carrying the qualified id as its metadata.
-func _add_model_item(qualified: String, favorites: PackedStringArray) -> void:
-	var label := GDLLMSources.label_for(qualified)
-	if favorites.has(qualified):
+	if _qualified_model == "":
+		_model_select.text = "Select model... ▾"
+		_model_select.icon = null
+		_model_select.tooltip_text = "Model used for this chat. Click to search and select."
+		return
+	var label := GDLLMSources.label_for(_qualified_model)
+	var favorites := GDLLMFavorites.get_list()
+	if favorites.has(_qualified_model):
 		var star := _favorite_icon()
 		if star != null:
-			_model_select.add_icon_item(star, label)
+			_model_select.icon = star
+			_model_select.text = label + " ▾"
 		else:
-			_model_select.add_item("★ " + label)
+			_model_select.icon = null
+			_model_select.text = "★ " + label + " ▾"
 	else:
-		_model_select.add_item(label)
-	_model_select.set_item_metadata(_model_select.item_count - 1, qualified)
+		_model_select.icon = null
+		_model_select.text = label + " ▾"
+	_model_select.tooltip_text = "Current model: %s\nClick to search and change model." % _qualified_model
+
+
+## Build the searchable popup panel lazily on first open.
+func _ensure_model_picker_popup() -> void:
+	if is_instance_valid(_model_picker_popup):
+		return
+	_model_picker_popup = PopupPanel.new()
+	_model_select.add_child(_model_picker_popup)
+
+	var vbox := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(380, 320)
+	vbox.add_theme_constant_override("separation", 6)
+	_model_picker_popup.add_child(vbox)
+
+	_model_search_edit = LineEdit.new()
+	_model_search_edit.placeholder_text = "Search model..."
+	_model_search_edit.clear_button_enabled = true
+	var theme := EditorInterface.get_editor_theme()
+	if theme != null and theme.has_icon("Search", "EditorIcons"):
+		_model_search_edit.right_icon = theme.get_icon("Search", "EditorIcons")
+	_model_search_edit.text_changed.connect(_on_model_search_text_changed)
+	_model_search_edit.gui_input.connect(_on_model_search_gui_input)
+	vbox.add_child(_model_search_edit)
+
+	_model_item_list = ItemList.new()
+	_model_item_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_model_item_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_model_item_list.allow_reselect = true
+	_model_item_list.item_clicked.connect(_on_model_item_clicked)
+	_model_item_list.item_activated.connect(_on_model_item_activated)
+	_model_item_list.gui_input.connect(_on_model_list_gui_input)
+	vbox.add_child(_model_item_list)
+
+
+## Open the searchable model picker popup anchored beneath the model button.
+func _open_model_picker_popup() -> void:
+	if _model_select.disabled:
+		return
+	if is_instance_valid(_model_picker_popup) and _model_picker_popup.visible:
+		_model_picker_popup.hide()
+		return
+	_ensure_model_picker_popup()
+	_model_search_edit.text = ""
+	_filter_model_picker_list("")
+
+	var btn_pos := Vector2i(_model_select.get_screen_position())
+	var btn_size := Vector2i(_model_select.size)
+	var popup_w := maxi(btn_size.x, 380)
+	var popup_h := 320
+	var popup_rect := Rect2i(btn_pos.x, btn_pos.y + btn_size.y, popup_w, popup_h)
+
+	_model_picker_popup.popup(popup_rect)
+	_model_search_edit.call_deferred("grab_focus")
+
+
+## Filter models by label and qualified id in real-time.
+func _filter_model_picker_list(filter_text: String) -> void:
+	if not is_instance_valid(_model_item_list):
+		return
+	_model_item_list.clear()
+	_filtered_models.clear()
+
+	var filter_lower := filter_text.strip_edges().to_lower()
+	var favorites := GDLLMFavorites.get_list()
+	var star_icon := _favorite_icon()
+	var selected_idx := -1
+
+	for qid in _available_models_cache:
+		var label := GDLLMSources.label_for(qid)
+		if not filter_lower.is_empty():
+			if not label.to_lower().contains(filter_lower) and not qid.to_lower().contains(filter_lower):
+				continue
+		_filtered_models.append(qid)
+		var is_fav := favorites.has(qid)
+		var idx: int
+		if is_fav:
+			if star_icon != null:
+				idx = _model_item_list.add_item(label, star_icon)
+			else:
+				idx = _model_item_list.add_item("★ " + label)
+		else:
+			idx = _model_item_list.add_item(label)
+		_model_item_list.set_item_metadata(idx, qid)
+		_model_item_list.set_item_tooltip(idx, qid)
+		if qid == _qualified_model:
+			selected_idx = idx
+
+	if selected_idx != -1:
+		_model_item_list.select(selected_idx)
+		_model_item_list.ensure_current_is_visible()
+	elif not filter_lower.is_empty() and _model_item_list.item_count > 0:
+		_model_item_list.select(0)
+		_model_item_list.ensure_current_is_visible()
+
+
+## LineEdit text changed: re-filter the list.
+func _on_model_search_text_changed(new_text: String) -> void:
+	_filter_model_picker_list(new_text)
+
+
+## LineEdit keyboard navigation: Up/Down arrow selection, Enter validation, Escape close.
+func _on_model_search_gui_input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.is_pressed() and not event.is_echo()):
+		return
+	var key_event := event as InputEventKey
+	match key_event.keycode:
+		KEY_DOWN:
+			if _model_item_list.item_count > 0:
+				var current_selected := _model_item_list.get_selected_items()
+				var next_idx := 0
+				if not current_selected.is_empty():
+					next_idx = mini(current_selected[0] + 1, _model_item_list.item_count - 1)
+				_model_item_list.select(next_idx)
+				_model_item_list.ensure_current_is_visible()
+				_model_search_edit.accept_event()
+		KEY_UP:
+			if _model_item_list.item_count > 0:
+				var current_selected := _model_item_list.get_selected_items()
+				var prev_idx := 0
+				if not current_selected.is_empty():
+					prev_idx = maxi(current_selected[0] - 1, 0)
+				_model_item_list.select(prev_idx)
+				_model_item_list.ensure_current_is_visible()
+				_model_search_edit.accept_event()
+		KEY_ENTER, KEY_KP_ENTER:
+			var current_selected := _model_item_list.get_selected_items()
+			if not current_selected.is_empty():
+				_select_model_from_picker(current_selected[0])
+			elif _model_item_list.item_count > 0:
+				_select_model_from_picker(0)
+			_model_search_edit.accept_event()
+		KEY_ESCAPE:
+			_model_picker_popup.hide()
+			_model_search_edit.accept_event()
+
+
+## ItemList keyboard events: Escape close.
+func _on_model_list_gui_input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.is_pressed() and not event.is_echo()):
+		return
+	var key_event := event as InputEventKey
+	if key_event.keycode == KEY_ESCAPE:
+		_model_picker_popup.hide()
+		_model_item_list.accept_event()
+
+
+## Item clicked with left mouse button: select and close.
+func _on_model_item_clicked(index: int, _at_position: Vector2, mouse_button_index: int) -> void:
+	if mouse_button_index == MOUSE_BUTTON_LEFT:
+		_select_model_from_picker(index)
+
+
+## Item activated (double click or Enter on list): select and close.
+func _on_model_item_activated(index: int) -> void:
+	_select_model_from_picker(index)
+
+
+## Select model from the filtered picker results and close the popup.
+func _select_model_from_picker(index: int) -> void:
+	if is_instance_valid(_model_picker_popup):
+		_model_picker_popup.hide()
+	if index < 0 or index >= _filtered_models.size():
+		return
+	var model := _filtered_models[index]
+	_select_model(model)
+
+
+## Apply a model selection, update session state, emit signal, and record change row.
+func _select_model(model: String) -> void:
+	if model == _qualified_model:
+		return
+	_apply_qualified_model(model, true)
+	model_changed.emit(session_id, model)
+	_add_model_change_row(model)
+	# A round-trip back to the model that made the last message means every swap since then led nowhere, so fold them all into one "cleared" note. A new session with no response yet clears on send instead (see _on_send_pressed).
+	if _has_prior_response() and model == _last_message_model():
+		_collapse_model_change_rows()
 
 
 ## The editor's star icon marking a favorite in the picker, or null when the theme lacks it (the caller falls back to a text star).
@@ -3478,19 +3658,6 @@ func _clear_generating_header() -> void:
 	if _generating_header != null:
 		_generating_header.queue_free()
 		_generating_header = null
-
-
-func _on_model_selected(index: int) -> void:
-	var model := String(_model_select.get_item_metadata(index)) # the qualified "source::model" id, not the friendly label
-	# Re-picking the current model isn't a change — no log row, no re-broadcast.
-	if model == _qualified_model:
-		return
-	_apply_qualified_model(model, true)
-	model_changed.emit(session_id, model)
-	_add_model_change_row(model)
-	# A round-trip back to the model that made the last message means every swap since then led nowhere, so fold them all into one "cleared" note. A new session with no response yet clears on send instead (see _on_send_pressed).
-	if _has_prior_response() and model == _last_message_model():
-		_collapse_model_change_rows()
 
 
 ## Log a "Changed model to X" row in the user-action blue. Pending rows (track) stack until a response lands and makes them permanent, or a collapse clears them; replayed markers (track=false) are reconstructed from history and are already permanent.
