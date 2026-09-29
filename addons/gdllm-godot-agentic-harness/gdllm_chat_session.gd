@@ -396,7 +396,6 @@ func _build_ui() -> void:
 	# A long model name must never set this row's minimum width: the row's minimum is the dock's, and a dock too wide for its slot sends the editor's dock layout into an unconverging relayout loop that hangs the whole editor at boot (100% CPU in text-server errors). Clip instead — the popup still shows full names.
 	_model_select.clip_text = true
 	_model_select.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_model_select.tooltip_text = "Model used for this chat, across every configured source. Click to search and select. Edit sources with the ⚙ button."
 	_model_select.pressed.connect(_open_model_picker_popup)
 	_model_select.draw.connect(_on_model_select_draw)
 	model_row.add_child(_model_select)
@@ -1623,14 +1622,15 @@ func _seed_model_picker(model: String) -> void:
 	_update_model_select_button()
 
 
-## Update the model button's text, icon, and tooltip to reflect the current qualified model and favorite status.
+## Update the model button's text, icon, and tooltip to reflect the current qualified model and favorite status. The tooltip leads with the exact qualified id, which the clipped friendly label can't show.
 func _update_model_select_button() -> void:
 	if not is_instance_valid(_model_select):
 		return
+	var hint := "Model used for this chat, across every configured source. Click to search and switch models. Edit sources with the ⚙ button."
 	if _qualified_model == "":
 		_model_select.text = "Select model..."
 		_model_select.icon = null
-		_model_select.tooltip_text = "Model used for this chat. Click to search and select."
+		_model_select.tooltip_text = hint
 		return
 	var label := GDLLMSources.label_for(_qualified_model)
 	var favorites := GDLLMFavorites.get_list()
@@ -1645,7 +1645,7 @@ func _update_model_select_button() -> void:
 	else:
 		_model_select.icon = null
 		_model_select.text = label
-	_model_select.tooltip_text = "Current model: %s\nClick to search and change model." % _qualified_model
+	_model_select.tooltip_text = "Current model: %s\n%s" % [_qualified_model, hint]
 
 
 ## Dress the model button in the OptionButton's styleboxes so it matches the effort picker beside it, each widened on the right by the theme arrow's width (the room an OptionButton reserves internally) so clipped text ends before the arrow instead of under it. The type is named explicitly because a theme_type_variation of "OptionButton" is ignored unless the theme declares it as a variation.
