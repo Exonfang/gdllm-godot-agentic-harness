@@ -393,11 +393,14 @@ func _build_ui() -> void:
 	_model_select = Button.new()
 	_model_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_model_select.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	# A long model name must never set this row's minimum width: the row's minimum is the dock's, and a dock too wide for its slot sends the editor's dock layout into an unconverging relayout loop that hangs the whole editor at boot (100% CPU in text-server errors). Clip instead — the popup still shows full names.
 	_model_select.clip_text = true
 	_model_select.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_model_select.tooltip_text = "Model used for this chat, across every configured source. Click to search and select. Edit sources with the ⚙ button."
 	_model_select.pressed.connect(_open_model_picker_popup)
+	_model_select.draw.connect(_on_model_select_draw)
 	model_row.add_child(_model_select)
+	_reserve_model_arrow_space()
 	_update_model_select_button()
 
 	_effort_select = OptionButton.new()
@@ -1625,7 +1628,7 @@ func _update_model_select_button() -> void:
 	if not is_instance_valid(_model_select):
 		return
 	if _qualified_model == "":
-		_model_select.text = "Select model... ▾"
+		_model_select.text = "Select model..."
 		_model_select.icon = null
 		_model_select.tooltip_text = "Model used for this chat. Click to search and select."
 		return
@@ -1635,14 +1638,46 @@ func _update_model_select_button() -> void:
 		var star := _favorite_icon()
 		if star != null:
 			_model_select.icon = star
-			_model_select.text = label + " ▾"
+			_model_select.text = label
 		else:
 			_model_select.icon = null
-			_model_select.text = "★ " + label + " ▾"
+			_model_select.text = "★ " + label
 	else:
 		_model_select.icon = null
-		_model_select.text = label + " ▾"
+		_model_select.text = label
 	_model_select.tooltip_text = "Current model: %s\nClick to search and change model." % _qualified_model
+
+
+## Dress the model button in the OptionButton's styleboxes so it matches the effort picker beside it, each widened on the right by the theme arrow's width (the room an OptionButton reserves internally) so clipped text ends before the arrow instead of under it. The type is named explicitly because a theme_type_variation of "OptionButton" is ignored unless the theme declares it as a variation.
+func _reserve_model_arrow_space() -> void:
+	if not _model_select.has_theme_icon("arrow", "OptionButton"):
+		return
+	var arrow_width := _model_select.get_theme_icon("arrow", "OptionButton").get_width()
+	for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
+		var style := _model_select.get_theme_stylebox(state, "OptionButton").duplicate() as StyleBox
+		style.content_margin_right = style.get_margin(SIDE_RIGHT) + arrow_width
+		_model_select.add_theme_stylebox_override(state, style)
+
+
+## Draw the theme's OptionButton arrow at the model button's trailing edge, placed and tinted per button state the way OptionButton draws its own; a plain Button has no arrow of its own.
+func _on_model_select_draw() -> void:
+	if not _model_select.has_theme_icon("arrow", "OptionButton"):
+		return
+	var arrow := _model_select.get_theme_icon("arrow", "OptionButton")
+	var tint := Color.WHITE
+	if _model_select.get_theme_constant("modulate_arrow", "OptionButton") != 0:
+		var color_name := "font_focus_color" if _model_select.has_focus() else "font_color"
+		match _model_select.get_draw_mode():
+			BaseButton.DRAW_PRESSED:
+				color_name = "font_pressed_color"
+			BaseButton.DRAW_HOVER, BaseButton.DRAW_HOVER_PRESSED:
+				color_name = "font_hover_color"
+			BaseButton.DRAW_DISABLED:
+				color_name = "font_disabled_color"
+		tint = _model_select.get_theme_color(color_name, "OptionButton")
+	var margin := _model_select.get_theme_constant("arrow_margin", "OptionButton")
+	var at := Vector2(_model_select.size.x - arrow.get_width() - margin, floorf(absf(_model_select.size.y - arrow.get_height()) / 2.0))
+	_model_select.draw_texture(arrow, at, tint)
 
 
 ## Build the searchable popup panel lazily on first open.
