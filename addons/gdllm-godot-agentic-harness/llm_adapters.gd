@@ -3,12 +3,12 @@ class_name LLMAdapter extends RefCounted
 ## Translates between the plugin's canonical (Ollama-native) message/tool shape and one provider's wire format.
 ## LLMClient owns the transport (socket, HTTP state machine); an adapter only says which path to hit, how to build a request body, and how to turn a streamed line back into canonical events.
 ## A fresh instance is built per request so a stateful format (OpenAI's tool-call argument fragments) can accumulate across lines.
-## Subclasses: OllamaAdapter (near-identity — the canonical shape already IS Ollama's), OpenAIAdapter, OpenAIResponsesAdapter (OpenAI's newer /v1/responses format, which its GPT-5.6-class models require for reasoning effort with tools), and AnthropicAdapter (translate at both edges).
+## Subclasses: OllamaAdapter (near-identity — the canonical shape already IS Ollama's), OpenAIAdapter, OpenAIResponsesAdapter (OpenAI's newer /v1/responses format, which its GPT-5.6-class models require for reasoning effort with tools), AnthropicAdapter and GeminiAdapter (translate at both edges).
 ##
 ## Canonical stream events an adapter emits from parse_line, folded straight onto LLMClient's state: {type:"thinking", text}, {type:"content", text}, {type:"tool_calls", calls}, {type:"done", stats, stop}, {type:"error", message} — plus {type:"progress"}, a no-op for a recognized frame with nothing streamable yet, so the client's wire-format guard knows the reply parses before the first visible delta (a Responses reasoning turn can stream nothing user-visible for minutes).
 ## A done event's `stop` is the provider's end-of-turn reason canonicalized by _canonical_stop: "" for a normal finish, "length" for the output-token cap, anything else verbatim — so a reply the provider itself cut short is never presented as finished (see LLMClient._stream_final_stats).
 ## A canonical tool call is {"function": {name, arguments: Dictionary}} — exactly what GDLLMTools.tool_call_name/args/sanitize_tool_calls consume.
-## An adapter whose provider must see its own turn echoed verbatim to continue a tool loop (Anthropic, the OpenAI Responses API) additionally emits {type:"assistant_blocks", blocks} ahead of the tool calls; LLMClient holds the blocks for the caller to store beside the turn (see LLMClient.last_assistant_blocks).
+## An adapter whose provider must see its own turn echoed verbatim to continue a tool loop (Anthropic, the OpenAI Responses API, and Chat Completions servers that attach state to a tool call — Gemini's thought signatures) additionally emits {type:"assistant_blocks", blocks} ahead of the tool calls; LLMClient holds the blocks for the caller to store beside the turn (see LLMClient.last_assistant_blocks).
 
 
 ## Build the adapter for a source `kind` (see GDLLMSources.KIND_*). Unknown kinds fall back to Ollama.
@@ -21,6 +21,8 @@ static func for_kind(kind: String) -> LLMAdapter:
 		return OpenAIChatGPTAdapter.new()
 	if kind == GDLLMSources.KIND_ANTHROPIC:
 		return AnthropicAdapter.new()
+	if kind == GDLLMSources.KIND_GEMINI:
+		return GeminiAdapter.new()
 	return OllamaAdapter.new()
 
 
@@ -300,7 +302,8 @@ class OllamaAdapter extends LLMAdapter:
 ## Translates the canonical message/tool shape to OpenAI's on send, and reassembles OpenAI's streamed deltas (content, reasoning, and tool-call argument fragments) back into canonical events on receive.
 ## Paths here omit the /v1 prefix because an OpenAI-compatible base_url carries it (e.g. .../inference.poolside.ai/v1); re-adding it would double the segment and 404.
 class OpenAIAdapter extends LLMAdapter:
-	var _tool_calls: Array = [] ## Tool calls under construction, one slot per stream `index`: {id, name, args}.
+	var _tool_calls: Array = [] ## Tool calls under construction, in arrival order: {id, name, args, extra}.
+	var _slot_for_index: Dictionary = {} ## Stream `index` → the _tool_calls position of the call currently open under it (see _accumulate_tool_calls).
 	var _usage: Dictionary = {} ## The `usage` block from the final chunk (stream_options.include_usage).
 	var _finish_reason: String = "" ## The finish_reason value that ended the turn; canonicalized onto the done event's `stop` ("length" = the token cap) so a capped reply is disclosed, not shown as finished.
 	var _finished: bool = false ## Guards _finish_events so finish_reason and a trailing [DONE] don't double-emit.
@@ -433,26 +436,29 @@ class OpenAIAdapter extends LLMAdapter:
 				events.append_array(_finish_events())
 		return events
 
-	## Translate canonical (Ollama-shaped) history to OpenAI's: assistant tool-call turns get string-encoded arguments and synthesized call ids, and each following tool result is bound to its call id by order.
+	## Translate canonical (Ollama-shaped) history to OpenAI's: assistant tool-call turns get string-encoded arguments and synthesized call ids, and each following tool result is bound to its call id by order. Inside the trailing tool loop (everything after the last user message), a turn whose provider stored its raw tool calls (see _raw_tool_calls) replays them verbatim instead, because Gemini validates the thought signature riding on each call to continue the loop; earlier turns rebuild, so past signatures aren't re-sent (goal 1).
 	func _translate_messages(messages: Array) -> Array:
 		var out: Array = []
 		var pending_ids: Array = [] # ids of the last assistant turn's calls, awaiting their tool results in order
 		var counter := 0
-		for msg in messages:
+		var last_user := _last_user_index(messages)
+		for i in messages.size():
+			var msg: Variant = messages[i]
 			if not (msg is Dictionary):
 				continue
 			var role := String(msg.get("role", ""))
 			if role == "assistant" and msg.get("tool_calls") is Array and not msg["tool_calls"].is_empty():
-				var calls: Array = []
 				pending_ids = []
-				for tc in msg["tool_calls"]:
-					var id := "call_%d" % counter
-					counter += 1
-					pending_ids.append(id)
-					var fn: Dictionary = tc.get("function", {}) if tc is Dictionary else {}
-					var raw_args: Variant = fn.get("arguments", {})
-					var args_str: String = raw_args if raw_args is String else JSON.stringify(raw_args)
-					calls.append({"id": id, "type": "function", "function": {"name": String(fn.get("name", "")), "arguments": args_str}})
+				var calls: Array = _echoed_tool_calls(msg, pending_ids, i) if i > last_user else []
+				if calls.is_empty():
+					for tc in msg["tool_calls"]:
+						var id := "call_%d" % counter
+						counter += 1
+						pending_ids.append(id)
+						var fn: Dictionary = tc.get("function", {}) if tc is Dictionary else {}
+						var raw_args: Variant = fn.get("arguments", {})
+						var args_str: String = raw_args if raw_args is String else JSON.stringify(raw_args)
+						calls.append({"id": id, "type": "function", "function": {"name": String(fn.get("name", "")), "arguments": args_str}})
 				var assistant_msg := {"role": "assistant", "tool_calls": calls}
 				var preamble := String(msg.get("content", ""))
 				if preamble != "":
@@ -465,17 +471,38 @@ class OpenAIAdapter extends LLMAdapter:
 				out.append({"role": role, "content": String(msg.get("content", ""))})
 		return out
 
+	## The stored raw tool calls of one assistant turn, ready to resend, with their ids appended to `pending_ids`; empty when the turn must rebuild instead. Blocks that aren't one OpenAI tool call per canonical call were recorded under another kind (Anthropic's tool_use blocks, the Responses API's items, after a mid-loop Kind switch) and would 400 here.
+	func _echoed_tool_calls(msg: Dictionary, pending_ids: Array, turn_index: int) -> Array:
+		var raw: Variant = msg.get("assistant_blocks")
+		if not (raw is Array) or raw.size() != msg["tool_calls"].size():
+			return []
+		for block in raw:
+			if not (block is Dictionary) or String(block.get("type", "")) != "function" or not (block.get("function") is Dictionary):
+				return []
+		var calls: Array = []
+		for n in raw.size():
+			var call: Dictionary = raw[n].duplicate(true)
+			if _text(call.get("id")) == "":
+				call["id"] = "call_echo_%d_%d" % [turn_index, n]
+			pending_ids.append(_text(call["id"]))
+			calls.append(call)
+		return calls
+
 	## Fold this chunk's tool-call deltas into _tool_calls: name arrives once, arguments stream as string fragments concatenated by `index`.
 	func _accumulate_tool_calls(deltas: Array) -> void:
 		for d in deltas:
 			if not (d is Dictionary):
 				continue
 			var idx := int(d.get("index", 0))
-			while _tool_calls.size() <= idx:
-				_tool_calls.append({"id": "", "name": "", "args": ""})
-			var slot: Dictionary = _tool_calls[idx]
-			# Only the opening delta of a call carries id/name; continuation deltas send null for both, so keep the first non-empty and never overwrite it back to blank.
 			var id_text := _text(d.get("id"))
+			# A delta opens a new call when its index is new, or when it names an id other than the call already open there — Gemini streams each parallel call whole under the same index, and folding them together would join their argument strings into unparseable JSON.
+			var pos: int = _slot_for_index.get(idx, -1)
+			if pos == -1 or (id_text != "" and _text(_tool_calls[pos]["id"]) not in ["", id_text]):
+				_tool_calls.append({"id": "", "name": "", "args": "", "extra": {}})
+				pos = _tool_calls.size() - 1
+				_slot_for_index[idx] = pos
+			var slot: Dictionary = _tool_calls[pos]
+			# Only the opening delta of a call carries id/name; continuation deltas send null for both, so keep the first non-empty and never overwrite it back to blank.
 			if id_text != "":
 				slot["id"] = id_text
 			if d.get("function") is Dictionary:
@@ -485,6 +512,15 @@ class OpenAIAdapter extends LLMAdapter:
 					slot["name"] = name_text
 				if fn.has("arguments"):
 					slot["args"] += _text(fn.get("arguments"))
+			# Any other field is provider state the call must carry back verbatim — Gemini's thought signature arrives as extra_content.google.thought_signature — so it is kept whole, whatever the provider names it.
+			var extra: Dictionary = slot["extra"]
+			for key in d:
+				if key in ["index", "id", "type", "function"] or d[key] == null:
+					continue
+				if extra.get(key) is Dictionary and d[key] is Dictionary:
+					extra[key].merge(d[key])
+				elif not extra.has(key):
+					extra[key] = d[key]
 
 	## The terminal events for the stream: the assembled tool calls (if any) then done+stats, emitted at most once.
 	func _finish_events() -> Array:
@@ -493,6 +529,9 @@ class OpenAIAdapter extends LLMAdapter:
 		_finished = true
 		var events: Array = []
 		if not _tool_calls.is_empty():
+			# Raw calls ride ahead of the canonical ones so LLMClient holds them before the tool_calls signal fires (see last_assistant_blocks); only when a call carried provider state, so every other server's history stays as before.
+			if _tool_calls.any(func(slot: Dictionary) -> bool: return not slot["extra"].is_empty()):
+				events.append({"type": "assistant_blocks", "blocks": _raw_tool_calls()})
 			events.append({"type": "tool_calls", "calls": _assembled_tool_calls()})
 		# "stop"/"tool_calls" (and legacy "function_call") are the normal ends; "length" (the token cap) and "content_filter" mean the reply was cut short.
 		events.append({"type": "done", "stats": _stats_from(_usage), "stop": _canonical_stop(_finish_reason, PackedStringArray(["stop", "tool_calls", "function_call"]))})
@@ -507,6 +546,15 @@ class OpenAIAdapter extends LLMAdapter:
 			var parsed: Variant = JSON.parse_string(args_text) if args_text != "" else {}
 			var args: Dictionary = parsed if parsed is Dictionary else {}
 			out.append({"function": {"name": _text(slot["name"]), "arguments": args}})
+		return out
+
+	## The accumulated calls in OpenAI's own wire shape, provider fields included, as _echoed_tool_calls resends them.
+	func _raw_tool_calls() -> Array:
+		var out: Array = []
+		for slot in _tool_calls:
+			var call: Dictionary = slot["extra"].duplicate(true)
+			call.merge({"id": _text(slot["id"]), "type": "function", "function": {"name": _text(slot["name"]), "arguments": _text(slot["args"])}}, true)
+			out.append(call)
 		return out
 
 	## OpenAI usage mapped onto the plugin's stat keys; it reports no durations, so those stay 0. Static so the non-streamed completion path maps its body's usage through the same rule.
@@ -1143,3 +1191,271 @@ class AnthropicAdapter extends LLMAdapter:
 			"eval_duration": 0,
 			"total_duration": 0,
 		}
+
+
+## Google Gemini API, native: /v1beta/models/{model}:streamGenerateContent?alt=sse, /v1beta/models. Authenticated with an AI Studio API key; the alternative to pointing the Chat Completions kind at Google's /v1beta/openai endpoint.
+## Translates at both edges: canonical history becomes `contents` (role "model" for the assistant, tool results as functionResponse parts merged into one user turn, since the API rejects two turns in a row from the same role), the system prompt rides as systemInstruction, and tools as functionDeclarations carrying their JSON Schema as-is. A tool-call turn's raw model parts — thought signatures included — are handed back via the assistant_blocks event and replayed verbatim inside the trailing loop, because Gemini validates the signatures to continue a tool loop; earlier turns rebuild from text and calls (goal 1).
+class GeminiAdapter extends LLMAdapter:
+	const PLUGIN_CFG := "res://addons/gdllm-godot-agentic-harness/plugin.cfg" ## Read for the version this harness reports itself as (see client_header).
+	static var _client_header: String = "" ## The x-goog-api-client value, built once (see client_header).
+	var _model: String = "" ## The model build_chat_body was called for; the API names it in the URL, which chat_path reads after the body is built.
+	var _parts: Array = [] ## The model turn's raw parts as streamed, adjacent text pieces joined, for the assistant_blocks echo.
+	var _calls: Array = [] ## Canonical tool calls collected from functionCall parts; each arrives whole.
+	var _usage: Dictionary = {} ## The latest usageMetadata; every chunk carries running totals.
+	var _finished: bool = false ## Guards the terminal events so a trailing frame can't double-emit.
+
+	func chat_path() -> String:
+		return "/models/%s:streamGenerateContent?alt=sse" % model_id(_model)
+
+	## The model id as the API's path wants it — the list hands out "models/…" names, which the picker shows without the prefix.
+	static func model_id(model: String) -> String:
+		return model.trim_prefix("models/")
+
+	## AI Studio keys ride x-goog-api-key, never the URL; the client header names this harness to Google so its traffic is attributed to GDLLM.
+	func auth_headers(api_key: String) -> PackedStringArray:
+		var headers := PackedStringArray(["x-goog-api-client: " + client_header()])
+		if api_key.strip_edges() != "":
+			headers.append("x-goog-api-key: " + api_key.strip_edges())
+		return headers
+
+	## "gdllm/<plugin version>", or bare "gdllm" when plugin.cfg can't be read.
+	static func client_header() -> String:
+		if _client_header == "":
+			var cfg := ConfigFile.new()
+			var version := String(cfg.get_value("plugin", "version", "")) if cfg.load(PLUGIN_CFG) == OK else ""
+			_client_header = "gdllm/" + version if version != "" else "gdllm"
+		return _client_header
+
+	func build_chat_body(model: String, messages: Array, tools: Array, effort: String = "", _cache_ttl: int = 0) -> Dictionary:
+		_model = model
+		var body := {"contents": _translate_messages(messages, not tools.is_empty())}
+		var system := _system_text(messages)
+		if system != "":
+			body["systemInstruction"] = {"parts": [{"text": system}]}
+		if not tools.is_empty():
+			body["tools"] = [{"functionDeclarations": _translate_tools(tools)}]
+		# includeThoughts asks for the reasoning summary so the thinking shows in the log (goal 2). "none" is a zero budget — the only off switch, which models that can't stop thinking reject by name; any other level is a thinkingLevel, gated per model by the user's level config (see GDLLMEfforts).
+		var thinking := {"includeThoughts": true}
+		if effort == "none":
+			thinking = {"thinkingBudget": 0}
+		elif effort != "":
+			thinking["thinkingLevel"] = effort
+		body["generationConfig"] = {"thinkingConfig": thinking}
+		return body
+
+	## OpenAI-envelope tool schemas as Gemini function declarations. parametersJsonSchema takes the schema as written; the older `parameters` field accepts only an OpenAPI subset and rejects keywords the plugin's schemas use.
+	static func _translate_tools(tools: Array) -> Array:
+		var out: Array = []
+		for tool in tools:
+			var fn: Dictionary = tool.get("function", {}) if tool is Dictionary else {}
+			var decl := {"name": _text(fn.get("name")), "description": _text(fn.get("description"))}
+			if fn.get("parameters") is Dictionary:
+				decl["parametersJsonSchema"] = fn["parameters"]
+			out.append(decl)
+		return out
+
+	## Canonical history as Gemini contents. With `allow_tool_parts` false — a tool-less request such as the loop-brake reflection or a subagent's forced final answer — the API rejects functionCall/functionResponse parts it has no declarations for, so the loop's turns flatten to plain text the model can still read.
+	func _translate_messages(messages: Array, allow_tool_parts: bool) -> Array:
+		var last_user := _last_user_index(messages)
+		var out: Array = []
+		var pending: Array = [] # the last model turn's calls as {name, id}, awaiting their results in order
+		for i in messages.size():
+			var msg: Variant = messages[i]
+			if not (msg is Dictionary):
+				continue
+			var role := String(msg.get("role", ""))
+			if role == "system":
+				continue # lifted to systemInstruction by build_chat_body
+			if role == "tool":
+				if allow_tool_parts:
+					_push(out, "user", [_function_response(msg, pending.pop_front() if not pending.is_empty() else {})])
+				else:
+					_push(out, "user", [{"text": _flatten_tool_result_text(msg)}])
+			elif role == "assistant" and msg.get("tool_calls") is Array and not msg["tool_calls"].is_empty():
+				if allow_tool_parts:
+					pending = []
+					_push(out, "model", _model_call_parts(msg, i > last_user, pending))
+				else:
+					_push(out, "model", [{"text": _flatten_call_text(msg)}])
+			else:
+				var text := _text(msg.get("content"))
+				# The API rejects an empty text part, and history can hold a blank assistant echo.
+				_push(out, "model" if role == "assistant" else "user", [{"text": text if text.strip_edges() != "" else "(empty)"}])
+		return out
+
+	## Append `parts` as a `role` turn, folding them into the previous turn when it has the same role — the API requires turns to alternate, and parallel tool results land as consecutive tool messages.
+	static func _push(out: Array, role: String, parts: Array) -> void:
+		if not out.is_empty() and String(out[-1]["role"]) == role:
+			out[-1]["parts"].append_array(parts)
+		else:
+			out.append({"role": role, "parts": parts})
+
+	## The parts for one model tool-call turn. Inside the trailing loop (`use_raw`), the stored raw parts replay verbatim, signatures intact; otherwise the turn rebuilds from its text and calls. Stored blocks whose functionCall count doesn't match the turn were recorded under another kind (Anthropic's blocks, OpenAI tool calls, after a mid-loop Kind switch) and fall through to the rebuild. `pending` receives each call's {name, id} so the results that follow bind to them.
+	func _model_call_parts(msg: Dictionary, use_raw: bool, pending: Array) -> Array:
+		var raw: Variant = msg.get("assistant_blocks")
+		if use_raw and raw is Array:
+			var calls: Array = raw.filter(func(p: Variant) -> bool: return p is Dictionary and p.get("functionCall") is Dictionary)
+			if not calls.is_empty() and calls.size() == msg["tool_calls"].size():
+				for part in calls:
+					pending.append({"name": _text(part["functionCall"].get("name")), "id": _text(part["functionCall"].get("id"))})
+				return raw.duplicate(true)
+		var parts: Array = []
+		var text := _text(msg.get("content"))
+		if text.strip_edges() != "":
+			parts.append({"text": text})
+		for tc in msg["tool_calls"]:
+			var fn: Dictionary = tc["function"] if tc is Dictionary and tc.get("function") is Dictionary else {}
+			var args: Variant = fn.get("arguments", {})
+			parts.append({"functionCall": {"name": _text(fn.get("name")), "args": args if args is Dictionary else {}}})
+			pending.append({"name": _text(fn.get("name")), "id": ""})
+		return parts
+
+	## One tool result as a functionResponse part, bound to its call by name (and id, when the model gave one). The result text rides unparsed under "output" — the API wants an object, and re-encoding a tool's JSON text would change what the model sees from what the log shows.
+	static func _function_response(msg: Dictionary, call: Dictionary) -> Dictionary:
+		var name := _text(call.get("name"))
+		if name == "":
+			name = _text(msg.get("tool_name"))
+		var text := _text(msg.get("content"))
+		var response := {"name": name, "response": {"output": text if text.strip_edges() != "" else "(no output)"}}
+		if _text(call.get("id")) != "":
+			response["id"] = call["id"]
+		return {"functionResponse": response}
+
+	func parse_line(line: String) -> Array:
+		var trimmed := line.strip_edges()
+		# SSE frames are bare "data: {json}" lines; the stream ends when the connection closes, with finishReason on the last candidate.
+		if not trimmed.begins_with("data:"):
+			return []
+		var json := JSON.new()
+		if json.parse(trimmed.substr(5).strip_edges()) != OK:
+			return []
+		var data: Variant = json.get_data()
+		# A mid-stream failure arrives as an error object, sometimes wrapped in a one-item list.
+		if data is Array and data.size() == 1:
+			data = data[0]
+		if not (data is Dictionary):
+			return []
+		if data.get("error") is Dictionary:
+			var err: Dictionary = data["error"]
+			return [{"type": "error", "message": _prefixed_error(_text(err.get("status")), _text(err.get("message")), trimmed)}]
+		if data.get("usageMetadata") is Dictionary:
+			_usage = data["usageMetadata"]
+		var candidates: Variant = data.get("candidates")
+		if not (candidates is Array) or candidates.is_empty():
+			# No candidate at all means the prompt itself was blocked; the reason is the only explanation the API gives.
+			var feedback: Variant = data.get("promptFeedback")
+			if feedback is Dictionary and _text(feedback.get("blockReason")) != "":
+				return [{"type": "error", "message": "Gemini blocked the prompt (%s) and returned no reply — rephrase the request, or check the safety ratings in the raw response." % _text(feedback["blockReason"])}]
+			return [{"type": "progress"}]
+		var candidate: Dictionary = candidates[0] if candidates[0] is Dictionary else {}
+		var events: Array = []
+		var content: Variant = candidate.get("content")
+		if content is Dictionary and content.get("parts") is Array:
+			for part in content["parts"]:
+				if part is Dictionary:
+					events.append_array(_part_events(part))
+		var finish := _text(candidate.get("finishReason"))
+		if finish != "":
+			events.append_array(_finish_events(finish))
+		elif events.is_empty():
+			events.append({"type": "progress"})
+		return events
+
+	## The canonical events for one streamed part, recording it for the echo.
+	func _part_events(part: Dictionary) -> Array:
+		_record(part)
+		if part.get("functionCall") is Dictionary:
+			var call: Dictionary = part["functionCall"]
+			_calls.append({"function": {"name": _text(call.get("name")), "arguments": call["args"] if call.get("args") is Dictionary else {}}})
+			return []
+		var text := _text(part.get("text"))
+		if text == "":
+			return []
+		return [{"type": "thinking" if bool(part.get("thought", false)) else "content", "text": text}]
+
+	## Keep one streamed part for the echo, joining a text piece onto the previous part when both are the same kind of text and the earlier one carries no signature — a turn can stream in hundreds of pieces, and the signature that closes a run must stay on the run it closes.
+	func _record(part: Dictionary) -> void:
+		if not _parts.is_empty() and part.has("text") and not part.has("functionCall"):
+			var last: Dictionary = _parts[-1]
+			if last.has("text") and not last.has("thoughtSignature") and bool(last.get("thought", false)) == bool(part.get("thought", false)):
+				last["text"] = _text(last["text"]) + _text(part["text"])
+				if part.has("thoughtSignature"):
+					last["thoughtSignature"] = part["thoughtSignature"]
+				return
+		_parts.append(part.duplicate(true))
+
+	## The terminal events: the raw parts and tool calls (if any), then done+stats, emitted at most once.
+	func _finish_events(reason: String) -> Array:
+		if _finished:
+			return []
+		_finished = true
+		var events: Array = []
+		if not _calls.is_empty():
+			# The raw parts ride ahead of the calls so LLMClient holds them before the tool_calls signal fires (see last_assistant_blocks).
+			events.append({"type": "assistant_blocks", "blocks": _parts})
+			events.append({"type": "tool_calls", "calls": _calls})
+		# MAX_TOKENS is the output cap under this API's spelling; anything else past STOP (SAFETY, MALFORMED_FUNCTION_CALL, …) is disclosed verbatim.
+		var stop := "length" if reason == "MAX_TOKENS" else _canonical_stop(reason, PackedStringArray(["STOP"]))
+		events.append({"type": "done", "stats": _stats_from(_usage), "stop": stop})
+		return events
+
+	## Gemini usage on the plugin's stat keys. candidatesTokenCount leaves out the thinking, which is billed as output all the same.
+	static func _stats_from(usage: Dictionary) -> Dictionary:
+		return {
+			"tokens_in": int(usage.get("promptTokenCount", 0)),
+			"tokens_out": int(usage.get("candidatesTokenCount", 0)) + int(usage.get("thoughtsTokenCount", 0)),
+			"prompt_eval_duration": 0,
+			"eval_duration": 0,
+			"total_duration": 0,
+		}
+
+	func models_path() -> String:
+		return "/models?pageSize=1000"
+
+	## Models that can chat (generateContent), shown without the "models/" prefix; embedding and other models are left out.
+	func parse_models(data: Variant) -> PackedStringArray:
+		var names := PackedStringArray()
+		if data is Dictionary and data.get("models") is Array:
+			for entry in data["models"]:
+				if entry is Dictionary and entry.get("supportedGenerationMethods") is Array and "generateContent" in entry["supportedGenerationMethods"]:
+					names.append(model_id(_text(entry.get("name"))))
+		return names
+
+	func context_probe(model: String) -> Dictionary:
+		return {"path": "/models/" + model_id(model), "method": HTTPClient.METHOD_GET, "body": {}}
+
+	func parse_context_window(data: Variant, _model: String = "") -> int:
+		return int(data.get("inputTokenLimit", 0)) if data is Dictionary else 0
+
+	func completion_request(model: String, system_prompt: String, prompt: String) -> Dictionary:
+		var body := {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
+		if system_prompt != "":
+			body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+		return {"path": "/models/%s:generateContent" % model_id(model), "body": body}
+
+	## The reply text out of a non-streamed response: every non-thought text part of the first candidate, joined.
+	func parse_completion(data: Variant) -> String:
+		if not (data is Dictionary) or not (data.get("candidates") is Array) or data["candidates"].is_empty():
+			return ""
+		var content: Variant = data["candidates"][0].get("content") if data["candidates"][0] is Dictionary else null
+		if not (content is Dictionary) or not (content.get("parts") is Array):
+			return ""
+		var text := ""
+		for part in content["parts"]:
+			if part is Dictionary and not bool(part.get("thought", false)):
+				text += _text(part.get("text"))
+		return text
+
+	func parse_completion_stats(data: Variant) -> Dictionary:
+		return _stats_from(data["usageMetadata"]) if data is Dictionary and data.get("usageMetadata") is Dictionary else {}
+
+	## A pasted endpoint reduces to the /v1beta base, and a bare host gains it. Google's /v1beta/openai compatibility URL is left alone, so the 404 hint can name the right kind for it.
+	func normalize_base(base: String) -> String:
+		var out := super.normalize_base(base)
+		var models_at := out.find("/models")
+		if models_at != -1:
+			out = out.left(models_at)
+		var scheme_end := out.find("://")
+		if out != "" and out.find("/", scheme_end + 3 if scheme_end != -1 else 0) == -1:
+			out += "/v1beta"
+		return out

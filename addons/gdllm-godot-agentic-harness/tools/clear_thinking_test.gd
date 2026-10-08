@@ -74,6 +74,11 @@ func _run_tests() -> void:
 	_check(not only_thinking.has("assistant_blocks"), "an all-thinking echo is dropped, not left empty")
 	_check(not GDLLMSessionStore.strip_echo_thinking({"role": "assistant", "content": "hi"}), "a message without an echo is untouched")
 
+	# Gemini parts carry no type; reasoning is flagged thought:true, and the functionCall part beside it must survive.
+	var gemini := {"assistant_blocks": [{"text": "SECRET plan", "thought": true, "thoughtSignature": "s"}, {"text": "Reading it."}, {"functionCall": {"name": "read_file", "args": {}}, "thoughtSignature": "t"}]}
+	_check(GDLLMSessionStore.strip_echo_thinking(gemini), "a Gemini echo's thought part counts as reasoning")
+	_check(gemini["assistant_blocks"].size() == 2 and not JSON.stringify(gemini).contains("SECRET") and gemini["assistant_blocks"][1].has("functionCall"), "it is stripped, while the answer text and the call part stay")
+
 
 ## The store file's current text, or null when none exists — the distinction _restore_store needs to put things back exactly.
 func _read_store() -> Variant:

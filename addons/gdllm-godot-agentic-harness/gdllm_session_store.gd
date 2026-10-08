@@ -171,13 +171,18 @@ func clear_thinking(id: String) -> bool:
 	return changed
 
 
-## Drop the reasoning blocks a provider echo stored beside a tool-call turn (see ECHO_THINKING_TYPES; summary and encrypted content alike — see LLMClient.last_assistant_blocks), so "Clear Thinking" removes reasoning from disk and from any resend, not just from the display fields. Returns true if anything was removed.
+## Whether one block of a provider echo is stored reasoning: a block typed in ECHO_THINKING_TYPES, or a Gemini part flagged as thought. Shared with the manage dialog's Thinking-size column, so what Clear Thinking strips and what the column counts can never drift apart.
+static func is_echo_thinking(block: Variant) -> bool:
+	return block is Dictionary and (String(block.get("type", "")) in ECHO_THINKING_TYPES or block.get("thought") == true)
+
+
+## Drop the reasoning blocks a provider echo stored beside a tool-call turn (see is_echo_thinking; summary and encrypted content alike — see LLMClient.last_assistant_blocks), so "Clear Thinking" removes reasoning from disk and from any resend, not just from the display fields. Returns true if anything was removed.
 static func strip_echo_thinking(msg: Dictionary) -> bool:
 	if not (msg.get("assistant_blocks") is Array):
 		return false
 	var kept: Array = []
 	for block in msg["assistant_blocks"]:
-		if not (block is Dictionary and String(block.get("type", "")) in ECHO_THINKING_TYPES):
+		if not is_echo_thinking(block):
 			kept.append(block)
 	if kept.size() == msg["assistant_blocks"].size():
 		return false

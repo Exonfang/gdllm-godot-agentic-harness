@@ -12,10 +12,12 @@ const KIND_OPENAI := "openai" ## OpenAI-compatible wire format (/v1/chat/complet
 const KIND_OPENAI_RESPONSES := "openai-responses" ## OpenAI Responses API wire format (/v1/responses SSE) — the newer OpenAI API, which GPT-5.6-class models require for reasoning effort with tools; /v1/chat/completions rejects that combination on them.
 const KIND_OPENAI_CHATGPT := "openai-chatgpt" ## The Responses wire format served from OpenAI's ChatGPT backend, authenticated with a ChatGPT sign-in instead of an API key (see GDLLMOAuth) — how a Plus/Pro subscription drives the harness without API billing.
 const KIND_ANTHROPIC := "anthropic" ## Anthropic Messages API wire format (/v1/messages SSE), used by the Claude models.
+const KIND_GEMINI := "gemini" ## Google's native Gemini API wire format (/v1beta/models/{model}:streamGenerateContent SSE), authenticated with an AI Studio API key. Gemini also works on the Chat Completions kind through Google's /v1beta/openai endpoint.
 
 const DEFAULT_OLLAMA_LOCAL_BASE := "http://localhost:11434" ## Seed endpoint for the first-run local Ollama source.
 const DEFAULT_ANTHROPIC_BASE := "https://api.anthropic.com" ## Anthropic's API host; the same for every account, so the Connections dialog prefills it when a row switches to the Anthropic kind.
 const DEFAULT_OPENAI_BASE := "https://api.openai.com/v1" ## OpenAI's own API base; the same for every account, so the Connections dialog prefills it when a row switches to the Responses kind (third-party servers speak the chat-completions kind instead).
+const DEFAULT_GEMINI_BASE := "https://generativelanguage.googleapis.com/v1beta" ## The Gemini API base; the same for every account, prefilled like its siblings when a row switches to the Gemini kind.
 const DEFAULT_CHATGPT_BASE := "https://chatgpt.com/backend-api/codex" ## The ChatGPT subscription backend; the same for every account, prefilled like its siblings when a row switches to the subscription kind.
 
 
@@ -50,6 +52,7 @@ static func default_sources() -> Array:
 		{"id": "poolside", "name": "Poolside", "kind": KIND_OPENAI, "base_url": "https://inference.poolside.ai/v1", "api_key": "", "enabled": false},
 		_openai_template(),
 		_chatgpt_template(),
+		_gemini_template(),
 		_anthropic_template(),
 	]
 
@@ -69,6 +72,11 @@ static func _anthropic_template() -> Dictionary:
 	return {"id": "anthropic", "name": "Anthropic", "kind": KIND_ANTHROPIC, "base_url": DEFAULT_ANTHROPIC_BASE, "api_key": "", "enabled": false}
 
 
+## The ready-to-fill Google Gemini source row on the native kind (see KIND_GEMINI), shared by the first-run seed and the one-time append for installs that predate it. Disabled until the user pastes an AI Studio key and flips it on, like every template.
+static func _gemini_template() -> Dictionary:
+	return {"id": "gemini", "name": "Google Gemini", "kind": KIND_GEMINI, "base_url": DEFAULT_GEMINI_BASE, "api_key": "", "enabled": false}
+
+
 ## Append each post-release template row for an install whose sources predate it — a first run already carries them all via default_sources. Each is offered exactly once, tracked by its id in TEMPLATES_SEEDED_KEY, so a deleted row never resurrects; a source the user already points at the provider — by the template's id or by its kind — counts as offered too.
 static func ensure_templates() -> void:
 	var es := EditorInterface.get_editor_settings()
@@ -80,7 +88,7 @@ static func ensure_templates() -> void:
 	var sources := get_sources()
 	var seeded_changed := false
 	var sources_changed := false
-	for template: Dictionary in [_anthropic_template(), _openai_template(), _chatgpt_template()]:
+	for template: Dictionary in [_anthropic_template(), _openai_template(), _chatgpt_template(), _gemini_template()]:
 		var template_id := String(template["id"])
 		if seeded.has(template_id):
 			continue
