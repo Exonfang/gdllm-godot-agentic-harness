@@ -8,7 +8,7 @@ class_name LLMAdapter extends RefCounted
 ## Canonical stream events an adapter emits from parse_line, folded straight onto LLMClient's state: {type:"thinking", text}, {type:"content", text}, {type:"tool_calls", calls}, {type:"done", stats, stop}, {type:"error", message} — plus {type:"progress"}, a no-op for a recognized frame with nothing streamable yet, so the client's wire-format guard knows the reply parses before the first visible delta (a Responses reasoning turn can stream nothing user-visible for minutes).
 ## A done event's `stop` is the provider's end-of-turn reason canonicalized by _canonical_stop: "" for a normal finish, "length" for the output-token cap, anything else verbatim — so a reply the provider itself cut short is never presented as finished (see LLMClient._stream_final_stats).
 ## A canonical tool call is {"function": {name, arguments: Dictionary}} — exactly what GDLLMTools.tool_call_name/args/sanitize_tool_calls consume.
-## An adapter whose provider must see its own turn echoed verbatim to continue a tool loop (Anthropic, the OpenAI Responses API) additionally emits {type:"assistant_blocks", blocks} ahead of the tool calls; LLMClient holds the blocks for the caller to store beside the turn (see LLMClient.last_assistant_blocks).
+## An adapter whose provider must see its own turn echoed verbatim to continue a tool loop (Anthropic, the OpenAI Responses API, and Chat Completions servers that attach state to a tool call — Gemini's thought signatures) additionally emits {type:"assistant_blocks", blocks} ahead of the tool calls; LLMClient holds the blocks for the caller to store beside the turn (see LLMClient.last_assistant_blocks).
 
 
 ## Build the adapter for a source `kind` (see GDLLMSources.KIND_*). Unknown kinds fall back to Ollama.
@@ -300,7 +300,8 @@ class OllamaAdapter extends LLMAdapter:
 ## Translates the canonical message/tool shape to OpenAI's on send, and reassembles OpenAI's streamed deltas (content, reasoning, and tool-call argument fragments) back into canonical events on receive.
 ## Paths here omit the /v1 prefix because an OpenAI-compatible base_url carries it (e.g. .../inference.poolside.ai/v1); re-adding it would double the segment and 404.
 class OpenAIAdapter extends LLMAdapter:
-	var _tool_calls: Array = [] ## Tool calls under construction, one slot per stream `index`: {id, name, args}.
+	var _tool_calls: Array = [] ## Tool calls under construction, in arrival order: {id, name, args, extra}.
+	var _slot_for_index: Dictionary = {} ## Stream `index` → the _tool_calls position of the call currently open under it (see _accumulate_tool_calls).
 	var _usage: Dictionary = {} ## The `usage` block from the final chunk (stream_options.include_usage).
 	var _finish_reason: String = "" ## The finish_reason value that ended the turn; canonicalized onto the done event's `stop` ("length" = the token cap) so a capped reply is disclosed, not shown as finished.
 	var _finished: bool = false ## Guards _finish_events so finish_reason and a trailing [DONE] don't double-emit.
@@ -433,26 +434,32 @@ class OpenAIAdapter extends LLMAdapter:
 				events.append_array(_finish_events())
 		return events
 
-	## Translate canonical (Ollama-shaped) history to OpenAI's: assistant tool-call turns get string-encoded arguments and synthesized call ids, and each following tool result is bound to its call id by order.
+	## Translate canonical (Ollama-shaped) history to OpenAI's: assistant tool-call turns get string-encoded arguments and synthesized call ids, and each following tool result is bound to its call id by order. Inside the trailing tool loop (everything after the last user message), a turn whose provider stored its raw tool calls (see _raw_tool_calls) replays them verbatim instead, because Gemini validates the thought signature riding on each call to continue the loop; earlier turns rebuild, so past signatures aren't re-sent (goal 1).
 	func _translate_messages(messages: Array) -> Array:
 		var out: Array = []
 		var pending_ids: Array = [] # ids of the last assistant turn's calls, awaiting their tool results in order
 		var counter := 0
-		for msg in messages:
+		var last_user := -1
+		for i in messages.size():
+			if messages[i] is Dictionary and String(messages[i].get("role", "")) == "user":
+				last_user = i
+		for i in messages.size():
+			var msg: Variant = messages[i]
 			if not (msg is Dictionary):
 				continue
 			var role := String(msg.get("role", ""))
 			if role == "assistant" and msg.get("tool_calls") is Array and not msg["tool_calls"].is_empty():
-				var calls: Array = []
 				pending_ids = []
-				for tc in msg["tool_calls"]:
-					var id := "call_%d" % counter
-					counter += 1
-					pending_ids.append(id)
-					var fn: Dictionary = tc.get("function", {}) if tc is Dictionary else {}
-					var raw_args: Variant = fn.get("arguments", {})
-					var args_str: String = raw_args if raw_args is String else JSON.stringify(raw_args)
-					calls.append({"id": id, "type": "function", "function": {"name": String(fn.get("name", "")), "arguments": args_str}})
+				var calls: Array = _echoed_tool_calls(msg, pending_ids, i) if i > last_user else []
+				if calls.is_empty():
+					for tc in msg["tool_calls"]:
+						var id := "call_%d" % counter
+						counter += 1
+						pending_ids.append(id)
+						var fn: Dictionary = tc.get("function", {}) if tc is Dictionary else {}
+						var raw_args: Variant = fn.get("arguments", {})
+						var args_str: String = raw_args if raw_args is String else JSON.stringify(raw_args)
+						calls.append({"id": id, "type": "function", "function": {"name": String(fn.get("name", "")), "arguments": args_str}})
 				var assistant_msg := {"role": "assistant", "tool_calls": calls}
 				var preamble := String(msg.get("content", ""))
 				if preamble != "":
@@ -465,17 +472,38 @@ class OpenAIAdapter extends LLMAdapter:
 				out.append({"role": role, "content": String(msg.get("content", ""))})
 		return out
 
+	## The stored raw tool calls of one assistant turn, ready to resend, with their ids appended to `pending_ids`; empty when the turn must rebuild instead. Blocks that aren't one OpenAI tool call per canonical call were recorded under another kind (Anthropic's tool_use blocks, the Responses API's items, after a mid-loop Kind switch) and would 400 here.
+	func _echoed_tool_calls(msg: Dictionary, pending_ids: Array, turn_index: int) -> Array:
+		var raw: Variant = msg.get("assistant_blocks")
+		if not (raw is Array) or raw.size() != msg["tool_calls"].size():
+			return []
+		for block in raw:
+			if not (block is Dictionary) or String(block.get("type", "")) != "function" or not (block.get("function") is Dictionary):
+				return []
+		var calls: Array = []
+		for n in raw.size():
+			var call: Dictionary = raw[n].duplicate(true)
+			if _text(call.get("id")) == "":
+				call["id"] = "call_echo_%d_%d" % [turn_index, n]
+			pending_ids.append(_text(call["id"]))
+			calls.append(call)
+		return calls
+
 	## Fold this chunk's tool-call deltas into _tool_calls: name arrives once, arguments stream as string fragments concatenated by `index`.
 	func _accumulate_tool_calls(deltas: Array) -> void:
 		for d in deltas:
 			if not (d is Dictionary):
 				continue
 			var idx := int(d.get("index", 0))
-			while _tool_calls.size() <= idx:
-				_tool_calls.append({"id": "", "name": "", "args": ""})
-			var slot: Dictionary = _tool_calls[idx]
-			# Only the opening delta of a call carries id/name; continuation deltas send null for both, so keep the first non-empty and never overwrite it back to blank.
 			var id_text := _text(d.get("id"))
+			# A delta opens a new call when its index is new, or when it names an id other than the call already open there — Gemini streams each parallel call whole under the same index, and folding them together would join their argument strings into unparseable JSON.
+			var pos: int = _slot_for_index.get(idx, -1)
+			if pos == -1 or (id_text != "" and _text(_tool_calls[pos]["id"]) not in ["", id_text]):
+				_tool_calls.append({"id": "", "name": "", "args": "", "extra": {}})
+				pos = _tool_calls.size() - 1
+				_slot_for_index[idx] = pos
+			var slot: Dictionary = _tool_calls[pos]
+			# Only the opening delta of a call carries id/name; continuation deltas send null for both, so keep the first non-empty and never overwrite it back to blank.
 			if id_text != "":
 				slot["id"] = id_text
 			if d.get("function") is Dictionary:
@@ -485,6 +513,15 @@ class OpenAIAdapter extends LLMAdapter:
 					slot["name"] = name_text
 				if fn.has("arguments"):
 					slot["args"] += _text(fn.get("arguments"))
+			# Any other field is provider state the call must carry back verbatim — Gemini's thought signature arrives as extra_content.google.thought_signature — so it is kept whole, whatever the provider names it.
+			var extra: Dictionary = slot["extra"]
+			for key in d:
+				if key in ["index", "id", "type", "function"] or d[key] == null:
+					continue
+				if extra.get(key) is Dictionary and d[key] is Dictionary:
+					extra[key].merge(d[key])
+				elif not extra.has(key):
+					extra[key] = d[key]
 
 	## The terminal events for the stream: the assembled tool calls (if any) then done+stats, emitted at most once.
 	func _finish_events() -> Array:
@@ -493,6 +530,9 @@ class OpenAIAdapter extends LLMAdapter:
 		_finished = true
 		var events: Array = []
 		if not _tool_calls.is_empty():
+			# Raw calls ride ahead of the canonical ones so LLMClient holds them before the tool_calls signal fires (see last_assistant_blocks); only when a call carried provider state, so every other server's history stays as before.
+			if _tool_calls.any(func(slot: Dictionary) -> bool: return not slot["extra"].is_empty()):
+				events.append({"type": "assistant_blocks", "blocks": _raw_tool_calls()})
 			events.append({"type": "tool_calls", "calls": _assembled_tool_calls()})
 		# "stop"/"tool_calls" (and legacy "function_call") are the normal ends; "length" (the token cap) and "content_filter" mean the reply was cut short.
 		events.append({"type": "done", "stats": _stats_from(_usage), "stop": _canonical_stop(_finish_reason, PackedStringArray(["stop", "tool_calls", "function_call"]))})
@@ -507,6 +547,15 @@ class OpenAIAdapter extends LLMAdapter:
 			var parsed: Variant = JSON.parse_string(args_text) if args_text != "" else {}
 			var args: Dictionary = parsed if parsed is Dictionary else {}
 			out.append({"function": {"name": _text(slot["name"]), "arguments": args}})
+		return out
+
+	## The accumulated calls in OpenAI's own wire shape, provider fields included, as _echoed_tool_calls resends them.
+	func _raw_tool_calls() -> Array:
+		var out: Array = []
+		for slot in _tool_calls:
+			var call: Dictionary = slot["extra"].duplicate(true)
+			call.merge({"id": _text(slot["id"]), "type": "function", "function": {"name": _text(slot["name"]), "arguments": _text(slot["args"])}}, true)
+			out.append(call)
 		return out
 
 	## OpenAI usage mapped onto the plugin's stat keys; it reports no durations, so those stay 0. Static so the non-streamed completion path maps its body's usage through the same rule.
