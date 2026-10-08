@@ -32,6 +32,11 @@ const CONNECTION_BASE_URL_HINTS := {
 		"tooltip": "Anthropic's endpoint is the same for everyone: https://api.anthropic.com — pasting the full …/v1/messages endpoint works too.",
 		"prefill": GDLLMSources.DEFAULT_ANTHROPIC_BASE,
 	},
+	GDLLMSources.KIND_GEMINI: {
+		"placeholder": "https://generativelanguage.googleapis.com/v1beta",
+		"tooltip": "Google's native Gemini API — the same for everyone: https://generativelanguage.googleapis.com/v1beta. Paste an API key from aistudio.google.com/apikey. Google's /v1beta/openai URL belongs on the OpenAI-Compatible (Chat Completions) kind instead.",
+		"prefill": GDLLMSources.DEFAULT_GEMINI_BASE,
+	},
 }
 const EFFORT_LEVEL_COL_WIDTH := 62 ## Fixed width of each level column in the Effort Configuration table; the header label and each row's checkbox share it so columns line up, wide enough for "minimal".
 const EFFORT_CACHE_COL_WIDTH := 84 ## Fixed width of the Effort Configuration table's cache-TTL column; the header label and each row's spinbox share it so the column lines up.
@@ -686,7 +691,7 @@ func _add_connection_row(source: Dictionary) -> void:
 	row.add_child(name_edit)
 
 	var kind_select := OptionButton.new()
-	var kinds: Array = [["Ollama", GDLLMSources.KIND_OLLAMA], ["OpenAI-Compatible (Chat Completions)", GDLLMSources.KIND_OPENAI], ["OpenAI Responses API", GDLLMSources.KIND_OPENAI_RESPONSES], ["OpenAI ChatGPT Subscription", GDLLMSources.KIND_OPENAI_CHATGPT], ["Anthropic", GDLLMSources.KIND_ANTHROPIC]]
+	var kinds: Array = [["Ollama", GDLLMSources.KIND_OLLAMA], ["OpenAI-Compatible (Chat Completions)", GDLLMSources.KIND_OPENAI], ["OpenAI Responses API", GDLLMSources.KIND_OPENAI_RESPONSES], ["OpenAI ChatGPT Subscription", GDLLMSources.KIND_OPENAI_CHATGPT], ["Anthropic", GDLLMSources.KIND_ANTHROPIC], ["Google Gemini", GDLLMSources.KIND_GEMINI]]
 	for i in kinds.size():
 		kind_select.add_item(String(kinds[i][0]))
 		kind_select.set_item_metadata(i, kinds[i][1])
@@ -1555,7 +1560,7 @@ func _thinking_size(record: Dictionary) -> int:
 			bytes += String(msg["thinking"]).to_utf8_buffer().size()
 		if msg.get("assistant_blocks") is Array:
 			for block in msg["assistant_blocks"]:
-				if block is Dictionary and String(block.get("type", "")) in GDLLMSessionStore.ECHO_THINKING_TYPES:
+				if GDLLMSessionStore.is_echo_thinking(block):
 					bytes += JSON.stringify(block).to_utf8_buffer().size()
 	return bytes
 

@@ -225,6 +225,8 @@ func _kind_404_hint() -> String:
 		return "check the source's URL: the ChatGPT subscription backend lives at %s, which the Connections dialog prefills — a 404 usually means the URL was edited" % GDLLMSources.DEFAULT_CHATGPT_BASE
 	if adapter_kind == GDLLMSources.KIND_ANTHROPIC:
 		return "check the source's URL: Anthropic wants https://api.anthropic.com (pasting the full …/v1/messages endpoint works too)"
+	if adapter_kind == GDLLMSources.KIND_GEMINI:
+		return "check the source's URL and Kind: the Gemini API lives at %s — Google's …/v1beta/openai URL needs the OpenAI-Compatible (Chat Completions) kind instead" % GDLLMSources.DEFAULT_GEMINI_BASE
 	return "check the source's URL and Kind: an Ollama server takes a bare http://host:port or a full endpoint like …/api/chat — an OpenAI-compatible server (LM Studio, llama.cpp, koboldcpp, vLLM, most others...) needs the OpenAI-Compatible (Chat Completions) kind instead"
 
 
