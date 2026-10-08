@@ -758,8 +758,8 @@ class OpenAIResponsesAdapter extends OpenAIAdapter:
 ## Only auth and discovery differ from the parent: the Bearer token is a ChatGPT access token whose own account-id claim must ride back as a header (read straight from the token, so no side channel is needed), and the backend publishes no model list or window probe — the model set is a maintained constant, and context windows come from the Effort Configuration dialog alone.
 class OpenAIChatGPTAdapter extends OpenAIResponsesAdapter:
 	const ORIGINATOR := "gdllm" ## The client identifier sent with each request, naming this harness honestly.
-	## The models the subscription backend serves, maintained by hand — there is no listing endpoint to sweep. An id the backend no longer takes fails loudly at request time, naming the model. Verified against the Codex model docs 2026-08-12; ids on their announced retirement path (gpt-5.4 and gpt-5.4-mini retire 2026-08-31) are deliberately not listed.
-	const MODELS: Array[String] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.3-codex-spark", "gpt-5.5"]
+	## The models the subscription backend serves, maintained by hand — there is no listing endpoint to sweep. An id the backend no longer takes fails loudly at request time, naming the model. Verified against the Codex model docs 2026-10-07; ids on their announced retirement path (gpt-5.5 retires 2026-10-14) are deliberately not listed.
+	const MODELS: Array[String] = ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
 
 	## The ChatGPT access token rides as a Bearer like an API key, and the backend additionally wants the token's own chatgpt_account_id claim echoed as a header, plus the originator stamp.
 	func auth_headers(api_key: String) -> PackedStringArray:
