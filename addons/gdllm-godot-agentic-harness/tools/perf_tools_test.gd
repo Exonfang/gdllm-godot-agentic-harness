@@ -290,9 +290,9 @@ func _test_refusals() -> void:
 	_check(Perf.profiler_panels("visual").is_empty() and Perf.video_ram_tabs().is_empty(), "headless locates no debugger panels to read")
 	var perf: Dictionary = await Tools.execute("read_performance", {})
 	_check(String(perf["content"]).begins_with("Error:") and String(perf["content"]).contains("headless"), "read_performance refuses by name in a headless run")
-	var profile: Dictionary = await Tools.execute("profile_game", {})
+	var profile: Dictionary = await Tools.execute("profile_game", {}, true)
 	_check(String(profile["content"]).contains("headless"), "profile_game refuses by name in a headless run")
-	var bad_mode: Dictionary = await Tools.execute("profile_game", {"mode": "sideways"})
+	var bad_mode: Dictionary = await Tools.execute("profile_game", {"mode": "sideways"}, true)
 	_check(String(bad_mode["content"]).contains("not a profiler this tool can run") and String(bad_mode["content"]).contains("\"visual\""), "an unknown mode is refused with the three that exist named")
 	var vram: Dictionary = await Tools.execute("read_video_ram", {})
 	_check(String(vram["content"]).begins_with("Error:") and String(vram["content"]).contains("headless"), "read_video_ram refuses by name in a headless run")
@@ -301,7 +301,7 @@ func _test_refusals() -> void:
 	var bogus_vram: Dictionary = await Tools.execute("read_video_ram", {"bogus": 1})
 	_check(String(bogus_vram["content"]).begins_with("Error:") and String(bogus_vram["content"]).contains("limit"), "read_video_ram's unrecognized argument comes back with its usage shape")
 	var catalog := String(Tools.tool_search_schema(false)["function"]["description"])
-	_check(catalog.contains("read_performance") and catalog.contains("profile_game") and catalog.contains("read_video_ram"), "the performance and video-memory tools are read tools, listed even with Make changes off")
+	_check(catalog.contains("read_performance") and catalog.contains("read_video_ram") and not catalog.contains("profile_game"), "inert editor metrics remain visible while the active profiler stays behind Run project code")
 
 
 ## profile_game's not-running refusal: the wild failure was a model that read "its profile flag" and launched twice without keep_running, capturing and stopping each time.

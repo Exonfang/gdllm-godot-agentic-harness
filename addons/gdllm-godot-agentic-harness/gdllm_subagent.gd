@@ -12,8 +12,7 @@ var _nested: GDLLMSubagent = null ## A subagent this one is itself running (a lo
 var _done: bool = false ## Whether the in-flight request's await has already been resolved, so a completion arriving after a cancel (or vice versa) is ignored.
 var _depth: int = 1 ## This subagent's nesting level, stamped on the activity events it emits so the chat can indent nested runs inside their parent's (set in run()).
 var _turn_thinking: String = "" ## Reasoning accumulated for the in-flight request via thinking_delta, emitted as a `thinking` activity event once the turn resolves, then reset by the next _send().
-var _allow_changes: bool = false ## The spawning session's "Make changes" state at launch, inherited so a subagent can never mutate more than the chat that spawned it.
-var _allow_delete: bool = false ## The spawning session's "Delete files" state at launch, inherited the same way so a subagent can never delete more than the chat that spawned it.
+var _capabilities: Dictionary = {} ## The spawning session's complete immutable authority at launch, inherited unchanged so nested runs can never widen it.
 var _ledger: GDLLMTools.SessionLedger = null ## The spawning session's tool ledger, shared so this run's reads and verdicts land in that session's record; null lets execute() fall back to its shared default (bare headless runs).
 var _qualified_source: String = "" ## The run's source and model as a qualified id, stamped on stats events so each footer names who answered (set in run()).
 var _reported_base: int = 0 ## The compaction predictor's base: the newest provider-reported prompt+output token count in the tool loop, 0 until a request reports usage (the trigger stays silent without one, like the main chat's).
@@ -47,10 +46,9 @@ static func ledger_entry(tool_name: String, args: Dictionary, result_content: St
 	return entry
 
 
-## Run `prompt` on the resolved `source` (endpoint + key + wire format + model, from GDLLMSources.resolve_qualified) under `system_prompt` and return the model's answer. With `use_tools` false it's a single tool-less turn (a pure transform, e.g. mapping a file). With `use_tools` true it runs an agentic loop — the model reaches the project's tools through tool_search just as the main chat does — until it produces a final answer or is cancelled; the loop has no iteration cap, but it carries the main chat's loop brakes (see GDLLMLoopBrakes) and its setting-gated context compaction (tool-result pruning; see _maybe_compact), and a tripped escalation ends the run with the model's own progress summary as its answer (see _break_loop) — the top-level Stop (cancel) remains the manual brake. `depth` is this subagent's nesting level (1 for one the main chat spawned), stamped on its activity events so the chat can indent nested runs. `allow_changes` is the spawning session's "Make changes" state, gating mutating tools exactly as it does in the main chat, and `allow_delete` its "Delete files" state, gating destructive ones the same way. `ledger` is the spawning session's tool ledger, shared down the whole subagent chain. A request failure resolves to an "Error: …" string the caller can surface; a cancel resolves to "" with was_cancelled set.
-func run(source: Dictionary, system_prompt: String, prompt: String, use_tools: bool = false, depth: int = 1, allow_changes: bool = false, allow_delete: bool = false, ledger: GDLLMTools.SessionLedger = null) -> String:
-	_allow_changes = allow_changes
-	_allow_delete = allow_delete
+## Run `prompt` on the resolved `source` (endpoint + key + wire format + model, from GDLLMSources.resolve_qualified) under `system_prompt` and return the model's answer. With `use_tools` false it's a single tool-less turn (a pure transform, e.g. mapping a file). With `use_tools` true it runs an agentic loop — the model reaches the project's tools through tool_search just as the main chat does — until it has an answer or is cancelled. `capabilities` is the complete immutable session snapshot: malformed, mutable, partial, or unknown sets collapse to no authority, and every nested subagent inherits the same object. `ledger` is shared down that whole chain. A request failure resolves to an "Error: …" string the caller can surface; a cancel resolves to "" with was_cancelled set.
+func run(source: Dictionary, system_prompt: String, prompt: String, use_tools: bool = false, depth: int = 1, capabilities: Dictionary = {}, ledger: GDLLMTools.SessionLedger = null) -> String:
+	_capabilities = capabilities if GDLLMCapabilities.is_valid(capabilities) else GDLLMCapabilities.none()
 	_ledger = ledger
 	mutation_ledger = PackedStringArray()
 	_client = LLMClient.new()
@@ -114,7 +112,7 @@ func run(source: Dictionary, system_prompt: String, prompt: String, use_tools: b
 					if called != "":
 						used_this_round[called] = true
 						# A direct call to an unattached registered tool attaches its schema for the rest of the loop — the same rule the main chat's rounds apply.
-						if called != GDLLMTools.TOOL_SEARCH and GDLLMTools.REGISTRY.has(called):
+						if called != GDLLMTools.TOOL_SEARCH and GDLLMTools.REGISTRY.has(called) and not GDLLMTools.schema_for(called, _capabilities).is_empty():
 							active_tools[called] = true
 				var round_repeated := false # a call this round re-ran identically with an identical result — the no-progress evidence the oscillation nudge requires
 				var fresh_activation := false # a search this round attached a NEW tool — the progress signal that resets the streak guard (see track_consecutive_use)
@@ -123,7 +121,7 @@ func run(source: Dictionary, system_prompt: String, prompt: String, use_tools: b
 					var tool_name := GDLLMTools.tool_call_name(tc)
 					var call_args := GDLLMTools.tool_call_args(tc)
 					_emit({"type": "tool_call", "name": tool_name, "args": call_args})
-					var result: Dictionary = await GDLLMTools.execute(tool_name, call_args, _allow_changes, _allow_delete, active_tools, _ledger, _repeat_scope)
+					var result: Dictionary = await GDLLMTools.execute(tool_name, call_args, _capabilities, active_tools, _ledger, _repeat_scope)
 					for activated in result.get("activate", PackedStringArray()):
 						if not active_tools.has(activated):
 							fresh_activation = true
@@ -201,7 +199,7 @@ func _run_nested(spec: Dictionary, source: Dictionary, depth: int) -> String:
 	# Announce the nested run before its steps, stamped with its own deeper depth — without a caption a quiet run (no thinking, no reported tokens) would be entirely invisible.
 	activity.emit({"type": "subagent_caption", "label": label, "depth": depth + 1})
 	var nested_use_tools := bool(spec.get("tools", false))
-	var text: String = await nested.run(nested_source, String(spec.get("system", "")), String(spec.get("prompt", "")), nested_use_tools, depth + 1, _allow_changes, _allow_delete, _ledger)
+	var text: String = await nested.run(nested_source, String(spec.get("system", "")), String(spec.get("prompt", "")), nested_use_tools, depth + 1, _capabilities, _ledger)
 	# The nested run's changes are this run's changes too, so the record handed to the parent stays complete.
 	mutation_ledger.append_array(nested.mutation_ledger)
 	if nested.was_cancelled:
@@ -342,13 +340,9 @@ func _note_compaction_refusal(text: String) -> void:
 
 ## The tools attached to a subagent's request: always tool_search, plus every tool it has activated by searching — the same narrow-context footprint AND gate filter the main chat uses (see GDLLMChatSession._tools_for_active_set): a gated tool's schema is dead weight on a request whose every call to it would be refused.
 func _build_tools(active_tools: Dictionary) -> Array:
-	var tools: Array = [GDLLMTools.tool_search_schema(_allow_changes, _allow_delete, active_tools)]
+	var tools: Array = [GDLLMTools.tool_search_schema(_capabilities, active_tools)]
 	for tool_name in active_tools:
-		if not _allow_changes and GDLLMTools.is_mutating(tool_name):
-			continue
-		if not _allow_delete and GDLLMTools.is_destructive(tool_name):
-			continue
-		var schema := GDLLMTools.schema_for(tool_name)
+		var schema := GDLLMTools.schema_for(tool_name, _capabilities)
 		if not schema.is_empty():
 			tools.append(schema)
 	return tools

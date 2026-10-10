@@ -39,11 +39,17 @@ const NEW_SESSION_EDITS := "gdllm/agents/new_sessions_start_with_edits"
 ## The "Delete files" counterpart to NEW_SESSION_EDITS: whether a newly created session starts with the delete toggle on. Off by default for the same reason, only more so — deletion stays a per-conversation opt-in.
 const NEW_SESSION_DELETE := "gdllm/agents/new_sessions_start_with_delete_files"
 
+## Whether a newly created session starts with permission to execute project code. Off by default: reading code must never silently run it, and each conversation opts in separately.
+const NEW_SESSION_EXECUTION := "gdllm/agents/new_sessions_start_with_run_project_code"
+
 ## The containment fence's single switch: whether tool calls may name paths outside the project (res://) and its user:// data directory. Off refuses such paths at the tool layer (see GDLLMTools._outside_path_guard); on lets tools reach as far as the user's own account can.
 const ALLOW_OUTSIDE_TOOL_CALLS := "gdllm/agents/allow_tool_calls_outside_project_or_user_directories"
 
-## Whether the plugin keeps the GDLLMGameAgent autoload registered in the project — the in-game half of the game-driving tools (read_game_ui, send_game_input, call_game_method). The autoload is inert without a debugger attached; turning this off removes it from Project Settings → Globals on the spot (see the plugin's _sync_game_agent).
+## Whether the plugin keeps the GDLLMGameAgent autoload registered in the project — the in-game half of the game-driving tools (read_game_ui, send_game_input, call_game_method). Off by default because enabling it writes project.godot; turning it on is the explicit consent for that write (see the plugin's _sync_game_agent).
 const GAME_AGENT := "gdllm/agents/register_game_input_agent"
+
+## One-way local migration marker: releases before explicit consent shipped GAME_AGENT on, so their inherited true value cannot prove a user chose the project.godot write.
+const GAME_AGENT_CONSENT_MIGRATION := "gdllm/internal/game_agent_explicit_consent_v1"
 
 ## Master switch for the automatic context-compaction system; off disables the send-time trigger and every automatic pass added under it, leaving the context meter's readout, the send-time over-window warning, and the chat's manual Compact button.
 const AUTO_COMPACTION := "gdllm/compaction/enable_automatic_context_compaction"
@@ -89,8 +95,9 @@ const DEFAULT_OPENAI_REASONING_SUMMARIES := true
 const DEFAULT_MAX_PARALLEL_SUBAGENTS := 4
 const DEFAULT_NEW_SESSION_EDITS := false
 const DEFAULT_NEW_SESSION_DELETE := false
+const DEFAULT_NEW_SESSION_EXECUTION := false
 const DEFAULT_ALLOW_OUTSIDE_TOOL_CALLS := false
-const DEFAULT_GAME_AGENT := true
+const DEFAULT_GAME_AGENT := false
 const DEFAULT_AUTO_COMPACTION := true
 ## 16k absorbs the incremental predictor's worst log-measured miss (~8.6k over 3421 wild requests) plus a typical reply's tokens.
 const DEFAULT_COMPACTION_BUFFER := 16000
@@ -127,6 +134,11 @@ static var headless_allow_outside_tool_calls := DEFAULT_ALLOW_OUTSIDE_TOOL_CALLS
 ## Register the settings so they show up in Editor → Editor Settings and persist across sessions. Idempotent — safe to call on every plugin load; existing values are kept.
 static func register() -> void:
 	var es := EditorInterface.get_editor_settings()
+	# An inherited true was the old default, not recorded consent. Require one deliberate off→on choice after this security boundary lands; the private marker keeps later loads from undoing a real choice.
+	if not es.has_setting(GAME_AGENT_CONSENT_MIGRATION):
+		if es.has_setting(GAME_AGENT):
+			es.set_setting(GAME_AGENT, false)
+		es.set_setting(GAME_AGENT_CONSENT_MIGRATION, true)
 	# Seed the multi-source list on first run; every template starts disabled (see GDLLMSources.default_sources).
 	GDLLMSources.ensure_seeded()
 	# An install seeded before a newer kind existed gets that template row appended once, so the Connections dialog shows it without a hand-added source (deleting one sticks; see GDLLMSources.TEMPLATES_SEEDED_KEY).
@@ -159,6 +171,7 @@ static func register() -> void:
 	_define_int(es, MAX_PARALLEL_SUBAGENTS, DEFAULT_MAX_PARALLEL_SUBAGENTS, "0,64,1,or_greater")
 	_define_bool(es, NEW_SESSION_EDITS, DEFAULT_NEW_SESSION_EDITS)
 	_define_bool(es, NEW_SESSION_DELETE, DEFAULT_NEW_SESSION_DELETE)
+	_define_bool(es, NEW_SESSION_EXECUTION, DEFAULT_NEW_SESSION_EXECUTION)
 	_define_bool(es, ALLOW_OUTSIDE_TOOL_CALLS, DEFAULT_ALLOW_OUTSIDE_TOOL_CALLS)
 	_define_bool(es, GAME_AGENT, DEFAULT_GAME_AGENT)
 	_define_bool(es, AUTO_COMPACTION, DEFAULT_AUTO_COMPACTION)
@@ -424,6 +437,11 @@ static func is_new_session_edits_on() -> bool:
 ## Whether a newly created session starts with "Delete files" on (see GDLLMSessionStore._new_record); the delete counterpart to is_new_session_edits_on.
 static func is_new_session_delete_on() -> bool:
 	return bool(EditorInterface.get_editor_settings().get_setting(NEW_SESSION_DELETE))
+
+
+## Whether a newly created session starts with project-code execution enabled. Shipped off; existing sessions keep their persisted per-session choice.
+static func is_new_session_execution_on() -> bool:
+	return bool(EditorInterface.get_editor_settings().get_setting(NEW_SESSION_EXECUTION))
 
 
 ## Whether tool calls may name paths outside the project and its user:// data directory (see GDLLMTools._outside_path_guard). Read defensively because the tool layer consults it headlessly and possibly before register() has defined the key.

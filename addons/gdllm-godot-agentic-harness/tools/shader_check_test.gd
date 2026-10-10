@@ -204,12 +204,14 @@ func _test_write_and_edit_end_to_end() -> void:
 	_check(still_broken.contains("BROKEN on disk") and still_broken.contains("YOU introduced"), "an edit that breaks a working shader is attributed to the edit that broke it")
 	var writes_clean: String = await _run("write_file", {"path": BROKEN_FIXTURE, "content": "shader_type canvas_item;\n\nvoid fragment() {\n\tCOLOR.rgb = vec3(1.0);\n}\n", "force": true})
 	_check(writes_clean.contains("compiles cleanly (engine-checked)"), "and a clean overwrite says which check cleared it")
-	# The third surface: a shader the model merely READS is checked by the same automatic hook a script's read fires, so damage nobody touched is flagged before it is built on.
+	# Reads remain inert even for shaders; execution-aware validation is explicit.
 	var read_clean: String = await _run("read_file", {"path": BROKEN_FIXTURE}, false)
 	_check(not read_clean.contains("Automatic check_script"), "reading a clean shader appends nothing, so it costs the context nothing")
 	_write(BROKEN_FIXTURE, "shader_type canvas_item;\n\nvoid fragment() {\n\tCOLOR.rgb = gone;\n}\n")
 	var read_broken: String = await _run("read_file", {"path": BROKEN_FIXTURE}, false)
-	_check(read_broken.contains("Automatic check_script") and read_broken.contains("gone"), "and reading a broken one flags it without being asked")
+	_check(read_broken.contains("gone") and not read_broken.contains("Automatic check_script"), "reading a broken shader returns inert source without compiling it")
+	var explicit_check: String = await _run("check_script", {"path": BROKEN_FIXTURE}, true)
+	_check(explicit_check.contains("gone") and explicit_check.contains("parse/compile error"), "explicitly authorized check_script still catches the broken shader")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(BROKEN_FIXTURE))
 
 

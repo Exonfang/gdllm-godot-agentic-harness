@@ -118,10 +118,10 @@ func _test_gate_and_catalog() -> void:
 	for name: String in ["run_game", "stop_game", "run_script"]:
 		_check(Tools.is_mutating(name), "%s rides the mutating gate" % name)
 		var refused: Dictionary = await Tools.execute(name, {})
-		_check(String(refused["content"]).contains("runs the project's own code") and String(refused["content"]).contains("Make changes"), "%s's gate refusal says it runs code, not that it edits files" % name)
+		_check(String(refused["content"]).contains("loads or executes project-controlled code") and String(refused["content"]).contains("Run project code"), "%s's gate refusal names the dedicated execution capability" % name)
 	var closed := String(Tools.tool_search_schema(false)["function"]["description"])
 	_check(not closed.contains("run_game"), "the catalog hides the run tools while Make changes is off")
-	_check(closed.contains("or run its code"), "the catalog's hidden-tools line admits running is gated too")
+	_check(closed.contains("Run project code"), "the catalog names the dedicated execution toggle")
 	var open := String(Tools.tool_search_schema(true)["function"]["description"])
 	_check(open.contains("run_game") and open.contains("run_script"), "the catalog lists the run tools once the gate is open")
 	_check(Tools.search("run_game", false, false).is_empty(), "search can't activate a gated run tool")

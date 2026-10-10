@@ -44,8 +44,8 @@ func _check(cond: bool, label: String) -> void:
 
 
 ## Run a tool through the real execute dispatch and return its content string.
-func _run(tool_name: String, args: Dictionary) -> String:
-	return String((await GDLLMTools.execute(tool_name, args, false))["content"])
+func _run(tool_name: String, args: Dictionary, allow_execution: bool = false) -> String:
+	return String((await GDLLMTools.execute(tool_name, args, allow_execution))["content"])
 
 
 func _fixture() -> Script:
@@ -281,11 +281,11 @@ func _test_end_to_end() -> void:
 	for tool_name in ["describe_class", "describe_member"]:
 		_check(GDLLMTools.is_registered(tool_name), "%s is registered" % tool_name)
 		_check(not GDLLMTools.is_mutating(tool_name), "%s is read-only" % tool_name)
-	var out := await _run("describe_class", {"class": "GDLLMDocs"})
+	var out := await _run("describe_class", {"class": "GDLLMDocs"}, true)
 	_check(out.contains("Project script class GDLLMDocs"), "a real registered project class resolves end to end")
 	_check(out.contains("search(query: String) -> String"), "its methods carry real signatures")
 	_check(out.contains("Inheritance: GDLLMDocs < RefCounted < Object"), "its chain reaches the engine base")
-	var member := await _run("describe_member", {"class": "gdllmdocs", "member": "search"})
+	var member := await _run("describe_member", {"class": "gdllmdocs", "member": "search"}, true)
 	_check(member.contains("Method (declared in GDLLMDocs"), "describe_member resolves a project class case-insensitively")
 	# Reaching the capability is half of it: tool_search matches on the summary, so a model looking for a project class must land on describe_class.
 	_check(String(GDLLMTools.REGISTRY["describe_class"]["summary"]).contains("class_name"), "describe_class's summary advertises project script classes")

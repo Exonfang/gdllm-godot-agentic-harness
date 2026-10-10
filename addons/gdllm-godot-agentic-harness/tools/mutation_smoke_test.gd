@@ -76,7 +76,8 @@ func _check(cond: bool, label: String) -> void:
 
 ## Run a tool through the real dispatch (including the mutating and destructive gates) and return the model-facing content.
 func _run(tool_name: String, args: Dictionary, allow_changes: bool, allow_delete: bool = false) -> String:
-	return String((await GDLLMTools.execute(tool_name, args, allow_changes, allow_delete)).get("content", ""))
+	var capabilities := GDLLMCapabilities.from_session(true, allow_changes, allow_delete, true, GDLLMSettings.is_outside_tool_calls_allowed())
+	return String((await GDLLMTools.execute(tool_name, args, capabilities)).get("content", ""))
 
 
 func _write(path: String, text: String) -> void:
@@ -377,7 +378,9 @@ func _test_delete_file() -> void:
 	_check(out.begins_with("Deleted") and not FileAccess.file_exists(outside_abs), "with the fence dropped, the outside delete goes through end to end")
 	GDLLMSettings.headless_allow_outside_tool_calls = false
 	DirAccess.remove_absolute(outside_abs)
-	# A symlink is the user's own setup: the fence judges the call's text and never chases where a path really leads, so a path through a link works exactly as it does for the user.
+	# A link inside the project must not turn an in-project spelling into an
+	# outside mutation. The canonical policy resolves every existing component
+	# before the fence is decided.
 	var link_da := DirAccess.open(root_abs)
 	var tmp_abs := ProjectSettings.globalize_path(TMP_DIR).simplify_path()
 	var sym_out_dir := root_abs.path_join("..").simplify_path().path_join("gdllm_sym_outside")
@@ -388,10 +391,10 @@ func _test_delete_file() -> void:
 	_check(link_da.create_link(sym_out_dir, link_dir_abs) == OK, "test setup: a directory symlink is created inside the project")
 	var through_path := TMP_DIR + "/sym_linked/victim.txt"
 	_check(FileAccess.file_exists(through_path), "test setup: the outside victim is reachable through the link")
-	_check(GDLLMTools._delete_target_guard(through_path) == "", "a path through the user's own symlink passes the guard — the fence never chases links")
+	_check(GDLLMTools._delete_target_guard(through_path).contains("OUTSIDE"), "a path through a symlink to outside is refused by its physical destination")
 	out = await _run("delete_file", {"path": through_path, "force": true}, true, true)
-	_check(out.begins_with("Deleted"), "a delete through a symlinked directory follows the user's own setup")
-	_check(not FileAccess.file_exists(sym_victim), "the delete landed on the link's real target, as that setup intends")
+	_check(out.contains("OUTSIDE"), "delete_file preserves the link-aware refusal end to end")
+	_check(FileAccess.file_exists(sym_victim), "the outside target behind the link was not touched")
 	DirAccess.remove_absolute(link_dir_abs)
 	DirAccess.remove_absolute(sym_out_dir)
 	# Deleting a broken file settles its ledger entries, so the reminder can't nag about a file that no longer exists.
@@ -940,18 +943,19 @@ func _test_load_error_display() -> void:
 	_check(not out.contains("loads cleanly"), "a file with pre-existing load errors earns no engine-checked claim")
 
 
-## The automatic check_script report on an unchanged broken file collapses to one self-sufficient line after its first full dump — transcripts show a file with 48 pre-existing errors re-dumping them on every read.
+## Reading source is inert even when it is malformed. Compilation is an explicit
+## check_script action behind the Run project code capability, never a read hook.
 func _test_auto_check_collapse() -> void:
 	var broken := TMP_DIR + "/auto_broken.gd"
 	_write(broken, "extends RefCounted\n\n\nfunc bad( -> int:\n\treturn 1\n")
 	var out := await _run("read_file", {"path": broken}, false)
-	_check(out.contains("Automatic check_script") and out.contains("account for them"), "reading a broken script reports its errors in full")
+	_check(out.contains("func bad(") and not out.contains("Automatic check_script"), "reading a broken script returns inert source without compiling it")
 	out = await _run("read_file", {"path": broken}, false)
-	_check(out.contains("still has the same") and not out.contains("account for them"), "an unchanged report collapses to one line on the next read")
-	_check(out.contains("likely pre-existing") and not out.contains("YOUR earlier edit"), "a never-edited broken file keeps the pre-existing framing")
+	_check(not out.contains("Automatic check_script"), "a repeated read remains inert")
+	_check(not GDLLMTools._fallback_ledger.auto_check_reports.has(broken), "inert reads do not alter the compiler-report ledger")
 	_write(broken, "extends RefCounted\n\n\nfunc bad() -> int:\n\treturn nonexistent_symbol\n")
 	out = await _run("read_file", {"path": broken}, false)
-	_check(out.contains("account for them"), "a changed error set reports in full again")
+	_check(out.contains("nonexistent_symbol") and not out.contains("Automatic check_script"), "changed malformed source is still only text until check_script is called")
 
 
 ## The load check runs in a child process whose uid registry (.godot/uid_cache.bin) can't see a uid this process registered moments ago through the kept-uid lint, so a coordinated preload pair came back BROKEN while the same result's uid note said KEPT; load_check.gd now registers the target's and its siblings' header uids in-child.
@@ -1189,7 +1193,7 @@ func _test_edit_ledger_demotion() -> void:
 	_check(out.contains("YOUR earlier edit") and not out.contains("YOU introduced"), "a re-landed error set already blamed on the model is demoted with honest attribution")
 	_check(GDLLMTools._fallback_ledger.broken_files.has(p), "the demoted verdict still records the file as broken")
 	out = await _run("read_file", {"path": p}, false)
-	_check(out.contains("YOUR earlier edit") and not out.contains("likely pre-existing"), "the automatic hook attributes the model's own unfixed errors instead of calling them pre-existing")
+	_check(not out.contains("Automatic check_script") and GDLLMTools._fallback_ledger.broken_files.has(p), "an inert read neither reclassifies nor clears an explicitly blamed broken file")
 	_write(p, clean)
 	await _run("check_script", {"path": p}, false)
 	_check(not GDLLMTools._fallback_ledger.auto_check_reports.has(p), "a clean check settles the shared ledger")
@@ -1197,10 +1201,10 @@ func _test_edit_ledger_demotion() -> void:
 	var q := TMP_DIR + "/ledger_demo_pre.gd"
 	var q_clean := "extends RefCounted\n\n\nfunc oops() -> int:\n\treturn 1\n"
 	_write(q, "extends RefCounted\n\n\nfunc oops() -> int:\n\treturn undeclared_thing\n")
-	await _run("read_file", {"path": q}, false)
+	await _run("check_script", {"path": q}, false)
 	_write(q, q_clean)
 	out = await _run("edit_file", {"path": q, "old_string": "return 1", "new_string": "return undeclared_thing"}, true)
-	_check(out.contains("likely pre-existing") and not out.contains("YOUR earlier edit"), "a never-blamed error set keeps the pre-existing framing")
+	_check(not out.contains("YOU introduced") and not out.contains("YOUR earlier edit"), "a previously reported, never-blamed error set is not attributed to the model")
 	_check(not GDLLMTools._fallback_ledger.broken_files.has(q), "pre-existing damage stays out of the broken-file ledger")
 	_write(q, q_clean)
 	await _run("check_script", {"path": q}, false)

@@ -18,10 +18,6 @@ config/name="gdllm-godot-agentic-harness"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 
-[autoload]
-
-GDLLMGameAgent="*uid://brjli541h1ttx"
-
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/markdownlabel/plugin.cfg", "res://addons/gdllm-godot-agentic-harness/plugin.cfg")

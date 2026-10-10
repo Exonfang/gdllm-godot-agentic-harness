@@ -76,6 +76,7 @@ func _init() -> void:
 func configure_from(resolved: Dictionary) -> void:
 	api_base = String(resolved.get("base_url", ""))
 	api_key = String(resolved.get("api_key", ""))
+	GDLLMSecretRedactor.register_secret(api_key)
 	adapter_kind = String(resolved.get("kind", GDLLMSources.KIND_OLLAMA))
 	model = String(resolved.get("model", ""))
 	effort = String(resolved.get("effort", ""))
@@ -100,7 +101,7 @@ func _refuse_stale_source() -> bool:
 
 
 func _emit_request_failed(reason: String) -> void:
-	request_failed.emit(reason)
+	request_failed.emit(GDLLMSecretRedactor.redact(reason))
 
 
 ## A fresh adapter for this client's current wire format.
@@ -197,7 +198,7 @@ func _on_tags_completed(result: int, response_code: int, _headers: PackedStringA
 		return
 	if response_code != 200:
 		# The body rides along because it's what tells e.g. a bad API key (a 401 that says so) apart from a dead route.
-		last_models_error = "HTTP %d: %s" % [response_code, body.get_string_from_utf8().strip_edges().left(300)]
+		last_models_error = GDLLMSecretRedactor.redact("HTTP %d: %s" % [response_code, body.get_string_from_utf8().strip_edges().left(300)])
 		# A 404 on the models path almost always means the Base URL's shape doesn't match the kind, so the error names the fix instead of leaving only the provider's complaint.
 		if response_code == 404:
 			last_models_error += " — " + _kind_404_hint()
@@ -277,7 +278,7 @@ func _on_context_timeout(serial: int) -> void:
 func _on_context_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		# Non-fatal: the meter shows an unknown and the next model apply retries; the warning still names the cause for the console.
-		push_warning("LLMClient: context-window probe failed (%s)" % (_request_result_failure(result) if result != HTTPRequest.RESULT_SUCCESS else "HTTP %d: %s" % [response_code, body.get_string_from_utf8().strip_edges().left(300)]))
+		push_warning(GDLLMSecretRedactor.redact("LLMClient: context-window probe failed (%s)" % (_request_result_failure(result) if result != HTTPRequest.RESULT_SUCCESS else "HTTP %d: %s" % [response_code, body.get_string_from_utf8().strip_edges().left(300)])))
 		_emit_context_window(0)
 		return
 	# _context_model, not `model`: the probe may have been issued for a model the session has since switched away from, and the reply describes the one it asked about.
@@ -307,7 +308,7 @@ func send_chat_request(messages: Array, system_prompt: String = "", tools: Array
 	if _busy:
 		# A visible failure, not a silent drop: without request_failed the caller waits forever on a request that never left.
 		push_warning("LLMClient busy; ignoring request")
-		request_failed.emit("Client busy: a request is already in flight, so this one was not sent.")
+		_emit_request_failed("Client busy: a request is already in flight, so this one was not sent.")
 		return
 	if not await _adopt_fresh_subscription_token():
 		return
@@ -488,18 +489,18 @@ func _finish_stream() -> void:
 		_stream_buffer = ""
 	_teardown_stream()
 	if _stream_error != "":
-		request_failed.emit(_stream_error + _failure_hints(_stream_error))
+		_emit_request_failed(_stream_error + _failure_hints(_stream_error))
 	elif _stream_bad_code != 0:
 		var body := _stream_buffer.strip_edges()
-		request_failed.emit("HTTP %d: %s%s" % [_stream_bad_code, body, _failure_hints(body)])
+		_emit_request_failed("HTTP %d: %s%s" % [_stream_bad_code, body, _failure_hints(body)])
 	elif not _stream_done and _stream_content == "" and _stream_tool_calls.is_empty():
 		# The stream ended before anything usable arrived — a failure, not an empty reply — and the three ways that happens point at different levers, so name the one that applies.
 		if _stream_est_out_chars > 0:
-			request_failed.emit("Connection to %s closed mid-reply, before any usable content arrived." % api_base)
+			_emit_request_failed("Connection to %s closed mid-reply, before any usable content arrived." % api_base)
 		elif _stream_received_body:
-			request_failed.emit("%s answered, but nothing in the reply matched this source's wire format — check that the source's API type fits the endpoint in the Connections dialog." % api_base)
+			_emit_request_failed("%s answered, but nothing in the reply matched this source's wire format — check that the source's API type fits the endpoint in the Connections dialog." % api_base)
 		else:
-			request_failed.emit("Connection to %s closed before any reply arrived." % api_base)
+			_emit_request_failed("Connection to %s closed before any reply arrived." % api_base)
 	elif not _stream_tool_calls.is_empty():
 		tool_calls_received.emit(_stream_tool_calls, _stream_content, _stream_final_stats())
 	else:
@@ -536,7 +537,7 @@ func _fail_stream(reason: String) -> void:
 	if not _streaming:
 		return
 	_teardown_stream()
-	request_failed.emit(reason)
+	_emit_request_failed(reason)
 
 
 ## When a failed request carried a reasoning-effort level and the provider's message points at that knob, name the level sent and where it's configured — the promised loud failure for an unaccepted level should land at the Effort Configuration dialog, not stop at a bare HTTP 400.
@@ -628,7 +629,7 @@ static func _completion_parse_failure(endpoint: String, text: String) -> String:
 
 ## A single-line, length-capped quote of a response body for an error message — enough to recognize what answered, never enough to dump a page into the log.
 static func _body_excerpt(text: String) -> String:
-	var flat := text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+	var flat := GDLLMSecretRedactor.redact(text).replace("\n", " ").replace("\r", " ").replace("\t", " ")
 	while flat.contains("  "):
 		flat = flat.replace("  ", " ")
 	if flat.length() <= BODY_EXCERPT_CHARS:
@@ -674,7 +675,7 @@ func _post(path: String, payload: String) -> void:
 	if _busy:
 		# Same visible failure as send_chat_request's busy drop, so a completion caller never waits on a request that never left.
 		push_warning("LLMClient busy; ignoring request")
-		request_failed.emit("Client busy: a request is already in flight, so this one was not sent.")
+		_emit_request_failed("Client busy: a request is already in flight, so this one was not sent.")
 		return
 	if not await _adopt_fresh_subscription_token():
 		return
@@ -684,16 +685,16 @@ func _post(path: String, payload: String) -> void:
 	var err := http_request.request(adapter.normalize_base(api_base) + path, _request_headers(adapter), HTTPClient.METHOD_POST, payload)
 	if err != OK:
 		_busy = false
-		request_failed.emit(_endpoint_failure("sending the request failed (%s)" % error_string(err)))
+		_emit_request_failed(_endpoint_failure("sending the request failed (%s)" % error_string(err)))
 
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	_busy = false
 	if result != HTTPRequest.RESULT_SUCCESS:
-		request_failed.emit(_request_result_failure(result))
+		_emit_request_failed(_request_result_failure(result))
 		return
 	if response_code != 200:
-		request_failed.emit("HTTP %s: %s" % [response_code, body.get_string_from_utf8()])
+		_emit_request_failed("HTTP %s: %s" % [response_code, body.get_string_from_utf8()])
 		return
 	var text := body.get_string_from_utf8()
 	var json := JSON.new()
@@ -706,7 +707,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			recovered_stats["est_tokens_out"] = estimate_tokens(String(recovered.get("text", "")).length())
 			response_received.emit(String(recovered.get("text", "")), recovered_stats)
 			return
-		request_failed.emit(_completion_parse_failure(api_base, text))
+		_emit_request_failed(_completion_parse_failure(api_base, text))
 		return
 	# Same reported-first shape as _stream_final_stats — the body's usage plus the client's own payload estimates — so a background chore's panel can render the footer a chat turn gets.
 	var adapter := _make_adapter()

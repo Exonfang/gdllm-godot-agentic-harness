@@ -34,7 +34,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 - Anthropic-like cache boundary aware compaction. Cache TTL is configurable per model and provider, auto-retires idle tools and loudly emits the boundary so the user can choose to compact manually if they prefer.
 - Supports agents spawning subagents.
 - Session history management.
-- Per-session permission gates (read only, make changes, make changes and delete files)
+- Per-session permission gates for reading, external paths, project-code execution, editor control, changes, project settings, and deletion.
 - Loop control breaks - notices when an agent is thrashing and stops them.
 - Send-safety gates - notices regarding unsaved work before prompts are sent.
 - Attachment support (selected nodes, scripts, and script selections)
@@ -94,3 +94,6 @@ While this harness is ready-to-use as is, there are a few additional features I'
 Contributions are welcome, including LLM generated or assisted contributions, however **all text communication must be human-authored.** Entirely autonomous issues or pull requests will be closed.
 
 Changes should be supported by your own benchmarking/testing; It's expected that you have done the diligence to run the same prompt before and after changes 10-30x to ensure the changes are improving completion rate, reducing the average tokens per task, or reducing the average number of turns.
+
+Security-sensitive reports should follow [SECURITY.md](SECURITY.md), and the
+local agent boundaries are documented in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).

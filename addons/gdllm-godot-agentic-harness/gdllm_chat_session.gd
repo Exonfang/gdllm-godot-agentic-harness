@@ -7,6 +7,7 @@ signal history_changed(session_id: String) ## A history entry was appended (a tu
 signal model_changed(session_id: String, model: String) ## The picker's selection changed; the dock persists it and updates the global default.
 signal make_changes_toggled(session_id: String, on: bool) ## The user flipped this session's "Make changes"; the dock persists it on the session's record. Per-session, so one chat can edit while another stays read-only.
 signal delete_files_toggled(session_id: String, on: bool) ## The user flipped this session's "Delete files"; the dock persists it on the session's record, like make_changes_toggled.
+signal run_project_code_toggled(session_id: String, on: bool) ## The user explicitly flipped this session's project-code execution capability; off by default and persisted independently of edits.
 signal tools_enabled_toggled(session_id: String, on: bool) ## The user flipped this session's "Tools"; the dock persists it on the session's record.
 signal effort_changed(session_id: String, effort: String) ## The effort dropdown's selection changed (or a model switch reset it to Default); the dock persists it on the session's record. "" is Default — no effort is sent.
 signal connections_requested ## The ⚙ button beside the picker was pressed; the dock opens its shared Connections dialog (the dialog is global, so the session only asks for it).
@@ -129,6 +130,8 @@ var _awaiting_loop_summary: bool = false ## A tool's loop guard tripped and we'v
 var _sent_with_tools := false ## Whether the in-flight request carried tools, captured at send time — the attach-row toggles stay live mid-request, so a landing-time read could lie; stamped on the turn it produces (see _send_chat_request).
 var _sent_make_changes := false ## The "Make changes" state the in-flight request's tools were filtered under, captured and stamped like _sent_with_tools.
 var _sent_delete_files := false ## The "Delete files" state the in-flight request's tools were filtered under, captured and stamped like _sent_make_changes.
+var _sent_run_project_code := false ## The explicit execution state the in-flight request was filtered under, stamped so context reconstruction never borrows a later opt-in.
+var _sent_capabilities: Dictionary = GDLLMCapabilities.none() ## Immutable authority captured with the in-flight request; live toggles may narrow or widen only the next request, never tool calls produced by this one.
 var _sent_effort := "" ## The reasoning-effort level the in-flight request went out under ("" = Default), captured and stamped like _sent_with_tools so the inspector replays the real request.
 ## Subagent state. A tool can defer heavy work (e.g. read_file mapping a long file, or a run_subagent delegation) to a fresh-context model the session runs mid-tool-loop. Several deferred in one assistant turn run concurrently — each a RunningSubagent with its own live panel — and the turn awaits them all before continuing (see _launch_subagent and _drive_subagent).
 var _running_subagents: Array = [] ## This turn's subagents (RunningSubagent handles), both running and queued behind the parallelism cap; the Stop button cancels/discards every one, and the turn resumes via subagents_all_done once the list empties.
@@ -228,6 +231,7 @@ var _attach_node_check: Button ## Attaches the node selected in the editor's Sce
 var _enable_tools_check: Button ## Gates tool calling; when off, requests carry no tools and the model can only chat
 var _make_changes_check: Button ## Gates mutating tools; when off, tools that modify the project are hidden from the catalog and refused if called anyway
 var _delete_files_check: Button ## Gates destructive tools the same way; shown only while Make changes is on, since deleting is a stricter tier of editing
+var _run_project_code_check: Button ## Explicit capability for tools that load or execute project code; independent of source-file edits and off by default
 var _context_label: Label ## The "~est+rep/max" context meter — a live chars-per-token estimate of what the next send would append, the last request's reported prompt tokens, and the model's maximum context window (see _update_context_label) — sharing the response notice's flexible slot in the attach row and yielding to it while the notice is lit. Deliberately a passive readout: manual compaction got its own button beside the jump arrows instead (_compact_button), so the meter is never a click target.
 var _context_probe_attempted := "" ## The qualified id the last context-window probe asked about, successful or not. reapply_source re-applies the model on every editor-settings write, so without this latch a failing probe would re-fire per write; a repeat attempt for the same id waits for a deliberate model change instead.
 var _response_notice: Label ## "Response generated!" caption beside the ↓ jump button: lit when a reply lands while the user is scrolled up — the log never moves under them — and cleared once the bottom comes into view (see _set_response_notice).
@@ -508,6 +512,11 @@ func _build_ui() -> void:
 	_make_changes_check.toggled.connect(_on_make_changes_toggled)
 	attach_row.add_child(_make_changes_check)
 
+	# Execution is its own authority: reading scripts and scenes remains safe with this off, while validation, game-running, and project-code loaders stay hidden and refused.
+	_run_project_code_check = _make_attach_toggle("Play", "Run", "Run project code: allow tools that load or execute this project's scripts, scenes, resources, autoloads, or game. Off by default and remembered per session. Reading files never needs this permission.")
+	_run_project_code_check.toggled.connect(_on_run_project_code_toggled)
+	attach_row.add_child(_run_project_code_check)
+
 	# A stricter tier of the Edits toggle, so it only shows while Make changes is on (see _on_make_changes_toggled); hidden it stays ineffective through _deletes_allowed.
 	_delete_files_check = _make_attach_toggle("Remove", "Delete", "Delete files: allow the model to delete project files with the delete_file tool (moved to the system trash, refused while other files still reference them). Only available while Make changes is on; every deletion is shown in the chat. Set per session.")
 	_delete_files_check.visible = false
@@ -608,6 +617,8 @@ func _apply_record() -> void:
 	if is_instance_valid(_delete_files_check):
 		_delete_files_check.set_pressed_no_signal(bool(_record.get("delete_files", false)))
 		_delete_files_check.visible = bool(_record.get("make_changes", false))
+	if is_instance_valid(_run_project_code_check):
+		_run_project_code_check.set_pressed_no_signal(bool(_record.get("run_project_code", false)))
 	if is_instance_valid(_enable_tools_check):
 		_enable_tools_check.set_pressed_no_signal(bool(_record.get("tools_enabled", true)))
 	_history.assign(_record.get("history", []))
@@ -1541,6 +1552,11 @@ func _on_make_changes_toggled(on: bool) -> void:
 ## The user flipped this session's "Delete files"; the per-session persistence counterpart to _on_make_changes_toggled.
 func _on_delete_files_toggled(on: bool) -> void:
 	delete_files_toggled.emit(session_id, on)
+
+
+## The user explicitly changed whether this session may execute project code. Restore uses set_pressed_no_signal, so this signal always represents real consent.
+func _on_run_project_code_toggled(on: bool) -> void:
+	run_project_code_toggled.emit(session_id, on)
 
 
 ## The user flipped this session's "Tools"; the per-session persistence counterpart to _on_make_changes_toggled.
@@ -2959,6 +2975,8 @@ func _send_chat_request(messages: Array, tools: Array) -> void:
 	_sent_with_tools = not tools.is_empty()
 	_sent_make_changes = _changes_allowed()
 	_sent_delete_files = _deletes_allowed()
+	_sent_run_project_code = _run_project_code_allowed()
+	_sent_capabilities = _current_capabilities()
 	_sent_effort = _effort
 	_last_request_unix = int(Time.get_unix_time_from_system()) # the idle-gap boundary measures from the last outbound request, tool-loop continuations included
 	# The stamp rides the record (persisted by the turn's normal saves), so a reload measures the real idle gap instead of presuming the provider cache cold — the cache is content-keyed on the provider's side and doesn't care that the editor restarted.
@@ -2992,6 +3010,7 @@ func _on_response_received(text: String, stats: Dictionary) -> void:
 	entry["sent_with_tools"] = _sent_with_tools
 	entry["sent_make_changes"] = _sent_make_changes
 	entry["sent_delete_files"] = _sent_delete_files
+	entry["sent_run_project_code"] = _sent_run_project_code
 	if _sent_effort != "":
 		entry["effort"] = _sent_effort # the level the request actually carried, display-only like the stamps above (see _show_turn_context)
 	if redirected:
@@ -3052,6 +3071,7 @@ func _on_tool_calls_received(tool_calls: Array, content: String, stats: Dictiona
 	entry["sent_with_tools"] = _sent_with_tools # the same footprint stamps a normal turn gets (see _send_chat_request)
 	entry["sent_make_changes"] = _sent_make_changes
 	entry["sent_delete_files"] = _sent_delete_files
+	entry["sent_run_project_code"] = _sent_run_project_code
 	if _sent_effort != "":
 		entry["effort"] = _sent_effort
 	# A provider that must see its own turn echoed verbatim to continue the loop (Anthropic) left its raw blocks on the client; store them beside the turn so the resend can echo them (see _history_for_request and AnthropicAdapter).
@@ -3090,7 +3110,7 @@ func _on_tool_calls_received(tool_calls: Array, content: String, stats: Dictiona
 			# Attached off the committed turn's calls before anything runs, so a Stop mid-round still leaves the set a reload would rebuild.
 			if called != GDLLMTools.TOOL_SEARCH and GDLLMTools.REGISTRY.has(called) and not _active_tools.has(called):
 				# Only a tool that will actually ride the continuation counts as a boundary: a gate-hidden one is dropped by _tools_for_active_set, leaving the tools block byte-identical, so retiring idle schemas on it would CAUSE a warm-cache rewrite instead of piggybacking on one. The attach itself stands for reload parity.
-				if (_changes_allowed() or not GDLLMTools.is_mutating(called)) and (_deletes_allowed() or not GDLLMTools.is_destructive(called)):
+				if not GDLLMTools.schema_for(called, _sent_capabilities).is_empty():
 					newly_attached.append(called)
 				_active_tools[called] = true
 				_tool_last_used[called] = _user_turn
@@ -3107,7 +3127,7 @@ func _on_tool_calls_received(tool_calls: Array, content: String, stats: Dictiona
 		var args := _tool_call_args(tc)
 		_add_tool_call_block(tool_name, args)
 		_show_live_tool_caption(tool_name)
-		var result: Dictionary = await GDLLMTools.execute(tool_name, args, _changes_allowed(), _deletes_allowed(), _active_tools, _tool_ledger, session_id)
+		var result: Dictionary = await GDLLMTools.execute(tool_name, args, _sent_capabilities, _active_tools, _tool_ledger, session_id)
 		_clear_live_tool_caption()
 		if _tool_turn_aborted:
 			break # a Stop landed mid-execute; the rollback below drops the whole turn, so don't run the remaining calls
@@ -4438,24 +4458,33 @@ func _set_response_notice(lit: bool) -> void:
 func _build_request_tools() -> Array:
 	if not (is_instance_valid(_enable_tools_check) and _enable_tools_check.button_pressed):
 		return []
-	return _tools_for_active_set(_active_tools, _changes_allowed(), _deletes_allowed(), _retirement_disclosed)
+	return _tools_for_active_set(_active_tools, _current_capabilities(), _retirement_disclosed)
 
 
-## The tool array for a request given an activated set: tool_search plus each activated tool's schema, with mutating tools dropped while `allow_changes` is off — and destructive ones while `allow_delete` is off — so toggling either mid-session takes effect on the very next request. `retirement_disclosed` adds tool_search's detachment note once a retirement has happened. Split from _build_request_tools so a past turn's tool list can be rebuilt from its own historical set, stamped toggle states, and as-of-then latch (see _show_turn_context).
-func _tools_for_active_set(active: Dictionary, allow_changes: bool, allow_delete: bool, retirement_disclosed: bool = false) -> Array:
-	var tools: Array = [GDLLMTools.tool_search_schema(allow_changes, allow_delete, active, retirement_disclosed)]
+## The tool array for a request given an activated set: tool_search plus every schema this immutable capability snapshot permits. Metadata is enforced inside GDLLMTools and unknown/missing capability requirements fail closed. Split from _build_request_tools so a past turn can rebuild its exact authority (see _show_turn_context).
+func _tools_for_active_set(active: Dictionary, capabilities: Dictionary, retirement_disclosed: bool = false) -> Array:
+	var tools: Array = [GDLLMTools.tool_search_schema(capabilities, active, retirement_disclosed)]
 	for tool_name in active:
-		if not allow_changes and GDLLMTools.is_mutating(tool_name):
-			continue
-		if not allow_delete and GDLLMTools.is_destructive(tool_name):
-			continue
-		var schema := GDLLMTools.schema_for(tool_name)
+		var schema := GDLLMTools.schema_for(tool_name, capabilities)
 		if not schema.is_empty():
 			tools.append(schema)
 	return tools
 
 
-## Whether the "Make changes" checkbox currently lets the model modify the project; read at each request and each tool execution so a mid-session toggle applies immediately.
+## One immutable boundary object for the live controls. Every caller — request schemas, direct dispatch, and subagents — receives the same seven-key authority rather than reconstructing booleans independently.
+func _current_capabilities() -> Dictionary:
+	return _capabilities_for_state(
+		is_instance_valid(_enable_tools_check) and _enable_tools_check.button_pressed,
+		_changes_allowed(),
+		_deletes_allowed(),
+		_run_project_code_allowed())
+
+
+func _capabilities_for_state(tools_enabled: bool, make_changes: bool, delete_files: bool, run_project_code: bool) -> Dictionary:
+	return GDLLMCapabilities.from_session(tools_enabled, make_changes, delete_files, run_project_code, GDLLMSettings.is_outside_tool_calls_allowed())
+
+
+## Whether the "Make changes" checkbox currently lets the model modify the project. It is captured at request send; tool calls produced by that request keep the immutable snapshot, while a live toggle applies to the next request.
 func _changes_allowed() -> bool:
 	return is_instance_valid(_make_changes_check) and _make_changes_check.button_pressed
 
@@ -4463,6 +4492,11 @@ func _changes_allowed() -> bool:
 ## Whether the "Delete files" checkbox currently lets the model delete project files. Make changes is part of the answer — deleting is a stricter tier of editing, and the toggle is hidden (not reset) while edits are off — so a stale pressed state can never leak through.
 func _deletes_allowed() -> bool:
 	return _changes_allowed() and is_instance_valid(_delete_files_check) and _delete_files_check.button_pressed
+
+
+## Whether the user explicitly enabled project-code execution for this session. Tools-off remains the outer gate inside _current_capabilities.
+func _run_project_code_allowed() -> bool:
+	return is_instance_valid(_run_project_code_check) and _run_project_code_check.button_pressed
 
 
 ## Re-attach every registered tool the stored history had activated — called or merely searched, minus any a persisted boundary retirement detached — so a reopened session keeps exactly the tools its last request carried rather than having to search for them again.
@@ -4600,7 +4634,7 @@ func _new_debug_button(text: String, tooltip: String) -> Button:
 	return btn
 
 
-## Rebuild the wire body of the request that produced the assistant turn at `history_index` — the same system prompt + trimmed history + tools composition the live send uses, through the same adapter — and pop it in the inspection dialog. Generated on demand from stored history rather than captured at send time; the Tools/Make changes states replay from the turn's stamps (see _send_chat_request), so the remaining trade-off is that the system prompt and tool schemas are read at their current values. `precompaction_event` (that compaction entry's history index, always `history_index` - 1) instead rebuilds the request as it WOULD have gone out had the event reclaimed nothing — same turn, same stamps, but the messages cut at the event leaves its own prunes unapplied while earlier events' still hold, so the pre-compaction state stays inspectable without any second copy of history.
+## Rebuild the wire body of the request that produced the assistant turn at `history_index` — the same system prompt + trimmed history + tools composition the live send uses, through the same adapter — and pop it in the inspection dialog. Generated on demand from stored history rather than captured at send time; the Tools/Edits/Delete/Run states replay from the turn's stamps (see _send_chat_request), so the remaining trade-off is that the system prompt and tool schemas are read at their current values. `precompaction_event` (that compaction entry's history index, always `history_index` - 1) instead rebuilds the request as it WOULD have gone out had the event reclaimed nothing — same turn, same stamps, but the messages cut at the event leaves its own prunes unapplied while earlier events' still hold, so the pre-compaction state stays inspectable without any second copy of history.
 func _show_turn_context(history_index: int, precompaction_event: int = -1) -> void:
 	_ensure_context_dialog()
 	# Which turn's stamps describe the request this event's context fed, and the two kinds of event answer differently. An AUTOMATIC event fires mid-send, so the reply it produced is the first conversation entry after it — landing on a user message there means that send failed, which the unavailable case below reports honestly. A MANUAL event sends nothing, so the first entry after it is the user's next message and the request that actually carried the compacted view is the assistant turn beyond it; stopping at the user message reported every manual event as unavailable (measured across the whole session store: every manual run that reclaimed anything).
@@ -4636,7 +4670,12 @@ func _show_turn_context(history_index: int, precompaction_event: int = -1) -> vo
 	# The turn's stamps say whether its request carried tools and under which "Make changes" state (see _send_chat_request); turns predating the stamps fall back to the live toggles, the old reconstruction.
 	elif bool(entry.get("sent_with_tools", is_instance_valid(_enable_tools_check) and _enable_tools_check.button_pressed)):
 		# The description latch replays as of this turn too, so a pre-retirement request reconstructs without the detachment note it never carried.
-		tools = _tools_for_active_set(_tools_active_as_of(as_of), bool(entry.get("sent_make_changes", _changes_allowed())), bool(entry.get("sent_delete_files", _deletes_allowed())), GDLLMTools.retirement_in_history(_history, as_of))
+		var historical_capabilities := _capabilities_for_state(
+			true,
+			bool(entry.get("sent_make_changes", _changes_allowed())),
+			bool(entry.get("sent_delete_files", _deletes_allowed())),
+			bool(entry.get("sent_run_project_code", false)))
+		tools = _tools_for_active_set(_tools_active_as_of(as_of), historical_capabilities, GDLLMTools.retirement_in_history(_history, as_of))
 	var full_messages: Array = []
 	# Composed like the send composes it — tools-carrying reconstructions include the skills roster — with the AGENTS.md and skills read at their current values, which the meta text's current-values caveat already covers.
 	var system_prompt := _composed_system_prompt(not tools.is_empty())
@@ -4658,7 +4697,7 @@ func _show_turn_context(history_index: int, precompaction_event: int = -1) -> vo
 	var prune_caveat := "a tool result pruned by a compaction event before this turn replays as the prune marker the model actually saw"
 	if precompaction_event >= 0:
 		prune_caveat = "this PRE-compaction view leaves the compaction event's own prunes unapplied so its pruned results show at full length (earlier events' prunes still hold), while the send-time and reported counts above describe the pruned request that actually went out — their gap from this reconstruction's estimate is roughly what compaction reclaimed"
-	var stamp_note := "the Tools/Make changes states and the effort level replay from this turn's own stamps (turns saved before the stamps fall back to the current toggles)" if stamped else "no request has gone out since this compaction, so the model, Tools/Make changes states, and effort level are this session's current ones rather than a turn's stamps"
+	var stamp_note := "the Tools/Edits/Delete/Run capability states and the effort level replay from this turn's own stamps (older turns without the Run stamp stay execution-disabled)" if stamped else "no request has gone out since this compaction, so the model, capability states, and effort level are this session's current ones rather than a turn's stamps"
 	_context_dialog_meta.text = "POST %s%s\n%s\nReconstructed on demand: the system prompt, tool schemas, and cache TTL are read at their current values, while %s; tool activations are re-derived from the searches and calls recorded in history, and %s." % [adapter.normalize_base(String(resolved.get("base_url", ""))), adapter.chat_path(), token_line, stamp_note, prune_caveat]
 	_context_save_name = "gdllm-context-message-%d%s.json" % [as_of + 1, ("-precompaction" if precompaction_event >= 0 else "")]
 	_present_context_dialog(JSON.stringify(body, "\t"))
@@ -5192,7 +5231,7 @@ func _drive_subagent(h: RunningSubagent) -> void:
 	# A run on a model other than the session's is named in the caption, so the swap is visible, not silent.
 	if source["model"] != session_source["model"] or source["source_id"] != session_source["source_id"]:
 		h.label += " · %s" % String(source["model"])
-	var text: String = await h.sub.run(source, h.system, h.prompt, h.use_tools, 1, _changes_allowed(), _deletes_allowed(), _tool_ledger)
+	var text: String = await h.sub.run(source, h.system, h.prompt, h.use_tools, 1, _sent_capabilities, _tool_ledger)
 	h.failed = text.begins_with("Error:")
 	# A failed run's success-framed preamble ("…use it directly", "an overview follows") would contradict the error's own next-step guidance, so the failure text stands alone.
 	h.result_text = text if h.failed else h.preamble + text
@@ -5760,6 +5799,8 @@ func _selected_scene_nodes() -> Array[Node]:
 ## `scene` is passed explicitly even though describe_scene defaults to the edited scene: without it, a re-run after the user switches tabs would describe a DIFFERENT scene's node of the same path, or fail — and the whole point of the pair is that re-running it returns what it returned.
 func _selected_node_attachments() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
+	if not GDLLMCapabilities.permits(_current_capabilities(), GDLLMCapabilities.RUN_PROJECT_CODE):
+		return out
 	var root := EditorInterface.get_edited_scene_root()
 	if root == null or root.scene_file_path == "":
 		# An unsaved scene has no path any argument could name, so no honest call can be claimed; the fused fallback carries it instead.
@@ -5783,6 +5824,8 @@ func _selected_node_attachments() -> Array[Dictionary]:
 
 ## What attaching the scene selection would add, as plain text — the estimate's input, and the fused fallback's body when no describe_scene call can be claimed.
 func _selected_node_context() -> String:
+	if not GDLLMCapabilities.permits(_current_capabilities(), GDLLMCapabilities.RUN_PROJECT_CODE):
+		return "Selected-node properties were not attached because reading live properties can invoke project-defined getters. Enable Run Project Code explicitly to attach them."
 	var root := EditorInterface.get_edited_scene_root()
 	if root == null:
 		return ""

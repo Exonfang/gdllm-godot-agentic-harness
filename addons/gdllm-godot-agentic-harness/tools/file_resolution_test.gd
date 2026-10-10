@@ -90,17 +90,17 @@ func _test_scene_detail_filter() -> void:
 		lines.append("metadata/prop_%02d = %d" % [i, i])
 	var path := _fixture("gdllm_resolve_probe_caps.tscn")
 	_write(path, "\n".join(lines) + "\n")
-	var capped := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "node_path": "."}))["content"])
+	var capped := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "node_path": "."}, true))["content"])
 	_check(capped.contains("(40 of 46 shown — pass \"filter\" with part of a name for the rest, or read_file this scene file with full: true)"), "the property cap names filter and the saved-route waiver")
 	_check(capped.contains("chars total)") and capped.contains("(a clipped value prints whole when \"filter\" names its property.)"), "a clipped value names the filter lever")
 	_check(not capped.contains("prop_44"), "entries past the cap are withheld by default")
-	var filtered := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "node_path": ".", "filter": "prop_44"}))["content"])
+	var filtered := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "node_path": ".", "filter": "prop_44"}, true))["content"])
 	_check(filtered.contains("Stored properties matching \"prop_44\" (1 of 46):") and filtered.contains("prop_44 = 44"), "a filter reaches an entry past the cap")
-	var whole := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "node_path": ".", "filter": "long_text"}))["content"])
+	var whole := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "node_path": ".", "filter": "long_text"}, true))["content"])
 	_check(whole.contains("y".repeat(200)), "a filtered value prints whole, never clipped")
-	var miss := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "node_path": ".", "filter": "zzz"}))["content"])
+	var miss := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "node_path": ".", "filter": "zzz"}, true))["content"])
 	_check(miss.contains("none of 46 match \"zzz\""), "a filter matching nothing says so")
-	var treeless := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "filter": "prop"}))["content"])
+	var treeless := String((await GDLLMTools.execute("describe_scene_file", {"path": path, "filter": "prop"}, true))["content"])
 	_check(treeless.begins_with("Error") and treeless.contains("node_path"), "filter without node_path is refused with the shape")
 
 
@@ -381,7 +381,7 @@ func _test_resource_load_cause() -> void:
 	var binary: String = GDLLMTools._resource_load_cause(_fixture(BINARY_RES))
 	_check(binary.contains("binary") and not binary.contains("read_file"), "a binary resource is never sent to read_file, which would only refuse it as non-text")
 	# A missing script dependency still loads (the node comes back scriptless), so the end-to-end check needs a scene the parser itself rejects.
-	var scene_call := String((await GDLLMTools.execute("describe_scene_file", {"path": _fixture(CORRUPT_SCENE)}))["content"])
+	var scene_call := String((await GDLLMTools.execute("describe_scene_file", {"path": _fixture(CORRUPT_SCENE)}, true))["content"])
 	_check(scene_call.contains("could not be loaded as a scene") and scene_call.contains("[gd_scene]"), "describe_scene_file's own refusal carries the cause, not just the failure")
 
 

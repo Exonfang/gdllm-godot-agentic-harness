@@ -48,7 +48,8 @@ func _check(cond: bool, label: String) -> void:
 
 ## Run a tool through the real execute dispatch and return its content string.
 func _run(tool_name: String, args: Dictionary, allow_changes := false) -> String:
-	return String((await GDLLMTools.execute(tool_name, args, allow_changes))["content"])
+	var capabilities := GDLLMCapabilities.from_session(true, allow_changes, false, true, false)
+	return String((await GDLLMTools.execute(tool_name, args, capabilities))["content"])
 
 
 ## A synthetic sidecar whose params are known, so the validation paths are driven against a fixed option set.

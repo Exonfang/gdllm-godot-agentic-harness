@@ -62,7 +62,8 @@ func _check(cond: bool, label: String) -> void:
 
 ## Run a tool through the real execute dispatch and return its content string.
 func _run(tool_name: String, args: Dictionary, allow_changes := false) -> String:
-	return String((await GDLLMTools.execute(tool_name, args, allow_changes))["content"])
+	var capabilities := GDLLMCapabilities.from_session(true, allow_changes, false, true, false)
+	return String((await GDLLMTools.execute(tool_name, args, capabilities))["content"])
 
 
 ## The known payload every decode/grid assertion is written against: sources 3 and 7 at fixed cells, one flipped cell, built through the engine's own encoder.
@@ -413,9 +414,10 @@ func _test_end_to_end() -> void:
 	var gated := await _run("read_tilemap", {"scene": FIXTURE_SCENE}, false)
 	_check(not gated.contains("Make changes"), "read_tilemap runs with Make changes off")
 	# The last two phrases are the wild-measured discovery gap: state-vocabulary questions (0/3 and 1/4 discovery) answered correctly but through ~110 KB of search where the 3.2 KB overview held the answer.
+	var read_capabilities := GDLLMCapabilities.from_session(true, false, false, true, false)
 	for phrase in ["tilemap", "tiles placed", "tileset terrains", "tile map grid", "empty layers", "hidden disabled"]:
 		var found_one := false
-		for entry in GDLLMTools.search(phrase, false):
+		for entry in GDLLMTools._search_permitted(phrase, read_capabilities):
 			var found_name := String(entry["name"])
 			if found_name == "read_tilemap" or found_name == "describe_tileset":
 				found_one = true
@@ -489,16 +491,18 @@ func _test_edit_gate() -> void:
 	_check(refusal.contains("Make changes"), "edit_tilemap rides the Make-changes gate")
 	var gated := false
 	var open := false
-	for entry in GDLLMTools.search("edit_tilemap", false):
+	var read_capabilities := GDLLMCapabilities.from_session(true, false, false, true, false)
+	var edit_capabilities := GDLLMCapabilities.from_session(true, true, false, true, false)
+	for entry in GDLLMTools._search_permitted("edit_tilemap", read_capabilities):
 		if String(entry["name"]) == "edit_tilemap":
 			gated = true
-	for entry in GDLLMTools.search("edit_tilemap", true):
+	for entry in GDLLMTools._search_permitted("edit_tilemap", edit_capabilities):
 		if String(entry["name"]) == "edit_tilemap":
 			open = true
 	_check(not gated and open, "the tool is searchable only when changes are allowed")
 	for phrase in ["change tiles", "replace tiles", "paint terrain"]:
 		var found := false
-		for entry in GDLLMTools.search(phrase, true):
+		for entry in GDLLMTools._search_permitted(phrase, edit_capabilities):
 			if String(entry["name"]) == "edit_tilemap":
 				found = true
 		_check(found, "tool_search finds edit_tilemap from \"%s\"" % phrase)
