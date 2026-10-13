@@ -24,6 +24,7 @@ func _init() -> void:
 	_test_toolless_flatten()
 	_test_thinking_config()
 	_test_stream_reassembly()
+	_test_silent_thinking_is_recognized()
 	_test_stream_refusal()
 	_test_stream_error()
 	_test_stop_reasons()
@@ -207,6 +208,10 @@ func _test_thinking_config() -> void:
 	adapter = LLMAdapters.AnthropicAdapter.new()
 	var haiku: Dictionary = adapter.build_chat_body("claude-haiku-4-5", [{"role": "user", "content": "Hi"}], [])
 	_check(not haiku.has("thinking"), "a family without adaptive thinking omits the field rather than risking a 400")
+	for model in ["claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]:
+		adapter = LLMAdapters.AnthropicAdapter.new()
+		var body: Dictionary = adapter.build_chat_body(model, [{"role": "user", "content": "Hi"}], [])
+		_check(body.get("thinking") == {"type": "adaptive", "display": "summarized"}, "%s opts back into the summarized trace its default omits" % model)
 
 
 func _test_stream_reassembly() -> void:
@@ -249,6 +254,22 @@ func _test_stream_reassembly() -> void:
 	var stats: Dictionary = _event_of(events, "done").get("stats", {})
 	_check(int(stats.get("tokens_in", 0)) == 150, "tokens_in sums fresh and cached input")
 	_check(int(stats.get("tokens_out", 0)) == 42, "tokens_out comes from the final usage delta")
+
+
+## A thinking turn whose trace text is omitted streams only lifecycle frames, pings, and a signature until its first visible block; each must still count as recognized, or LLMClient's wire-format guard times the healthy reply out as unparseable.
+func _test_silent_thinking_is_recognized() -> void:
+	var adapter := LLMAdapters.AnthropicAdapter.new()
+	for line in [
+		_sse({"type": "message_start", "message": {"usage": {"input_tokens": 100}}}),
+		_sse({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+		_sse({"type": "ping"}),
+		_sse({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig"}}),
+		_sse({"type": "content_block_stop", "index": 0}),
+	]:
+		var events: Array = adapter.parse_line(line)
+		_check(not events.is_empty(), "a silent-thinking frame yields an event: %s" % line)
+	_check(adapter.parse_line("event: ping").is_empty(), "an SSE event-name line still yields nothing")
+	_check(adapter.parse_line(_sse({"type": "response.created"})).is_empty(), "another wire format's frame is not mistaken for this one")
 
 
 func _test_stream_refusal() -> void:

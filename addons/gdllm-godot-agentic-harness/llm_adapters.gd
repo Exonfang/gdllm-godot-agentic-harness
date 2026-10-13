@@ -866,6 +866,7 @@ class OpenAIChatGPTAdapter extends OpenAIResponsesAdapter:
 class AnthropicAdapter extends LLMAdapter:
 	const API_VERSION := "2023-06-01" ## The anthropic-version header every request carries.
 	const CACHE_TTL_DEFAULT := 300 ## Anthropic's default prompt-cache lifetime (the 5-minute tier).
+	const STREAM_FRAME_TYPES: Array[String] = ["message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "ping"] ## The SSE frame types this wire format streams besides message_stop and error, each of which parse_line reports at least as progress.
 	const CACHE_TTL_LONG := 3600 ## The only other lifetime the API offers: the 1-hour tier, requested as ttl "1h" at 2x write cost instead of 1.25x (worth it from about three reuses).
 	# The fallback chat max_tokens (for a model whose cap no sweep has reported yet — /v1/messages requires the field, and the chat path streams, so a large value can't hit a transport timeout) and the one-shot completion cap are user-configurable — see GDLLMTunables' gdllm/network section.
 
@@ -989,14 +990,17 @@ class AnthropicAdapter extends LLMAdapter:
 		var data: Variant = json.get_data()
 		if not (data is Dictionary):
 			return []
-		match String(data.get("type", "")):
+		var type := String(data.get("type", ""))
+		match type:
 			"message_start":
 				if data.get("message") is Dictionary and data["message"].get("usage") is Dictionary:
 					_merge_usage(data["message"]["usage"])
 			"content_block_start":
 				_begin_block(data["content_block"] if data.get("content_block") is Dictionary else {})
 			"content_block_delta":
-				return _apply_delta(data["delta"] if data.get("delta") is Dictionary else {})
+				var events := _apply_delta(data["delta"] if data.get("delta") is Dictionary else {})
+				if not events.is_empty():
+					return events
 			"content_block_stop":
 				_end_block()
 			"message_delta":
@@ -1011,12 +1015,13 @@ class AnthropicAdapter extends LLMAdapter:
 				var err: Dictionary = data["error"] if data.get("error") is Dictionary else {}
 				var message := _text(err.get("message", "")) if data.get("error") is Dictionary else _text(data.get("error"))
 				return [{"type": "error", "message": _prefixed_error(_text(err.get("type", "")), message, trimmed)}]
-		return []
+		# Every other frame of this wire format is proof the reply parses — a thinking turn whose trace text is omitted streams only these (and a signature) until its first visible block, and the client's format guard must not read that silence as an unrecognized reply (see LLMClient._stream_saw_event).
+		return [{"type": "progress"}] if type in STREAM_FRAME_TYPES else []
 
-	## The thinking parameter for `model`. Adaptive thinking is requested only on families documented to accept it, so an unknown or older model never 400s on an unsupported knob; families whose default omits the trace text opt back in with display:"summarized" so the reasoning block the plugin renders isn't empty (the 4.6 family already defaults to summarized).
+	## The thinking parameter for `model`. Adaptive thinking is requested only on families documented to accept it, so an unknown or older model never 400s on an unsupported knob; families whose default omits the trace text (everything from Opus 4.7 on) opt back in with display:"summarized" so the reasoning block the plugin renders isn't empty (the 4.6 family already defaults to summarized).
 	func _thinking_config(model: String) -> Dictionary:
 		var name := model.to_lower()
-		for family in ["claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-5", "claude-fable", "claude-mythos"]:
+		for family in ["claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable", "claude-mythos"]:
 			if name.begins_with(family):
 				return {"type": "adaptive", "display": "summarized"}
 		for family in ["claude-opus-4-6", "claude-sonnet-4-6"]:
