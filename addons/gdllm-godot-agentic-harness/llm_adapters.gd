@@ -81,6 +81,11 @@ func parse_completion(_data: Variant) -> String:
 	return ""
 
 
+## The reasoning trace a parsed completion response body carried beside its reply, or "" when the provider returned none (or this adapter doesn't lift it out). Kept apart from the reply so a background chore can show the trace without it polluting the result.
+func parse_completion_thinking(_data: Variant) -> String:
+	return ""
+
+
 ## The usage counters out of a parsed completion response body, mapped onto the plugin's stat keys; {} when the body carries none.
 func parse_completion_stats(_data: Variant) -> Dictionary:
 	return {}
@@ -178,7 +183,7 @@ static func _last_user_index(messages: Array) -> int:
 	return last_user
 
 
-## Native Ollama: /api/chat NDJSON, /api/tags, /api/generate. The canonical shapes are already Ollama's, so building and parsing are near pass-throughs.
+## Native Ollama: /api/chat (NDJSON for chat turns, one JSON body for one-shot completions), /api/tags, /api/show. The canonical shapes are already Ollama's, so building and parsing are near pass-throughs.
 class OllamaAdapter extends LLMAdapter:
 	func chat_path() -> String:
 		return "/api/chat"
@@ -277,19 +282,26 @@ class OllamaAdapter extends LLMAdapter:
 				return int(parts[1])
 		return 0
 
+	## A one-shot completion rides /api/chat, not /api/generate: only the chat endpoint splits a thinking model's reasoning into `message.thinking` — on /api/generate a template that opens <think> inside the prompt (Unsloth's Qwen GGUFs) returns the trace and its lone closing tag inline in `response`.
 	func completion_request(model: String, system_prompt: String, prompt: String) -> Dictionary:
-		return {"path": "/api/generate", "body": {"model": model, "system": system_prompt, "prompt": prompt, "stream": false}}
+		var messages: Array = []
+		if system_prompt != "":
+			messages.append({"role": "system", "content": system_prompt})
+		messages.append({"role": "user", "content": prompt})
+		return {"path": "/api/chat", "body": {"model": model, "messages": messages, "stream": false}}
 
 	func parse_completion(data: Variant) -> String:
-		if data is Dictionary:
-			if data.has("response"):
-				return String(data["response"])
-			if data.get("message") is Dictionary:
-				return String(data["message"].get("content", ""))
+		if data is Dictionary and data.get("message") is Dictionary:
+			return _text(data["message"].get("content", ""))
+		return ""
+
+	func parse_completion_thinking(data: Variant) -> String:
+		if data is Dictionary and data.get("message") is Dictionary:
+			return _text(data["message"].get("thinking", ""))
 		return ""
 
 	func parse_completion_stats(data: Variant) -> Dictionary:
-		# /api/generate reports the same top-level counters as a chat stream's final chunk.
+		# A non-streamed /api/chat reply reports the same top-level counters as a chat stream's final chunk.
 		return _stats(data) if data is Dictionary else {}
 
 	## Ollama's usage/timing counters; durations stay in nanoseconds, as Ollama reports them. Missing fields default to 0.

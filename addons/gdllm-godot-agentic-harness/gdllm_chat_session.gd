@@ -4696,7 +4696,9 @@ func _show_title_task_context(data: Dictionary) -> void:
 	_context_dialog_meta.text = "POST %s%s\nReconstructed on demand through the current Tasks Model settings; the system prompt and opening message replay verbatim from this run's record." % [adapter.normalize_base(String(resolved.get("base_url", ""))), String(request.get("path", ""))]
 	# .txt, not .json — the raw reply rides after the request body, so the dump isn't parseable JSON.
 	_context_save_name = "gdllm-task-context.txt"
-	_present_context_dialog("%s\n\nRaw reply (verbatim, before title sanitization):\n%s" % [JSON.stringify(request.get("body", {}), "\t"), reply])
+	var thinking := String(data.get("thinking", ""))
+	var reasoning := ("\n\nReasoning (returned beside the reply):\n%s" % thinking) if thinking.strip_edges() != "" else ""
+	_present_context_dialog("%s%s\n\nRaw reply (verbatim, before title sanitization):\n%s" % [JSON.stringify(request.get("body", {}), "\t"), reasoning, reply])
 
 
 ## Cap `dialog` at the usable screen so no child's minimum-size claim can size its native window past what the GPU can present. The concrete failure this prevents, caught live 2026-07-20: an autowrapped label that has never had a layout reports its minimum height wrapped at zero width (21587 px measured), a wrap_controls dialog sizes its native window to that claim, and Mesa's Wayland swap intermittently faults in dri2_query_image on the over-limit surface instead of refusing it — an editor crash on first open. Applied to every plugin dialog that holds an autowrapped label (the dock's dialogs call this too). No-op headless, where the usable rect is empty.
@@ -5495,18 +5497,19 @@ func begin_title_task(model_label: String, system_prompt: String, prompt: String
 
 
 ## Settle the title panel with the run's outcome and persist the whole exchange as a display-only history entry, so it replays on reload but is never re-sent to any model (see _history_for_request). When the live panel is gone (the tab was closed and reopened mid-run) the settled panel renders whole instead, unless the reopened log itself still awaits its replay — then the entry alone suffices.
-func settle_title_task(model_label: String, system_prompt: String, prompt: String, result: String, failed: bool, seconds: float, raw: String = "", stats: Dictionary = {}) -> void:
+func settle_title_task(model_label: String, system_prompt: String, prompt: String, result: String, failed: bool, seconds: float, raw: String = "", stats: Dictionary = {}, thinking: String = "") -> void:
 	if _title_task_active:
 		seconds = _title_task_elapsed
 	_title_task_active = false
 	# The live inspection button holds this dict, so merging the outcome in is what lets a press after settle show the raw reply.
-	_title_task_debug.merge({"result": result, "failed": failed, "raw": raw}, true)
-	var entry := title_task_entry(model_label, system_prompt, prompt, result, failed, seconds, raw, stats)
+	_title_task_debug.merge({"result": result, "failed": failed, "raw": raw, "thinking": thinking}, true)
+	var entry := title_task_entry(model_label, system_prompt, prompt, result, failed, seconds, raw, stats, thinking)
 	_history.append(entry)
 	if is_instance_valid(_title_task_caption):
 		_title_task_caption.text = _title_task_done_caption(model_label, seconds)
 		_settle_fold_summary(_title_task_caption, _title_fold_summary(failed))
 		var body := _title_task_caption.get_parent() as VBoxContainer
+		_add_title_task_thinking(body, thinking)
 		_add_title_task_result(body, result, failed)
 		_add_title_task_stats(body, entry)
 	elif not _needs_replay:
@@ -5519,19 +5522,22 @@ func settle_title_task(model_label: String, system_prompt: String, prompt: Strin
 	history_changed.emit(session_id)
 
 
-## The display-only history entry recording one Tasks-Model title run; static so the dock can persist the same shape onto a session whose tab closed mid-run. `raw` keeps the model's reply verbatim — the sanitized `result` alone can't show what a mangled reply actually said (see _show_title_task_context). `stats` is stored exactly when its footer would render (see _stats_has_counts), so the reloaded panel matches the live one.
-static func title_task_entry(model_label: String, system_prompt: String, prompt: String, result: String, failed: bool, seconds: float, raw: String = "", stats: Dictionary = {}) -> Dictionary:
+## The display-only history entry recording one Tasks-Model title run; static so the dock can persist the same shape onto a session whose tab closed mid-run. `raw` keeps the model's reply verbatim — the sanitized `result` alone can't show what a mangled reply actually said (see _show_title_task_context). `stats` is stored exactly when its footer would render (see _stats_has_counts), so the reloaded panel matches the live one; `thinking`, the reasoning the provider returned beside the reply, only when non-blank.
+static func title_task_entry(model_label: String, system_prompt: String, prompt: String, result: String, failed: bool, seconds: float, raw: String = "", stats: Dictionary = {}, thinking: String = "") -> Dictionary:
 	var entry := {"role": "task", "task": "session_title", "model": model_label, "system": system_prompt, "prompt": prompt, "result": result, "failed": failed, "seconds": seconds, "raw": raw}
+	if thinking.strip_edges() != "":
+		entry["thinking"] = thinking
 	if _stats_has_counts(stats):
 		entry["stats"] = stats
 	return entry
 
 
-## Rebuild a completed title run's gray panel from its stored entry — settled caption, request disclosure, outcome row, and stats footer. Shared by history replay and a settle whose live panel is gone. The inspection button lands above the panel, matching the live order.
+## Rebuild a completed title run's gray panel from its stored entry — settled caption, request disclosure, reasoning, outcome row, and stats footer. Shared by history replay and a settle whose live panel is gone. The inspection button lands above the panel, matching the live order.
 func _replay_title_task(entry: Dictionary) -> void:
 	_add_task_debug_button(entry)
 	var body := _new_title_task_panel(_title_fold_summary(bool(entry.get("failed", false))))
 	_build_title_task_rows(body, _title_task_done_caption(String(entry.get("model", "")), float(entry.get("seconds", 0.0))), String(entry.get("system", "")), String(entry.get("prompt", "")))
+	_add_title_task_thinking(body, String(entry.get("thinking", "")))
 	_add_title_task_result(body, String(entry.get("result", "")), bool(entry.get("failed", false)))
 	_add_title_task_stats(body, entry)
 
@@ -5554,6 +5560,12 @@ func _add_title_task_stats(body: VBoxContainer, entry: Dictionary) -> void:
 	var footer := _build_stats_footer(entry.get("stats", {}), float(entry.get("seconds", 0.0)))
 	if footer != null:
 		body.add_child(footer)
+
+
+## Append the run's reasoning trace as a collapsed "Thoughts" disclosure above the outcome row — the same block a summarization run gets — when the provider returned one.
+func _add_title_task_thinking(body: VBoxContainer, thinking: String) -> void:
+	if thinking.strip_edges() != "":
+		body.add_child(_make_collapsible(_mono_body(thinking), false, "Thoughts", GDLLMColors.color(GDLLMColors.STATUS_CAPTION), "thinking"))
 
 
 ## Append the outcome row under a title panel's disclosure: the generated title, or the failure and its reason in the error red.
