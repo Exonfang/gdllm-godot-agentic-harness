@@ -72,12 +72,12 @@ var _connection_rows: Array = [] ## One entry per row: {id, name_edit, kind_sele
 var _effort_dialog: ConfirmationDialog ## Built lazily on first Effort-configuration press; edits the GDLLMEfforts per-model level map. Opened from the ⚡ button beside each session's model picker.
 var _effort_rows_box: VBoxContainer ## Container the per-model level rows are rebuilt into.
 var _effort_rows: Array = [] ## One entry per row: {qualified, checks: Dictionary (level -> CheckBox), cache_spin: SpinBox, container}.
-var _effort_add_select: OptionButton ## Picker of Ollama-sourced models not yet in the table; choosing one appends its row (see _on_effort_add_selected).
+var _effort_add_select: GDLLMModelPicker ## Searchable picker of models not yet in the table; choosing one appends its row (see _on_effort_add_selected).
 
 var _favorites_dialog: ConfirmationDialog ## Built lazily on first Favorites press; edits the GDLLMFavorites ordered list. Opened from the ★ button beside each session's model picker.
 var _favorites_rows_box: VBoxContainer ## Container the favorite rows are rebuilt into.
 var _favorites_rows: Array = [] ## One entry per row, in display order: {qualified, container}.
-var _favorites_add_select: OptionButton ## Picker of models not yet favorited; choosing one appends its row (see _on_favorites_add_selected).
+var _favorites_add_select: GDLLMModelPicker ## Searchable picker of models not yet favorited; choosing one appends its row (see _on_favorites_add_selected).
 var _last_favorites := "" ## Snapshot of the stored favorites JSON, so _on_editor_settings_changed rebuilds model pickers only on an actual favorites edit.
 var _last_colors := "" ## Snapshot of the configured log palette, read the same way and for the same reason: repaint open logs only on an actual color edit.
 var _color_repaint_pending := false ## True while a scheduled palette repaint is waiting out COLOR_REPAINT_INTERVAL, so a drag's every tick can't stack rebuilds.
@@ -194,7 +194,7 @@ func _build_ui() -> void:
 
 	_session_select = OptionButton.new()
 	_session_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Same guard as the session's model picker: a long session title must never set the dock's minimum width, or the editor's dock layout can hang at boot (see _build_ui in gdllm_chat_session.gd).
+	# Same guard as the session's model picker: a long session title must never set the dock's minimum width, or the editor's dock layout can hang at boot (see GDLLMModelPicker._init).
 	_session_select.fit_to_longest_item = false
 	_session_select.clip_text = true
 	_session_select.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -917,12 +917,10 @@ func _ensure_effort_dialog() -> void:
 	var add_label := Label.new()
 	add_label.text = "Add model:"
 	add_row.add_child(add_label)
-	_effort_add_select = OptionButton.new()
-	_effort_add_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_effort_add_select.fit_to_longest_item = false
-	_effort_add_select.clip_text = true
-	_effort_add_select.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_effort_add_select.item_selected.connect(_on_effort_add_selected)
+	_effort_add_select = GDLLMModelPicker.new()
+	_effort_add_select.placeholder = "Add a model…"
+	_effort_add_select.hint = "Search the known models and add one to the list below."
+	_effort_add_select.model_chosen.connect(_on_effort_add_selected)
 	add_row.add_child(_effort_add_select)
 	content.add_child(add_row)
 
@@ -983,11 +981,9 @@ func _refresh_effort_dialog() -> void:
 	_refresh_effort_add_select()
 
 
-## Fill the add-picker with every known model that has no row yet, behind a placeholder item — every adapter translates effort now, so any source's models are configurable. Only a stale id (its source was deleted) is withheld, since nothing can run on it.
+## Offer the add-picker every known model that has no row yet, favorites first as in every picker — every adapter translates effort now, so any source's models are configurable. Only a stale id (its source was deleted) is withheld, since nothing can run on it.
 func _refresh_effort_add_select() -> void:
-	_effort_add_select.clear()
-	_effort_add_select.add_item("Add a model…")
-	_effort_add_select.set_item_metadata(0, "")
+	var addable := PackedStringArray()
 	var listed := {}
 	for entry in _effort_rows:
 		listed[String(entry["qualified"])] = true
@@ -996,17 +992,13 @@ func _refresh_effort_add_select() -> void:
 			continue
 		if bool(GDLLMSources.resolve_qualified(qid).get("stale", false)):
 			continue
-		_effort_add_select.add_item(GDLLMSources.label_for(qid))
-		_effort_add_select.set_item_metadata(_effort_add_select.item_count - 1, qid)
-	_effort_add_select.select(0)
-	_effort_add_select.disabled = _effort_add_select.item_count <= 1
+		addable.append(qid)
+	_effort_add_select.set_models(GDLLMFavorites.apply_order(addable))
+	_effort_add_select.disabled = addable.is_empty()
 
 
-## A model was chosen in the add-picker: append its (empty) row and return the picker to its placeholder.
-func _on_effort_add_selected(index: int) -> void:
-	var qualified := String(_effort_add_select.get_item_metadata(index))
-	if qualified == "":
-		return
+## A model was chosen in the add-picker: append its (empty) row and drop it from the picker.
+func _on_effort_add_selected(qualified: String) -> void:
 	_add_effort_row(qualified, PackedStringArray(), 0, 0)
 	_refresh_effort_add_select()
 
@@ -1127,12 +1119,11 @@ func _ensure_favorites_dialog() -> void:
 	var add_label := Label.new()
 	add_label.text = "Add model:"
 	add_row.add_child(add_label)
-	_favorites_add_select = OptionButton.new()
-	_favorites_add_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_favorites_add_select.fit_to_longest_item = false
-	_favorites_add_select.clip_text = true
-	_favorites_add_select.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_favorites_add_select.item_selected.connect(_on_favorites_add_selected)
+	_favorites_add_select = GDLLMModelPicker.new()
+	_favorites_add_select.placeholder = "Add a model…"
+	_favorites_add_select.hint = "Search the known models and add one to the list below."
+	_favorites_add_select.mark_favorites = false # the stored favorites lag this dialog's unsaved edits, so a star here could misinform
+	_favorites_add_select.model_chosen.connect(_on_favorites_add_selected)
 	add_row.add_child(_favorites_add_select)
 	content.add_child(add_row)
 
@@ -1162,11 +1153,9 @@ func _refresh_favorites_dialog() -> void:
 	_refresh_favorites_add_select()
 
 
-## Fill the add-picker with every known model not yet favorited, behind a placeholder item. Only a stale id (its source was deleted) is withheld, since no picker would offer it anyway.
+## Offer the add-picker every known model not yet favorited. Only a stale id (its source was deleted) is withheld, since no picker would offer it anyway.
 func _refresh_favorites_add_select() -> void:
-	_favorites_add_select.clear()
-	_favorites_add_select.add_item("Add a model…")
-	_favorites_add_select.set_item_metadata(0, "")
+	var addable := PackedStringArray()
 	var listed := {}
 	for entry in _favorites_rows:
 		listed[String(entry["qualified"])] = true
@@ -1175,17 +1164,13 @@ func _refresh_favorites_add_select() -> void:
 			continue
 		if bool(GDLLMSources.resolve_qualified(qid).get("stale", false)):
 			continue
-		_favorites_add_select.add_item(GDLLMSources.label_for(qid))
-		_favorites_add_select.set_item_metadata(_favorites_add_select.item_count - 1, qid)
-	_favorites_add_select.select(0)
-	_favorites_add_select.disabled = _favorites_add_select.item_count <= 1
+		addable.append(qid)
+	_favorites_add_select.set_models(addable)
+	_favorites_add_select.disabled = addable.is_empty()
 
 
-## A model was chosen in the add-picker: append its row at the end of the order and return the picker to its placeholder.
-func _on_favorites_add_selected(index: int) -> void:
-	var qualified := String(_favorites_add_select.get_item_metadata(index))
-	if qualified == "":
-		return
+## A model was chosen in the add-picker: append its row at the end of the order and drop it from the picker.
+func _on_favorites_add_selected(qualified: String) -> void:
 	_add_favorite_row(qualified)
 	_refresh_favorites_add_select()
 
