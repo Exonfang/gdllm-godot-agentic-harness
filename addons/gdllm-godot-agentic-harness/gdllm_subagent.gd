@@ -115,7 +115,7 @@ func run(source: Dictionary, system_prompt: String, prompt: String, use_tools: b
 					if called != "":
 						used_this_round[called] = true
 						# A direct call to an unattached registered tool attaches its schema for the rest of the loop — the same rule the main chat's rounds apply.
-						if called != GDLLMTools.TOOL_SEARCH and GDLLMTools.REGISTRY.has(called):
+						if called != GDLLMTools.TOOL_SEARCH and GDLLMTools.is_registered(called):
 							active_tools[called] = true
 				var round_repeated := false # a call this round re-ran identically with an identical result — the no-progress evidence the oscillation nudge requires
 				var fresh_activation := false # a search this round attached a NEW tool — the progress signal that resets the streak guard (see track_consecutive_use)

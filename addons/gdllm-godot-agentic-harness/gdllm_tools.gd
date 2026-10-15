@@ -1598,8 +1598,9 @@ static func _catalog(allow_changes: bool = false, allow_delete: bool = false, ac
 	var lines: Array = ["Available tools — call tool_search with a name to get that tool's parameters:"]
 	var hidden := 0
 	var hidden_destructive := 0
-	for name in REGISTRY:
-		var entry: Dictionary = REGISTRY[name]
+	var tools := _all_tools()
+	for name in tools:
+		var entry: Dictionary = tools[name]
 		if not allow_changes and bool(entry.get("mutating", false)):
 			hidden += 1
 			continue
@@ -1615,6 +1616,9 @@ static func _catalog(allow_changes: bool = false, allow_delete: bool = false, ac
 	# Stated only while ON — the catalog's per-tool summaries all say "the project", and transcripts show a model refusing an outside read the dropped fence would have served, never trying the tool. The default fenced state needs no line: absence of permission is what every summary already describes.
 	if GDLLMSettings.is_outside_tool_calls_allowed():
 		lines.append("The user's \"Allow Tool Calls Outside Project Or User Directories\" setting is ON: the file tools also reach absolute OS paths outside the project. An outside path must be spelled exactly — no name search runs out there.")
+	var custom_notes := GDLLMCustomTools.catalog_notes()
+	if custom_notes != "":
+		lines.append(custom_notes)
 	return "\n".join(lines)
 
 
@@ -1633,13 +1637,25 @@ static func _params_hint(entry: Dictionary) -> String:
 
 ## The function schema for a registered tool by name, ready to drop into a request's `tools` array; {} if the name isn't registered.
 static func schema_for(name: String) -> Dictionary:
-	if not REGISTRY.has(name):
+	var entry := _definition_for(name)
+	if entry.is_empty() or name == TOOL_SEARCH:
 		return {}
-	return _schema(name, REGISTRY[name])
+	return _schema(name, entry)
 
 
+## Whether `name` is a callable tool other than tool_search: a built-in, or a custom tool that's currently loaded.
 static func is_registered(name: String) -> bool:
-	return REGISTRY.has(name)
+	return REGISTRY.has(name) or GDLLMCustomTools.definitions().has(name)
+
+
+## Every tool tool_search can offer: REGISTRY plus the project's loaded custom tools (see GDLLMCustomTools), which never shadow a built-in.
+static func _all_tools() -> Dictionary:
+	var custom := GDLLMCustomTools.definitions()
+	if custom.is_empty():
+		return REGISTRY
+	var all := REGISTRY.duplicate()
+	all.merge(custom)
+	return all
 
 
 ## The registered tools the first `count` messages of a stored history had activated — every tool an assistant turn called plus every tool a tool_search result returned, minus any a persisted cache-boundary retirement detached — so a reload (and the debug context reconstruction) restores the same set live activation and retirement built. `count` < 0 walks the whole history. Shared by _reactivate_tools_from_history and _tools_active_as_of in the chat session.
@@ -1653,11 +1669,11 @@ static func active_tools_from_history(history: Array, count: int = -1) -> Dictio
 		if role == "assistant" and msg.has("tool_calls") and not bool(msg.get("attachment", false)):
 			for tc in msg["tool_calls"]:
 				var called := tool_call_name(tc)
-				if called != "" and called != TOOL_SEARCH and REGISTRY.has(called):
+				if called != "" and called != TOOL_SEARCH and is_registered(called):
 					active[called] = true
 		elif role == "tool" and String(msg.get("tool_name", "")) == TOOL_SEARCH:
 			for searched in _search_result_names(String(msg.get("content", ""))):
-				if REGISTRY.has(searched):
+				if is_registered(searched):
 					active[searched] = true
 		# A persisted cache-boundary retirement detached these schemas at this point; replaying it in order keeps the rebuilt set matching what each request actually carried (a later re-search re-adds).
 		elif role == "notice" and String(msg.get("kind", "")) == "cache_boundary":
@@ -1679,12 +1695,12 @@ static func tool_usage_from_history(history: Array) -> Dictionary:
 		elif role == "assistant" and msg.has("tool_calls") and not bool(msg.get("attachment", false)):
 			for tc in msg["tool_calls"]:
 				var called := tool_call_name(tc)
-				if called != "" and REGISTRY.has(called):
+				if called != "" and is_registered(called):
 					last_used[called] = turn
 		elif role == "tool" and String(msg.get("tool_name", "")) == TOOL_SEARCH:
 			# Attachment counts as use, so a tool searched but not yet called ages from its search, not from zero.
 			for searched in _search_result_names(String(msg.get("content", ""))):
-				if REGISTRY.has(searched):
+				if is_registered(searched):
 					last_used[searched] = turn
 	return {"turns": turn, "last_used": last_used}
 
@@ -1758,7 +1774,7 @@ static func _definition_for(name: String) -> Dictionary:
 		return TOOL_SEARCH_TOOL
 	if REGISTRY.has(name):
 		return REGISTRY[name]
-	return {}
+	return GDLLMCustomTools.definitions().get(name, {})
 
 
 ## Wrap a tool definition ({description, parameters, ...}) in the Ollama/OpenAI function-schema envelope under `name`. Extra fields on the definition (like max_consecutive_uses) are left out, so they never reach the model.
@@ -1785,8 +1801,9 @@ static func search(query: String, allow_changes: bool = false, allow_delete: boo
 	var terms := query.to_lower().split(" ", false)
 	var named: Array = []
 	var scored: Array = []
-	for name in REGISTRY:
-		var entry: Dictionary = REGISTRY[name]
+	var tools := _all_tools()
+	for name in tools:
+		var entry: Dictionary = tools[name]
 		if not allow_changes and bool(entry.get("mutating", false)):
 			continue
 		if not allow_delete and bool(entry.get("destructive", false)):
@@ -1825,7 +1842,7 @@ static func _gate_blocked_matches(query: String, allow_changes: bool, allow_dele
 	var blocked: Array = []
 	for match_entry in search(query, true, true):
 		var name := String(match_entry["name"])
-		var entry: Dictionary = REGISTRY[name]
+		var entry := _definition_for(name)
 		var remedy := ""
 		if not allow_delete and bool(entry.get("destructive", false)):
 			# A destructive tool needs both toggles, so naming only Delete files would send the user to a switch that alone changes nothing.
@@ -1882,7 +1899,13 @@ static func _tool_search(query: String, allow_changes: bool, allow_delete: bool,
 static func execute(name: String, args: Dictionary, allow_changes: bool = false, allow_delete: bool = false, active_tools: Dictionary = {}, ledger: SessionLedger = null, repeat_owner: String = "") -> Dictionary:
 	if ledger == null:
 		ledger = _fallback_ledger
-	return await _apply_hooks("tool_completed", name, args, _note_repeat(name, args, await _dispatch(name, args, allow_changes, allow_delete, active_tools, ledger), repeat_owner), ledger)
+	# Bracketing every call lets GDLLMCustomTools attribute custom-tool files written during it — by any tool, run_script's subprocess included — to the model, so they wait for the user's approval before they can load.
+	GDLLMCustomTools.begin_model_call()
+	var result: Dictionary = await _dispatch(name, args, allow_changes, allow_delete, active_tools, ledger)
+	var pending := GDLLMCustomTools.end_model_call()
+	if not pending.is_empty() and result.get("content") is String:
+		result["content"] = String(result["content"]) + GDLLMCustomTools.pending_note(pending)
+	return await _apply_hooks("tool_completed", name, args, _note_repeat(name, args, result, repeat_owner), ledger)
 
 
 ## Number a repeated call whose work really happened again, so its result stops rendering identically to the last one. This is the shared half of the honesty rule the loop brake depends on: the brake keeps its full force (a genuinely pointless repeat still returns identical content and is still caught), while a tool that CHANGED something says so. A refusal is left alone — it changed nothing, so an identical one is exactly the repeat the brake should catch.
@@ -1947,6 +1970,8 @@ static func _dispatch(name: String, args: Dictionary, allow_changes: bool, allow
 	if name == TOOL_SEARCH:
 		return _tool_search(String(args.get("query", "")), allow_changes, allow_delete, active_tools)
 	if is_mutating(name) and not allow_changes:
+		if bool(_definition_for(name).get("custom", false)):
+			return {"content": "Error: \"%s\" is one of the project's custom tools and isn't declared read-only (no const READ_ONLY := true), so it's gated behind the user's \"Make changes\" toggle, which is off. Ask the user to turn on Make changes if the task needs it, or continue without it." % name, "activate": PackedStringArray()}
 		# The run tools ride the mutating gate but don't rewrite files, so the refusal names what they actually do — a message claiming run_game "modifies the project" would be a lie the model repeats to the user.
 		if DEBUG_TOOLS.has(name):
 			return {"content": "Error: \"%s\" changes where the project's code halts — a breakpoint pauses the running game at that line — which the user's \"Make changes\" toggle also gates, and that toggle is off. Ask the user to turn on Make changes if the task needs the game stopped on a line, or work from read_output and read_errors instead." % name, "activate": PackedStringArray()}
@@ -2055,13 +2080,15 @@ static func _dispatch(name: String, args: Dictionary, allow_changes: bool, allow
 		return _plain(await _delete_file(args, ledger))
 	if name == "edit_resource":
 		return _plain(_edit_resource(args))
+	if GDLLMCustomTools.definitions().has(name):
+		return _plain(await GDLLMCustomTools.execute(name, args))
 	return {"content": _unknown_tool_message(name), "activate": PackedStringArray()}
 
 
 ## The unknown-tool error, coached toward recovery: transcripts show hallucinated names (e.g. a literal "tool_call") stalling models because the bare error named no way forward. Near-miss registered names are suggested — a registered tool can be called directly by its exact name — and the tool_search route is spelled out for the rest.
 static func _unknown_tool_message(name: String) -> String:
 	var candidates: Array = [TOOL_SEARCH]
-	for registered in REGISTRY:
+	for registered in _all_tools():
 		candidates.append(String(registered))
 	var near := _create_res_near_miss(name, candidates)
 	var hint := ""
