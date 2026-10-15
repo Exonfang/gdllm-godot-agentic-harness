@@ -76,7 +76,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
   - Context window size and cache TTL are used to inform context compaction.
   - For providers that report it, context window size is automatically fetched via API.
   - For Anthropic models, setting the cache above 300s uses Anthropic's 1 hour cache declaration. _(Other providers don't currently publish cache times.)_
-- In Editor Settings > GDLLM > Models, specify your preferred default chat model and tasks model. The tasks model powers summarization and title generation.
+- In Editor Settings > GDLLM > Models, specify your preferred default chat model and tasks model. The tasks model powers summarization and title generation; its default, **Current model**, runs those on whichever model the session is using, so pick a small model there only if you want them offloaded.
 - Review Editor Settings > GDLLM and update to your preference. Some color-blind users will want to adjust their colors.
 
 ## Roadmap

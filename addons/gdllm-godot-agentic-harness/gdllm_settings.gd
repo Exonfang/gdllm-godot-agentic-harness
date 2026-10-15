@@ -3,7 +3,8 @@ class_name GDLLMSettings
 ## Central home for the plugin's editor settings: key names, defaults, and helpers. Settings live in EditorSettings (per-developer, never committed)
 
 const CHAT_MODEL := "gdllm/models/chat"
-const TASKS_MODEL := "gdllm/models/tasks" ## Small model for background chores: session-title summarization and read_file's long-file maps.
+const TASKS_MODEL := "gdllm/models/tasks" ## Small model for background chores: session-title summarization and read_file's long-file maps. Holds a qualified id, or TASKS_MODEL_CURRENT.
+const TASKS_MODEL_CURRENT := "Current model" ## The Tasks Model choice (and default) that runs each chore on the model of the session it serves, so an install works with one model configured. Listed first in the dropdown; never a qualified id, since those always carry "::".
 
 # Each model's system prompt sits beside it on the Models page; the alphabetical sort keeps prompt next to model.
 const CHAT_SYSTEM_PROMPT := "gdllm/models/chat_system_prompt"
@@ -142,7 +143,7 @@ static func register() -> void:
 	# Model settings now hold a qualified "source::model" id; default to the local source's default model.
 	var default_model := GDLLMSources.make_qualified("ollama-local", DEFAULT_MODEL)
 	_define(es, CHAT_MODEL, default_model)
-	_define(es, TASKS_MODEL, default_model)
+	_define(es, TASKS_MODEL, TASKS_MODEL_CURRENT)
 	_define(es, CHAT_SYSTEM_PROMPT, DEFAULT_CHAT_SYSTEM_PROMPT, PROPERTY_HINT_MULTILINE_TEXT)
 	# A stored prompt byte-identical to the pre-placeholder default is that default, not a user edit — adopt the placeholder form so the Markdown line gates on existing installs too.
 	if String(es.get_setting(CHAT_SYSTEM_PROMPT)) == GDLLMMarkdown.apply_prompt_placeholder(DEFAULT_CHAT_SYSTEM_PROMPT, true):
@@ -315,6 +316,8 @@ static func _refresh_model_enum(models: PackedStringArray) -> void:
 		# Favorites float to the top here too, so the settings dropdowns mirror the session pickers' order.
 		var names := GDLLMFavorites.apply_order(models)
 		var current := String(es.get_setting(key))
+		if key == TASKS_MODEL:
+			names.insert(0, TASKS_MODEL_CURRENT)
 		if current != "" and not names.has(current):
 			names.append(current)
 		es.add_property_info({
@@ -330,8 +333,9 @@ static func get_chat_source_and_model() -> Dictionary:
 	return GDLLMSources.resolve_qualified(get_chat_model())
 
 
-static func get_tasks_source_and_model() -> Dictionary:
-	return GDLLMSources.resolve_qualified(get_tasks_model())
+## `current_model` is the qualified id of the session the chore serves, which TASKS_MODEL_CURRENT resolves to (see resolve_tasks_model).
+static func get_tasks_source_and_model(current_model: String = "") -> Dictionary:
+	return GDLLMSources.resolve_qualified(resolve_tasks_model(current_model))
 
 
 ## Whether timestamps should render on a 24-hour clock (else 12-hour with AM/PM).
@@ -498,9 +502,17 @@ static func get_chat_model() -> String:
 	return String(EditorInterface.get_editor_settings().get_setting(CHAT_MODEL))
 
 
-## Small model used for background chores (session-title summarization, read_file's long-file maps, and any future task work).
+## Small model used for background chores (session-title summarization, read_file's long-file maps, and any future task work), as stored: a qualified id, or TASKS_MODEL_CURRENT. Callers that need a runnable id go through resolve_tasks_model.
 static func get_tasks_model() -> String:
 	return String(EditorInterface.get_editor_settings().get_setting(TASKS_MODEL))
+
+
+## The qualified id a chore for a session on `current_model` runs on: the configured Tasks Model, or under TASKS_MODEL_CURRENT the session's own model — the chat model setting when no session is given.
+static func resolve_tasks_model(current_model: String = "") -> String:
+	var model := get_tasks_model()
+	if model != TASKS_MODEL_CURRENT:
+		return model
+	return current_model if current_model != "" else get_chat_model()
 
 
 ## System prompt for the dock chat conversation.

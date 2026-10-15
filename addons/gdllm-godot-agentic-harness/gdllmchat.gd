@@ -430,10 +430,12 @@ func _process_title_queue() -> void:
 	if _title_busy or _title_queue.is_empty() or _tasks_client.is_busy():
 		return
 	_title_busy = true
-	_tasks_client.configure_from(GDLLMSettings.get_tasks_source_and_model())
 	var job: Dictionary = _title_queue[0]
+	# The stored record tracks the session's model even after its tab closes, so a "Current model" Tasks Model always resolves to the session the title is for.
+	var tasks_model := GDLLMSettings.resolve_tasks_model(String(_store.get_session(String(job["id"])).get("model", "")))
+	_tasks_client.configure_from(GDLLMSources.resolve_qualified(tasks_model))
 	# Capture what actually leaves for the Tasks Model (and when), so the settle can persist the exchange even if the tab closes mid-run.
-	job["model_label"] = GDLLMSources.label_for(GDLLMSettings.get_tasks_model())
+	job["model_label"] = GDLLMSources.label_for(tasks_model)
 	job["system"] = GDLLMSettings.get_tasks_system_prompt()
 	job["started_ms"] = Time.get_ticks_msec()
 	var session: GDLLMChatSession = _open_sessions.get(String(job["id"]))

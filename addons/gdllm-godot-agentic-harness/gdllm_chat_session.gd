@@ -4444,10 +4444,10 @@ func _show_turn_context(history_index: int, precompaction_event: int = -1) -> vo
 	_present_context_dialog(JSON.stringify(body, "\t"))
 
 
-## Pop the inspection dialog for a Tasks-Model run: the wire body of its request plus the raw reply verbatim — the panel's outcome row shows only the sanitized title, so a mangled reply ("Sure! Here's a title:") is diagnosable only here. The body is rebuilt through the current Tasks-Model source (the run recorded its prompt text, not its wiring), so a since-changed tasks setting shows today's endpoint around the recorded exchange.
+## Pop the inspection dialog for a Tasks-Model run: the wire body of its request plus the raw reply verbatim — the panel's outcome row shows only the sanitized title, so a mangled reply ("Sure! Here's a title:") is diagnosable only here. The body is rebuilt through the current Tasks-Model source (the run recorded its prompt text, not its wiring), so a since-changed tasks setting shows today's endpoint around the recorded exchange — under "Current model", this session's current model.
 func _show_title_task_context(data: Dictionary) -> void:
 	_ensure_context_dialog()
-	var resolved := GDLLMSettings.get_tasks_source_and_model()
+	var resolved := GDLLMSettings.get_tasks_source_and_model(_qualified_model)
 	var adapter := LLMAdapter.for_kind(String(resolved.get("kind", GDLLMSources.KIND_OLLAMA)))
 	var request := adapter.completion_request(String(resolved.get("model", "")), String(data.get("system", "")), String(data.get("prompt", "")))
 	var reply: String
