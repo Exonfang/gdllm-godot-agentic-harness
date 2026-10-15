@@ -23,9 +23,10 @@ var _over_window_noted: bool = false ## The over-window warning has been disclos
 var _repeat_scope: String = "" ## This run's own GDLLMRepeats owner id, set in run() — repeat numbering is per-agent like the loop brakes, so a fresh run's first call is never tagged as a repeat the main chat (or another run) made.
 
 
-## The source a deferred `subagent` spec runs on: the caller's own `fallback` normally, or the settings' Tasks Model when the spec sets `tasks_model` — a pure transform like read_file's file map is a background chore fit for the small tasks model, unlike a delegation, which stays on the chat model. An unconfigured tasks model falls back to the caller's source so a flagged spec still runs.
+## The source a deferred `subagent` spec runs on: the caller's own `fallback` normally, or the settings' Tasks Model when the spec sets `tasks_model` — a pure transform like read_file's file map is a background chore fit for the small tasks model, unlike a delegation, which stays on the chat model. An unconfigured tasks model, or one set to GDLLMSettings.TASKS_MODEL_CURRENT, runs on the caller's own source.
 static func spec_source(spec: Dictionary, fallback: Dictionary) -> Dictionary:
-	if not bool(spec.get("tasks_model", false)) or GDLLMSettings.get_tasks_model() == "":
+	var tasks_model := GDLLMSettings.get_tasks_model()
+	if not bool(spec.get("tasks_model", false)) or tasks_model == "" or tasks_model == GDLLMSettings.TASKS_MODEL_CURRENT:
 		return fallback
 	var source := GDLLMSettings.get_tasks_source_and_model()
 	if String(source.get("model", "")) == "" or String(source.get("base_url", "")) == "":
