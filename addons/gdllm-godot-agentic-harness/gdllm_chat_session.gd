@@ -12,6 +12,7 @@ signal effort_changed(session_id: String, effort: String) ## The effort dropdown
 signal connections_requested ## The ⚙ button beside the picker was pressed; the dock opens its shared Connections dialog (the dialog is global, so the session only asks for it).
 signal effort_config_requested ## The ⚡ button beside the picker was pressed; the dock opens its shared Effort Configuration dialog (shared like the Connections dialog).
 signal favorites_config_requested ## The ★ button beside the picker was pressed; the dock opens its shared Favorite Models dialog (shared like the Connections dialog).
+signal custom_tools_requested ## The 🔧 button beside the picker was pressed; the dock opens its shared Custom Tools dialog.
 signal models_refresh_requested ## The Fetch button beside the picker was pressed; the dock re-sweeps every enabled source so the model list is current (see GDLLMChatDock.refresh_all_models). Manual because the list is otherwise served from cache.
 signal subagents_all_done ## Internal: emitted when the last in-flight subagent of a turn finishes, waking _on_tool_calls_received to assemble their results (see _drive_subagent).
 signal cache_boundary(session_id: String, reason: String, retired: PackedStringArray) ## A moment the provider prompt cache is being rewritten anyway (new tool attached, or the TTL lapsed while idle — measured across reloads via the record's last-request stamp), so context trimming is free — schema retirement rides it, and a committed compaction pass (prune or summary) crosses one of its own, so retirement rides those rewrites too (see _cross_cache_boundary).
@@ -430,6 +431,13 @@ func _build_ui() -> void:
 	favorites_button.tooltip_text = "Favorite models: choose and order the models pinned to the top of every model picker."
 	favorites_button.pressed.connect(func() -> void: favorites_config_requested.emit())
 	model_row.add_child(favorites_button)
+
+	# Opens the dock's shared Custom Tools dialog — the project's res://gdllm-tools scripts, where the user approves model-written tools and switches tools on or off.
+	var custom_tools_button := Button.new()
+	custom_tools_button.text = "🔧"
+	custom_tools_button.tooltip_text = "Custom tools: the project's own tools in res://gdllm-tools. Approve tools the model created or changed, and enable or disable each one."
+	custom_tools_button.pressed.connect(func() -> void: custom_tools_requested.emit())
+	model_row.add_child(custom_tools_button)
 
 	# --- Input resize handle ---
 	# A grabber rather than a VSplitContainer, which sent the editor's dock-layout load into a hang around the fit-content log; dragging adjusts the input's minimum height directly and the expand-fill log absorbs the difference.
@@ -2868,7 +2876,7 @@ func _on_tool_calls_received(tool_calls: Array, content: String, stats: Dictiona
 			used_this_round[called] = true
 			# A direct call to an unattached registered tool attaches its schema like a search hit would: the committed turn shows a call the model can make, which is exactly how the reload walker reads it (see GDLLMTools.active_tools_from_history), so the live and reloaded footprints stay identical.
 			# Attached off the committed turn's calls before anything runs, so a Stop mid-round still leaves the set a reload would rebuild.
-			if called != GDLLMTools.TOOL_SEARCH and GDLLMTools.REGISTRY.has(called) and not _active_tools.has(called):
+			if called != GDLLMTools.TOOL_SEARCH and GDLLMTools.is_registered(called) and not _active_tools.has(called):
 				# Only a tool that will actually ride the continuation counts as a boundary: a gate-hidden one is dropped by _tools_for_active_set, leaving the tools block byte-identical, so retiring idle schemas on it would CAUSE a warm-cache rewrite instead of piggybacking on one. The attach itself stands for reload parity.
 				if (_changes_allowed() or not GDLLMTools.is_mutating(called)) and (_deletes_allowed() or not GDLLMTools.is_destructive(called)):
 					newly_attached.append(called)

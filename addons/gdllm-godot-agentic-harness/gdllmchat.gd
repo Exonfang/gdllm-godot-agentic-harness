@@ -77,6 +77,13 @@ var _effort_add_select: GDLLMModelPicker ## Searchable picker of models not yet 
 var _favorites_dialog: ConfirmationDialog ## Built lazily on first Favorites press; edits the GDLLMFavorites ordered list. Opened from the ★ button beside each session's model picker.
 var _favorites_rows_box: VBoxContainer ## Container the favorite rows are rebuilt into.
 var _favorites_rows: Array = [] ## One entry per row, in display order: {qualified, container}.
+
+var _custom_tools_dialog: AcceptDialog ## Built lazily on first 🔧 press; lists GDLLMCustomTools.status() rows with enable toggles and review/approve. Changes apply immediately.
+var _custom_tools_rows_box: VBoxContainer ## Container the per-tool rows are rebuilt into.
+var _custom_tool_review_dialog: ConfirmationDialog ## Shows a pending tool's source read-only; confirming approves exactly the reviewed content.
+var _custom_tool_review_text: TextEdit
+var _custom_tool_review_path := "" ## The res path under review.
+var _custom_tool_review_md5 := "" ## The md5 of the source shown, so an approval never covers content the user didn't see.
 var _favorites_add_select: GDLLMModelPicker ## Searchable picker of models not yet favorited; choosing one appends its row (see _on_favorites_add_selected).
 var _last_favorites := "" ## Snapshot of the stored favorites JSON, so _on_editor_settings_changed rebuilds model pickers only on an actual favorites edit.
 var _last_colors := "" ## Snapshot of the configured log palette, read the same way and for the same reason: repaint open logs only on an actual color edit.
@@ -258,6 +265,7 @@ func _open_session(record: Dictionary) -> GDLLMChatSession:
 	session.connections_requested.connect(_on_connections_pressed) # the ⚙ beside its picker opens the shared dialog
 	session.effort_config_requested.connect(_on_effort_config_pressed) # the ⚡ beside its picker opens the shared Effort Configuration dialog
 	session.favorites_config_requested.connect(_on_favorites_config_pressed) # the ★ beside its picker opens the shared Favorite Models dialog
+	session.custom_tools_requested.connect(_on_custom_tools_pressed) # the 🔧 beside its picker opens the shared Custom Tools dialog
 	session.models_refresh_requested.connect(_on_models_refresh_requested) # opening its picker re-sweeps sources so the list is current
 	_tabs.add_child(session) # triggers the session's _ready (builds its UI; history rendering waits for the tab's first show)
 
@@ -1086,6 +1094,137 @@ func _on_effort_confirmed() -> void:
 		var context_window := int(context_spin.value) if is_instance_valid(context_spin) else 0
 		config[String(entry["qualified"])] = GDLLMEfforts.make_entry(levels, cache_cold_gap, context_window)
 	GDLLMEfforts.save_config(config)
+
+
+# --- Custom Tools dialog ---
+
+func _on_custom_tools_pressed() -> void:
+	_ensure_custom_tools_dialog()
+	_refresh_custom_tools_dialog()
+	_custom_tools_dialog.popup_centered(Vector2i(640, 420))
+
+
+func _ensure_custom_tools_dialog() -> void:
+	if is_instance_valid(_custom_tools_dialog):
+		return
+	_custom_tools_dialog = AcceptDialog.new()
+	GDLLMChatSession.cap_dialog_to_screen(_custom_tools_dialog)
+	_custom_tools_dialog.title = "Custom Tools"
+	_custom_tools_dialog.ok_button_text = "Close"
+
+	var content := VBoxContainer.new()
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 8)
+
+	var hint := Label.new()
+	hint.text = "Each %s/<name>.gd becomes a tool the model can find with tool_search. Tools run inside the editor, so one the model created or changed waits for your review and approval before it loads; tools you write yourself load on their own. Unchecking a tool hides it from the model. Tools not declared read-only only run while Make changes is on.\n\n%s" % [GDLLMCustomTools.ROOT, GDLLMCustomTools.CONTRACT]
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	content.add_child(hint)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(600, 160)
+	_custom_tools_rows_box = VBoxContainer.new()
+	_custom_tools_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_custom_tools_rows_box.add_theme_constant_override("separation", 4)
+	scroll.add_child(_custom_tools_rows_box)
+	content.add_child(scroll)
+
+	_custom_tools_dialog.add_child(content)
+	add_child(_custom_tools_dialog)
+
+	_custom_tool_review_dialog = ConfirmationDialog.new()
+	GDLLMChatSession.cap_dialog_to_screen(_custom_tool_review_dialog)
+	_custom_tool_review_dialog.ok_button_text = "Approve"
+	_custom_tool_review_dialog.confirmed.connect(_on_custom_tool_approved)
+	_custom_tool_review_text = TextEdit.new()
+	_custom_tool_review_text.editable = false
+	_custom_tool_review_text.custom_minimum_size = Vector2(700, 420)
+	_custom_tool_review_dialog.add_child(_custom_tool_review_text)
+	_custom_tools_dialog.add_child(_custom_tool_review_dialog)
+
+
+## Rebuild one row per file under GDLLMCustomTools.ROOT from a fresh scan.
+func _refresh_custom_tools_dialog() -> void:
+	for child in _custom_tools_rows_box.get_children():
+		child.queue_free()
+	GDLLMCustomTools.invalidate()
+	var rows := GDLLMCustomTools.status()
+	if rows.is_empty():
+		var empty := Label.new()
+		empty.text = "No custom tools yet: %s holds no .gd files." % GDLLMCustomTools.ROOT
+		_custom_tools_rows_box.add_child(empty)
+		return
+	for row: Dictionary in rows:
+		_add_custom_tool_row(row)
+
+
+func _add_custom_tool_row(row: Dictionary) -> void:
+	var path := String(row["path"])
+	var state := String(row["state"])
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 6)
+
+	var enabled := CheckBox.new()
+	enabled.button_pressed = state != "disabled"
+	enabled.disabled = state == "pending"
+	enabled.tooltip_text = "Approve this tool before enabling it." if state == "pending" else "Offer this tool to the model."
+	enabled.toggled.connect(func(on: bool) -> void:
+		GDLLMCustomTools.set_enabled(path, on)
+		_refresh_custom_tools_dialog())
+	line.add_child(enabled)
+
+	var name_label := Label.new()
+	name_label.text = String(row["name"])
+	name_label.tooltip_text = path
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.clip_text = true
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	line.add_child(name_label)
+
+	var status := Label.new()
+	match state:
+		"ready":
+			status.text = "Loaded"
+		"disabled":
+			status.text = "Disabled"
+		"pending":
+			status.text = "Needs approval"
+			status.add_theme_color_override("font_color", get_theme_color("warning_color", "Editor"))
+		"error":
+			status.text = "Load error"
+			status.tooltip_text = String(row["detail"])
+			status.mouse_filter = Control.MOUSE_FILTER_PASS
+			status.add_theme_color_override("font_color", get_theme_color("error_color", "Editor"))
+	line.add_child(status)
+
+	var review := Button.new()
+	review.text = "Review & approve…" if state == "pending" else "View source"
+	review.tooltip_text = "Read the tool's source; approving loads exactly what you read." if state == "pending" else "Read the tool's source."
+	review.pressed.connect(func() -> void: _open_custom_tool_review(path, state == "pending"))
+	line.add_child(review)
+
+	_custom_tools_rows_box.add_child(line)
+
+
+## Show a tool's source read-only — read as text, never loaded as a script, so reviewing runs none of it. `approvable` adds the Approve button for a pending tool.
+func _open_custom_tool_review(path: String, approvable: bool) -> void:
+	_custom_tool_review_path = path
+	_custom_tool_review_md5 = FileAccess.get_md5(path)
+	_custom_tool_review_text.text = FileAccess.get_file_as_string(path)
+	_custom_tool_review_dialog.title = ("Review custom tool: %s" if approvable else "Custom tool: %s") % path
+	_custom_tool_review_dialog.get_ok_button().visible = approvable
+	_custom_tool_review_dialog.popup_centered()
+
+
+## Approve the reviewed content; if the file changed under the review, nothing is approved and the review reopens on the new content.
+func _on_custom_tool_approved() -> void:
+	if not GDLLMCustomTools.approve(_custom_tool_review_path, _custom_tool_review_md5):
+		_open_custom_tool_review(_custom_tool_review_path, true)
+		_custom_tool_review_dialog.title = "Changed while you were reviewing — review again: %s" % _custom_tool_review_path
+	_refresh_custom_tools_dialog()
 
 
 # --- Favorite Models dialog ---
