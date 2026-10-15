@@ -8,7 +8,7 @@ class_name LLMAdapter extends RefCounted
 ## Canonical stream events an adapter emits from parse_line, folded straight onto LLMClient's state: {type:"thinking", text}, {type:"content", text}, {type:"tool_calls", calls}, {type:"done", stats, stop}, {type:"error", message} — plus {type:"progress"}, a no-op for a recognized frame with nothing streamable yet, so the client's wire-format guard knows the reply parses before the first visible delta (a Responses reasoning turn can stream nothing user-visible for minutes).
 ## A done event's `stop` is the provider's end-of-turn reason canonicalized by _canonical_stop: "" for a normal finish, "length" for the output-token cap, anything else verbatim — so a reply the provider itself cut short is never presented as finished (see LLMClient._stream_final_stats).
 ## A canonical tool call is {"function": {name, arguments: Dictionary}} — exactly what GDLLMTools.tool_call_name/args/sanitize_tool_calls consume.
-## An adapter whose provider must see its own turn echoed verbatim to continue a tool loop (Anthropic, the OpenAI Responses API, and Chat Completions servers that attach state to a tool call — Gemini's thought signatures) additionally emits {type:"assistant_blocks", blocks} ahead of the tool calls; LLMClient holds the blocks for the caller to store beside the turn (see LLMClient.last_assistant_blocks).
+## An adapter whose provider must see its own turn echoed verbatim to continue a tool loop (Anthropic, the OpenAI Responses API, and Chat Completions servers that attach state to a tool-call turn — Gemini's thought signatures, Reflection's and DeepSeek's reasoning_content) additionally emits {type:"assistant_blocks", blocks} ahead of the tool calls; LLMClient holds the blocks for the caller to store beside the turn (see LLMClient.last_assistant_blocks).
 
 
 ## Build the adapter for a source `kind` (see GDLLMSources.KIND_*). Unknown kinds fall back to Ollama.
@@ -38,6 +38,11 @@ func build_chat_body(_model: String, _messages: Array, _tools: Array, _effort: S
 
 ## Zero or more canonical events parsed out of one streamed line. Instance state may accumulate across calls (see OpenAIAdapter).
 func parse_line(_line: String) -> Array:
+	return []
+
+
+## The echo blocks this request has accumulated so far, for a stream cut off before its terminal events: a partial reply that lands in history without them would lose provider state the next request must carry (see OpenAIAdapter's reasoning_content). Empty for providers with nothing to keep.
+func partial_assistant_blocks() -> Array:
 	return []
 
 
@@ -302,11 +307,14 @@ class OllamaAdapter extends LLMAdapter:
 ## Translates the canonical message/tool shape to OpenAI's on send, and reassembles OpenAI's streamed deltas (content, reasoning, and tool-call argument fragments) back into canonical events on receive.
 ## Paths here omit the /v1 prefix because an OpenAI-compatible base_url carries it (e.g. .../inference.poolside.ai/v1); re-adding it would double the segment and 404.
 class OpenAIAdapter extends LLMAdapter:
+	const REASONING_BLOCK := "reasoning_content" ## The assistant_blocks entry type holding an assistant turn's streamed reasoning_content (beside its raw calls on a tool-call turn); listed in GDLLMSessionStore.ECHO_THINKING_TYPES so Clear Thinking strips it.
+
 	var _tool_calls: Array = [] ## Tool calls under construction, in arrival order: {id, name, args, extra}.
 	var _slot_for_index: Dictionary = {} ## Stream `index` → the _tool_calls position of the call currently open under it (see _accumulate_tool_calls).
 	var _usage: Dictionary = {} ## The `usage` block from the final chunk (stream_options.include_usage).
 	var _finish_reason: String = "" ## The finish_reason value that ended the turn; canonicalized onto the done event's `stop` ("length" = the token cap) so a capped reply is disclosed, not shown as finished.
 	var _finished: bool = false ## Guards _finish_events so finish_reason and a trailing [DONE] don't double-emit.
+	var _reasoning_content: String = "" ## The turn's reasoning streamed under the `reasoning_content` field, kept for the echo: servers on that convention (Reflection) 400 every later request whose earlier assistant message comes back without it.
 
 	func chat_path() -> String:
 		return "/chat/completions"
@@ -425,6 +433,8 @@ class OpenAIAdapter extends LLMAdapter:
 				var reasoning := _text(delta.get("reasoning_content", delta.get("reasoning", "")))
 				if reasoning != "":
 					events.append({"type": "thinking", "text": reasoning})
+					if delta.has("reasoning_content"):
+						_reasoning_content += reasoning
 				var content := _text(delta.get("content"))
 				if content != "":
 					events.append({"type": "content", "text": content})
@@ -436,7 +446,7 @@ class OpenAIAdapter extends LLMAdapter:
 				events.append_array(_finish_events())
 		return events
 
-	## Translate canonical (Ollama-shaped) history to OpenAI's: assistant tool-call turns get string-encoded arguments and synthesized call ids, and each following tool result is bound to its call id by order. Inside the trailing tool loop (everything after the last user message), a turn whose provider stored its raw tool calls (see _raw_tool_calls) replays them verbatim instead, because Gemini validates the thought signature riding on each call to continue the loop; earlier turns rebuild, so past signatures aren't re-sent (goal 1).
+	## Translate canonical (Ollama-shaped) history to OpenAI's: assistant tool-call turns get string-encoded arguments and synthesized call ids, and each following tool result is bound to its call id by order. Inside the trailing tool loop (everything after the last user message), a turn whose provider stored its raw tool calls (see _raw_tool_calls) replays them verbatim instead, because Gemini validates the thought signature riding on each call to continue the loop; earlier turns rebuild, so past signatures aren't re-sent (goal 1). Every assistant message that stored reasoning_content carries it back wherever it sits — Reflection rejects any request whose earlier assistant message lacks the reasoning returned with it — while servers that stream none store none, so their requests stay lean.
 	func _translate_messages(messages: Array) -> Array:
 		var out: Array = []
 		var pending_ids: Array = [] # ids of the last assistant turn's calls, awaiting their tool results in order
@@ -450,6 +460,7 @@ class OpenAIAdapter extends LLMAdapter:
 			if role == "assistant" and msg.get("tool_calls") is Array and not msg["tool_calls"].is_empty():
 				pending_ids = []
 				var calls: Array = _echoed_tool_calls(msg, pending_ids, i) if i > last_user else []
+				var reasoning := _echoed_reasoning(msg)
 				if calls.is_empty():
 					for tc in msg["tool_calls"]:
 						var id := "call_%d" % counter
@@ -463,18 +474,27 @@ class OpenAIAdapter extends LLMAdapter:
 				var preamble := String(msg.get("content", ""))
 				if preamble != "":
 					assistant_msg["content"] = preamble
+				if reasoning != "":
+					assistant_msg["reasoning_content"] = reasoning
 				out.append(assistant_msg)
 			elif role == "tool":
 				var id := String(pending_ids.pop_front()) if not pending_ids.is_empty() else ""
 				out.append({"role": "tool", "tool_call_id": id, "content": String(msg.get("content", ""))})
 			else:
-				out.append({"role": role, "content": String(msg.get("content", ""))})
+				var plain := {"role": role, "content": String(msg.get("content", ""))}
+				var reasoning := _echoed_reasoning(msg) if role == "assistant" else ""
+				if reasoning != "":
+					plain["reasoning_content"] = reasoning
+				out.append(plain)
 		return out
 
-	## The stored raw tool calls of one assistant turn, ready to resend, with their ids appended to `pending_ids`; empty when the turn must rebuild instead. Blocks that aren't one OpenAI tool call per canonical call were recorded under another kind (Anthropic's tool_use blocks, the Responses API's items, after a mid-loop Kind switch) and would 400 here.
+	## The stored raw tool calls of one assistant turn, ready to resend, with their ids appended to `pending_ids`; empty when the turn must rebuild instead. The stored reasoning block rides apart (see _echoed_reasoning); any other block, or a call count that doesn't match the turn, was recorded under another kind (Anthropic's tool_use blocks, the Responses API's items, after a mid-loop Kind switch) and would 400 here.
 	func _echoed_tool_calls(msg: Dictionary, pending_ids: Array, turn_index: int) -> Array:
-		var raw: Variant = msg.get("assistant_blocks")
-		if not (raw is Array) or raw.size() != msg["tool_calls"].size():
+		var stored: Variant = msg.get("assistant_blocks")
+		if not (stored is Array):
+			return []
+		var raw: Array = stored.filter(func(block: Variant) -> bool: return not (block is Dictionary and String(block.get("type", "")) == REASONING_BLOCK))
+		if raw.size() != msg["tool_calls"].size():
 			return []
 		for block in raw:
 			if not (block is Dictionary) or String(block.get("type", "")) != "function" or not (block.get("function") is Dictionary):
@@ -487,6 +507,14 @@ class OpenAIAdapter extends LLMAdapter:
 			pending_ids.append(_text(call["id"]))
 			calls.append(call)
 		return calls
+
+	## The reasoning_content stored with one assistant turn (see _finish_events), or "" when it stored none — a server that streams no reasoning_content, or a trace Clear Thinking removed.
+	static func _echoed_reasoning(msg: Dictionary) -> String:
+		var text := ""
+		for block in msg.get("assistant_blocks", []):
+			if block is Dictionary and String(block.get("type", "")) == REASONING_BLOCK:
+				text += _text(block.get("text"))
+		return text
 
 	## Fold this chunk's tool-call deltas into _tool_calls: name arrives once, arguments stream as string fragments concatenated by `index`.
 	func _accumulate_tool_calls(deltas: Array) -> void:
@@ -522,16 +550,28 @@ class OpenAIAdapter extends LLMAdapter:
 				elif not extra.has(key):
 					extra[key] = d[key]
 
+	## A cut-off reply keeps the reasoning streamed so far: the client stores the partial reply (calls are only assembled at the terminal events, so it lands as a plain reply), and a server on the reasoning_content convention 400s every later request whose earlier assistant message lacks it.
+	func partial_assistant_blocks() -> Array:
+		if _finished or _reasoning_content == "":
+			return []
+		return [{"type": REASONING_BLOCK, "text": _reasoning_content}]
+
 	## The terminal events for the stream: the assembled tool calls (if any) then done+stats, emitted at most once.
 	func _finish_events() -> Array:
 		if _finished:
 			return []
 		_finished = true
 		var events: Array = []
+		if _tool_calls.is_empty() and _reasoning_content != "":
+			# A plain reply's reasoning is stored too, since the convention wants every earlier assistant message's reasoning back (see _translate_messages).
+			events.append({"type": "assistant_blocks", "blocks": [{"type": REASONING_BLOCK, "text": _reasoning_content}]})
 		if not _tool_calls.is_empty():
-			# Raw calls ride ahead of the canonical ones so LLMClient holds them before the tool_calls signal fires (see last_assistant_blocks); only when a call carried provider state, so every other server's history stays as before.
-			if _tool_calls.any(func(slot: Dictionary) -> bool: return not slot["extra"].is_empty()):
-				events.append({"type": "assistant_blocks", "blocks": _raw_tool_calls()})
+			# Raw calls ride ahead of the canonical ones so LLMClient holds them before the tool_calls signal fires (see last_assistant_blocks); only when a call carried provider state or the turn streamed reasoning_content, so every other server's history stays as before.
+			if _reasoning_content != "" or _tool_calls.any(func(slot: Dictionary) -> bool: return not slot["extra"].is_empty()):
+				var blocks := _raw_tool_calls()
+				if _reasoning_content != "":
+					blocks.append({"type": REASONING_BLOCK, "text": _reasoning_content})
+				events.append({"type": "assistant_blocks", "blocks": blocks})
 			events.append({"type": "tool_calls", "calls": _assembled_tool_calls()})
 		# "stop"/"tool_calls" (and legacy "function_call") are the normal ends; "length" (the token cap) and "content_filter" mean the reply was cut short.
 		events.append({"type": "done", "stats": _stats_from(_usage), "stop": _canonical_stop(_finish_reason, PackedStringArray(["stop", "tool_calls", "function_call"]))})

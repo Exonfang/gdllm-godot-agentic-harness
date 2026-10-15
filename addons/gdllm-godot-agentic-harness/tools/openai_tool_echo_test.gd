@@ -1,5 +1,5 @@
 extends SceneTree
-## Headless regression tests for OpenAIAdapter's provider-state echo on tool calls: fields a server attaches to a streamed tool call beyond id/type/function (Gemini's extra_content.google.thought_signature) are captured into an assistant_blocks event, then replayed verbatim on the call inside the trailing tool loop; turns before the last user message, servers that attach nothing, and blocks recorded under another kind all keep the plain rebuild.
+## Headless regression tests for OpenAIAdapter's provider-state echo on tool calls: fields a server attaches to a streamed tool call beyond id/type/function (Gemini's extra_content.google.thought_signature) are captured into an assistant_blocks event, then replayed verbatim on the call inside the trailing tool loop; turns before the last user message, servers that attach nothing, and blocks recorded under another kind all keep the plain rebuild. Any assistant turn that streamed reasoning_content (Reflection) stores it and sends it back on every later request, wherever the turn sits, since that server 400s a request whose earlier assistant message lacks it.
 ## Run from the project root:
 ##   godot --headless --path . --script res://addons/gdllm-godot-agentic-harness/tools/openai_tool_echo_test.gd
 ## Exits nonzero on any failure.
@@ -20,6 +20,8 @@ func _init() -> void:
 	_test_trailing_loop_echo()
 	_test_older_turn_rebuilds()
 	_test_alien_blocks_rebuild()
+	_test_reasoning_content_captured()
+	_test_reasoning_content_echo()
 	print("%s: %d checks, %d failures" % ["FAIL" if _failures > 0 else "OK", _checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -143,3 +145,51 @@ func _test_alien_blocks_rebuild() -> void:
 	_check(out[2]["tool_calls"].size() == 1 and out[2]["tool_calls"][0]["id"] == "call_0", "blocks that don't match the turn's call count fall through to the rebuild")
 	out = LLMAdapters.OpenAIAdapter.new()._translate_messages(_history(null))
 	_check(out[2]["tool_calls"][0]["id"] == "call_0", "a turn with no stored blocks rebuilds as before")
+
+
+func _reasoning_frame(field: String, text: String) -> String:
+	return "data: " + JSON.stringify({"choices": [{"delta": {field: text}, "finish_reason": null}]})
+
+
+func _test_reasoning_content_captured() -> void:
+	var events := _events(LLMAdapters.OpenAIAdapter.new(), [
+		_reasoning_frame("reasoning_content", "Look for "),
+		_reasoning_frame("reasoning_content", "the scene."),
+		_frame([{"index": 0, "id": "call_a", "type": "function", "function": {"name": "tool_search", "arguments": "{}"}}], "tool_calls"),
+	])
+	var types := _types(events)
+	_check(types == ["thinking", "thinking", "assistant_blocks", "tool_calls", "done"], "a tool-call turn that streamed reasoning_content emits its raw blocks (got %s)" % [types])
+	var blocks: Array = events[2]["blocks"]
+	_check(blocks.size() == 2 and blocks[0]["id"] == "call_a" and blocks[1] == {"type": "reasoning_content", "text": "Look for the scene."}, "the raw call is stored with the joined reasoning beside it")
+	events = _events(LLMAdapters.OpenAIAdapter.new(), [
+		_reasoning_frame("reasoning", "Look for the scene."),
+		_frame([{"index": 0, "id": "call_a", "type": "function", "function": {"name": "tool_search", "arguments": "{}"}}], "tool_calls"),
+	])
+	_check(_types(events) == ["thinking", "tool_calls", "done"], "reasoning under the `reasoning` field still shows but isn't echoed, so those servers' requests stay as before")
+	events = _events(LLMAdapters.OpenAIAdapter.new(), [
+		_reasoning_frame("reasoning_content", "Just answer."),
+		"data: " + JSON.stringify({"choices": [{"delta": {"content": "Hi"}, "finish_reason": "stop"}]}),
+	])
+	_check(_types(events) == ["thinking", "content", "assistant_blocks", "done"], "a plain reply's reasoning_content is stored too")
+	_check(events[2]["blocks"] == [{"type": "reasoning_content", "text": "Just answer."}], "a plain reply stores only its reasoning block")
+	events = _events(LLMAdapters.OpenAIAdapter.new(), ["data: " + JSON.stringify({"choices": [{"delta": {"content": "Hi"}, "finish_reason": "stop"}]})])
+	_check(_types(events) == ["content", "done"], "a reply with no reasoning stores no blocks")
+
+
+func _test_reasoning_content_echo() -> void:
+	var reasoning := {"type": "reasoning_content", "text": "Look for the scene."}
+	var plain := {"id": "call_a", "type": "function", "function": {"name": "tool_search", "arguments": "{\"query\":\"scene\"}"}}
+	var out: Array = LLMAdapters.OpenAIAdapter.new()._translate_messages(_history([plain, reasoning]))
+	_check(out[2].get("reasoning_content") == "Look for the scene.", "inside the trailing loop the turn carries its reasoning_content back")
+	_check(out[2]["tool_calls"].size() == 1 and out[2]["tool_calls"][0]["id"] == "call_a" and out[3]["tool_call_id"] == "call_a", "the reasoning block isn't replayed as a call, and the result binds to the real id")
+	var history := _history([plain, reasoning])
+	history.append({"role": "assistant", "content": "It's res://main.tscn."})
+	history.append({"role": "user", "content": "thanks"})
+	out = LLMAdapters.OpenAIAdapter.new()._translate_messages(history)
+	_check(out[2].get("reasoning_content") == "Look for the scene." and out[2]["tool_calls"][0]["id"] == "call_0", "a tool-call turn before the last user message rebuilds its calls but still carries its reasoning")
+	history[4]["assistant_blocks"] = [{"type": "reasoning_content", "text": "Found it."}]
+	out = LLMAdapters.OpenAIAdapter.new()._translate_messages(history)
+	_check(out[4].get("reasoning_content") == "Found it." and out[4]["content"] == "It's res://main.tscn.", "an earlier plain reply carries its reasoning back")
+	_check(not out[5].has("reasoning_content"), "user messages never carry reasoning")
+	out = LLMAdapters.OpenAIAdapter.new()._translate_messages(_history([plain]))
+	_check(not out[2].has("reasoning_content"), "a turn whose reasoning was cleared replays its call alone")
