@@ -41,6 +41,7 @@ const CONNECTION_BASE_URL_HINTS := {
 const EFFORT_LEVEL_COL_WIDTH := 62 ## Fixed width of each level column in the Effort Configuration table; the header label and each row's checkbox share it so columns line up, wide enough for "minimal".
 const EFFORT_CACHE_COL_WIDTH := 84 ## Fixed width of the Effort Configuration table's cache-TTL column; the header label and each row's spinbox share it so the column lines up.
 const EFFORT_CONTEXT_COL_WIDTH := 140 ## Fixed width of the Effort Configuration table's declared-context-window column; sized for an eight-digit token figure beside the spin arrows, so a millions-scale window never clips.
+const CUSTOM_TOOLS_DOCS_URL := "https://github.com/Exonfang/gdllm-godot-agentic-harness/blob/main/docs/custom-tools.md" ## Where the Custom Tools dialog sends the user for the file contract and approval rules, instead of explaining them in-client.
 const COLOR_REPAINT_INTERVAL := 0.4 ## Seconds one palette repaint holds off the next; the settings dialog's color picker writes on every drag tick and each repaint rebuilds every open log (see _schedule_color_repaint).
 
 var _store: GDLLMSessionStore ## Per-project roster + persistence.
@@ -1118,9 +1119,14 @@ func _ensure_custom_tools_dialog() -> void:
 	content.add_theme_constant_override("separation", 8)
 
 	var hint := Label.new()
-	hint.text = "Each %s/<name>.gd becomes a tool the model can find with tool_search. Tools run inside the editor, so one the model created or changed waits for your review and approval before it loads; tools you write yourself load on their own. Unchecking a tool hides it from the model. Tools not declared read-only only run while Make changes is on.\n\n%s" % [GDLLMCustomTools.ROOT, GDLLMCustomTools.CONTRACT]
+	hint.text = "Each %s/<name>.gd becomes a tool the model can call. Approve tools the model created or changed, and check or uncheck a tool to offer or hide it." % GDLLMCustomTools.ROOT
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(hint)
+	var docs_link := LinkButton.new()
+	docs_link.text = "How to write custom tools (documentation)"
+	docs_link.uri = CUSTOM_TOOLS_DOCS_URL
+	docs_link.tooltip_text = CUSTOM_TOOLS_DOCS_URL
+	content.add_child(docs_link)
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL

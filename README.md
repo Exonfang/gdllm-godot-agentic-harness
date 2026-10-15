@@ -29,8 +29,8 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 - Edits, whenever possible, are automatically engine-validated after changes and errors are surfaced to agents. 
 - Integrated engine documentation, pulling from the same cached data the in-editor documentation browser uses.
 - Respects `AGENTS.md`. `GDLLM.md` optionally overrides any `AGENTS.md` file if present.
-- Supports user-defined `/skills/`, dynamically added for appropriate tasks, similar to most other harnesses.
-- Supports project custom tools in `/gdllm-tools/`: each `<name>.gd` becomes a tool the model finds through `tool_search`, run inside the editor. Tools the model creates or changes wait for your review and approval in the Custom Tools dialog (🔧) before they load.
+- Supports user-defined `/skills/`, dynamically added for appropriate tasks, similar to most other harnesses. See [Skills](docs/skills.md).
+- Supports project custom tools in `/gdllm-tools/`: each `<name>.gd` becomes a tool the model finds through `tool_search`, run inside the editor. Tools the model creates or changes wait for your review and approval in the Custom Tools dialog (🔧) before they load. See [Custom tools](docs/custom-tools.md).
 - Contains tool calls within user and project directories for increased safety. (User configurable via editor setting in GDLLM > Agents)
 - Anthropic-like cache boundary aware compaction. Cache TTL is configurable per model and provider, auto-retires idle tools and loudly emits the boundary so the user can choose to compact manually if they prefer.
 - Supports agents spawning subagents.
