@@ -447,12 +447,13 @@ func _on_tasks_response(text: String, stats: Dictionary) -> void:
 		_title_busy = false
 		return
 	var job: Dictionary = _title_queue.pop_front()
-	var title := _sanitize_title(text)
+	var thinking := _tasks_client.last_completion_thinking
+	var title := sanitize_title(text)
 	if title != "":
 		_store.set_title(String(job["id"]), title) # emits session_title_changed -> tab + dropdown update
-		_settle_title_job(job, title, false, text, stats)
+		_settle_title_job(job, title, false, text, stats, thinking)
 	else:
-		_settle_title_job(job, "the reply reduced to an empty title", true, text, stats)
+		_settle_title_job(job, "the reply reduced to an empty title (Inspect task model context shows the raw reply) — a reply that is only reasoning means the Tasks Model never reached an answer; a small non-thinking model suits gdllm/models/tasks in Editor Settings", true, text, stats, thinking)
 	_title_busy = false
 	_process_title_queue()
 
@@ -465,25 +466,25 @@ func _on_tasks_request_failed(reason: String) -> void:
 	_process_title_queue()
 
 
-## Land a finished title job's outcome in its session's task panel — an open session owns its in-memory history, so it appends the display-only record itself — or, when the tab closed mid-run, straight onto the stored record, so the run persists on reload either way (goal 2). `raw` is the model's reply verbatim ("" when the request failed outright), kept so the debug inspection can show what sanitization saw; `stats` is the request's usage, feeding the panel's footer.
-func _settle_title_job(job: Dictionary, result: String, failed: bool, raw: String = "", stats: Dictionary = {}) -> void:
+## Land a finished title job's outcome in its session's task panel — an open session owns its in-memory history, so it appends the display-only record itself — or, when the tab closed mid-run, straight onto the stored record, so the run persists on reload either way (goal 2). `raw` is the model's reply verbatim ("" when the request failed outright), kept so the debug inspection can show what sanitization saw; `stats` is the request's usage, feeding the panel's footer; `thinking` is the reasoning trace the provider returned beside the reply.
+func _settle_title_job(job: Dictionary, result: String, failed: bool, raw: String = "", stats: Dictionary = {}, thinking: String = "") -> void:
 	var id := String(job["id"])
 	var seconds := (Time.get_ticks_msec() - int(job.get("started_ms", Time.get_ticks_msec()))) / 1000.0
 	var session: GDLLMChatSession = _open_sessions.get(id)
 	if is_instance_valid(session):
-		session.settle_title_task(String(job.get("model_label", "")), String(job.get("system", "")), String(job.get("text", "")), result, failed, seconds, raw, stats)
+		session.settle_title_task(String(job.get("model_label", "")), String(job.get("system", "")), String(job.get("text", "")), result, failed, seconds, raw, stats, thinking)
 		return
 	var record := _store.get_session(id)
 	if record.is_empty():
 		return
 	var history: Array = record.get("history", [])
-	history.append(GDLLMChatSession.title_task_entry(String(job.get("model_label", "")), String(job.get("system", "")), String(job.get("text", "")), result, failed, seconds, raw, stats))
+	history.append(GDLLMChatSession.title_task_entry(String(job.get("model_label", "")), String(job.get("system", "")), String(job.get("text", "")), result, failed, seconds, raw, stats, thinking))
 	_store.set_history(id, history)
 
 
-## Reduce a model's reply to a clean one-line title: first line only, quotes and trailing punctuation stripped, clamped in length.
-func _sanitize_title(raw: String) -> String:
-	var title := raw.strip_edges()
+## Reduce a model's reply to a clean one-line title: any reasoning trace that leaked inline dropped, then first line only, quotes and trailing punctuation stripped, clamped in length.
+static func sanitize_title(raw: String) -> String:
+	var title := _strip_inline_thinking(raw).strip_edges()
 	var newline := title.find("\n")
 	if newline != -1:
 		title = title.substr(0, newline).strip_edges()
@@ -495,6 +496,18 @@ func _sanitize_title(raw: String) -> String:
 	if title.length() > max_chars:
 		title = title.substr(0, max_chars).strip_edges() + "…"
 	return title
+
+
+## `text` with a reasoning trace that a server left in the reply text removed: everything through the last </think> (a template that opens the tag inside the prompt returns only the closing one), then anything from an unclosed <think> on (a trace cut off before its answer). Tags match case-insensitively.
+static func _strip_inline_thinking(text: String) -> String:
+	var out := text
+	var close := out.to_lower().rfind("</think>")
+	if close != -1:
+		out = out.substr(close + "</think>".length())
+	var open := out.to_lower().find("<think>")
+	if open != -1:
+		out = out.substr(0, open)
+	return out
 
 
 # --- Model list ---

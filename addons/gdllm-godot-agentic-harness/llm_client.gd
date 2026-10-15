@@ -23,6 +23,7 @@ var source_id: String = "" ## Id of the configured source, carried from configur
 var source_stale: bool = false ## The configured source id no longer resolves (deleted or renamed; see GDLLMSources.resolve_qualified); every send refuses loudly instead of running on rerouted connection details.
 var http_request: HTTPRequest
 var last_assistant_blocks: Array = [] ## The provider's raw assistant content blocks for the request that just finished, when its adapter needs them echoed back (Anthropic, the OpenAI Responses API, Gemini's signed tool calls on Chat Completions — all on tool-call turns only — and reasoning_content on any Chat Completions reply that streamed it; see LLMAdapter's assistant_blocks event). Empty for providers whose canonical echo suffices. Read it right after the response or tool_calls signal and store it beside the turn.
+var last_completion_thinking: String = "" ## The reasoning trace the provider returned beside the latest one-shot completion's reply ("" when none), set just before response_received fires; read it in that handler, since the next completion request clears it.
 var last_models_error: String = "" ## Why the latest fetch_models resolved empty ("" = no failure, the source is genuinely bare); the model sweep reads it so an empty source is reported with its cause instead of a bare "returned nothing".
 var _tags_http_request: HTTPRequest ## Separate transport so a model-list fetch can't collide with an in-flight chat request.
 var _tags_pending: bool = false ## True between issuing a model-list request and its first terminal event (response, request error, or timeout); guards models_received against a double-emit when a late response and the timeout race.
@@ -296,6 +297,7 @@ func _emit_context_window(tokens: int) -> void:
 func send_completion_request(prompt_json: String, system_prompt: String) -> void:
 	if _refuse_stale_source():
 		return
+	last_completion_thinking = ""
 	var req := _make_adapter().completion_request(model, system_prompt, prompt_json)
 	_post(String(req["path"]), JSON.stringify(req["body"]))
 
@@ -725,6 +727,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	# Same reported-first shape as _stream_final_stats — the body's usage plus the client's own payload estimates — so a background chore's panel can render the footer a chat turn gets.
 	var adapter := _make_adapter()
 	var reply := adapter.parse_completion(json.get_data())
+	last_completion_thinking = adapter.parse_completion_thinking(json.get_data())
 	var stats := adapter.parse_completion_stats(json.get_data())
 	stats["est_tokens_in"] = _completion_est_in
 	stats["est_tokens_out"] = estimate_tokens(reply.length())
