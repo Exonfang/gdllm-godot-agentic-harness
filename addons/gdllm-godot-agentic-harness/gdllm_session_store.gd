@@ -12,7 +12,7 @@ signal store_failed(message: String)
 const DIR := "user://gdllm"
 const PATH := "user://gdllm/sessions.json"
 const DEFAULT_TITLE := "New chat"
-const ECHO_THINKING_TYPES: Array[String] = ["thinking", "redacted_thinking", "reasoning"] ## The provider-echo block types that ARE stored reasoning (Anthropic's thinking/redacted_thinking, the Responses API's reasoning items) — shared with the manage dialog's Thinking-size column, so what Clear Thinking strips and what the column counts can never drift apart (see strip_echo_thinking).
+const ECHO_THINKING_TYPES: Array[String] = ["thinking", "redacted_thinking", "reasoning", "reasoning_content"] ## The provider-echo block types that ARE stored reasoning (Anthropic's thinking/redacted_thinking, the Responses API's reasoning items, a Chat Completions turn's reasoning_content — see OpenAIAdapter.REASONING_BLOCK) — shared with the manage dialog's Thinking-size column, so what Clear Thinking strips and what the column counts can never drift apart (see strip_echo_thinking).
 # The save-debounce window is user-configurable — see GDLLMTunables' gdllm/interface section.
 
 var sessions: Array[Dictionary] = [] ## Ordered roster; each entry is a session record (see _new_record).
@@ -176,7 +176,7 @@ static func is_echo_thinking(block: Variant) -> bool:
 	return block is Dictionary and (String(block.get("type", "")) in ECHO_THINKING_TYPES or block.get("thought") == true)
 
 
-## Drop the reasoning blocks a provider echo stored beside a tool-call turn (see is_echo_thinking; summary and encrypted content alike — see LLMClient.last_assistant_blocks), so "Clear Thinking" removes reasoning from disk and from any resend, not just from the display fields. Returns true if anything was removed.
+## Drop the reasoning blocks a provider echo stored beside a turn — a tool-call turn, or any reply on a reasoning_content server (see is_echo_thinking; summary and encrypted content alike — see LLMClient.last_assistant_blocks), so "Clear Thinking" removes reasoning from disk and from any resend, not just from the display fields. Returns true if anything was removed.
 static func strip_echo_thinking(msg: Dictionary) -> bool:
 	if not (msg.get("assistant_blocks") is Array):
 		return false

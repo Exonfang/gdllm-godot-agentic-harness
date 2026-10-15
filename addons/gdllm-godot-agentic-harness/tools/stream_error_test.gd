@@ -33,6 +33,9 @@ func _init() -> void:
 	_test_completion_parse_failure_names_the_shape()
 	_test_completion_parse_failure_excerpt_is_capped()
 	_test_completion_body_reaches_the_failure()
+	_test_reasoning_echo_400_guides_to_new_session()
+	_test_reasoning_rejection_400_guides_to_clear_thinking()
+	_test_cutoff_reply_keeps_its_reasoning()
 	print("%s: %d checks, %d failures" % ["FAIL" if _failures > 0 else "OK", _checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -194,3 +197,39 @@ func _test_completion_body_reaches_the_failure() -> void:
 	client._on_request_completed(HTTPRequest.RESULT_SUCCESS, 200, PackedStringArray(), "<html>nope</html>".to_utf8_buffer())
 	client.free()
 	_check(failed.size() == 1 and String(failed[0]).contains("nope"), "a non-JSON 200 body reaches the emitted failure, got: %s" % failed)
+
+
+## Reflection's 400 for a reply sent back without its reasoning names "reasoning" too; the hint must point at the session, not the effort level.
+func _test_reasoning_echo_400_guides_to_new_session() -> void:
+	var client: Node = Client.new()
+	client.effort = "medium"
+	var body := "{\"error\":{\"code\":\"missing_required_parameter\",\"message\":\"Missing required parameter: 'messages[2].reasoning_content'.\"}}"
+	var hint: String = client._failure_hints(body)
+	client.free()
+	_check(hint.contains("Start a new session"), "the reasoning_content 400 guides to a new session, got: %s" % hint)
+	_check(not hint.contains("Effort Configuration"), "the effort hint stays out of it")
+
+
+## A strict server refusing the echoed field names reasoning_content too; the hint must point the other way, at removing it.
+func _test_reasoning_rejection_400_guides_to_clear_thinking() -> void:
+	var client: Node = Client.new()
+	var body := "{\"error\":{\"message\":\"Additional properties are not allowed ('reasoning_content' was unexpected) - 'messages.2'\"}}"
+	var hint: String = client._failure_hints(body)
+	client.free()
+	_check(hint.contains("Clear Thinking") and not hint.contains("needs the reasoning"), "a rejected reasoning_content guides to Clear Thinking, got: %s" % hint)
+
+
+## A reply the socket cut short still lands in history; without the reasoning streamed so far, Reflection 400s every later request in the session.
+func _test_cutoff_reply_keeps_its_reasoning() -> void:
+	var client: Node = Client.new()
+	client.api_base = "http://box:8000/v1"
+	var replied: Array = []
+	client.response_received.connect(func(text: String, stats: Dictionary) -> void: replied.append([text, stats]))
+	client._streaming = true
+	client._stream_adapter = Adapters.OpenAIAdapter.new()
+	client._handle_stream_line('data: {"choices": [{"delta": {"reasoning_content": "Plan it."}}]}')
+	client._handle_stream_line('data: {"choices": [{"delta": {"content": "Half an ans"}}]}')
+	client._finish_stream()
+	_check(replied.size() == 1 and bool(replied[0][1].get("truncated", false)), "the cut-off reply is delivered as truncated")
+	_check(client.last_assistant_blocks == [{"type": "reasoning_content", "text": "Plan it."}], "the cut-off reply keeps the reasoning streamed so far, got: %s" % [client.last_assistant_blocks])
+	client.free()

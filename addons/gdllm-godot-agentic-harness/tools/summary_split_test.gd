@@ -35,6 +35,7 @@ func _init() -> void:
 	_test_downshift_advice()
 	_test_downshift_notice_tracks_the_condition()
 	_test_cross_model_base_is_labelled()
+	_test_reasoning_billed_only_where_sent()
 	print("%s: %d checks, %d failures" % ["FAIL" if _failures > 0 else "OK", _checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -319,3 +320,17 @@ func _test_cross_model_base_is_labelled() -> void:
 	Session._note_cross_model_base(untouched, same, "src::old")
 	_check(untouched.is_empty(), "and no note at all")
 	s.free()
+
+
+## A stored reasoning_content block rides every Chat Completions request wherever its turn sits, and no other kind's; sizing must follow the request, or the meter overstates a session that switched kinds.
+func _test_reasoning_billed_only_where_sent() -> void:
+	var reply := _a(100)
+	reply["assistant_blocks"] = [{"type": "reasoning_content", "text": "x".repeat(400)}]
+	var s: Variant = _session([_u(100), reply, _u(100)])
+	_check(int(s._request_span_chars(0, 3, 3)) == 700, "with no client the reasoning on an earlier plain reply is billed")
+	s.client = LLM.new()
+	s.client.adapter_kind = "openai"
+	_check(int(s._request_span_chars(0, 3, 3)) == 700, "on Chat Completions it is billed outside the trailing loop too")
+	s.client.adapter_kind = "anthropic"
+	_check(int(s._request_span_chars(0, 3, 3)) == 300, "on another kind the dropped reasoning is not billed")
+	s.client.free()

@@ -22,7 +22,7 @@ var cache_ttl: int = 0 ## The session's effective prompt-cache TTL in seconds, a
 var source_id: String = "" ## Id of the configured source, carried from configure_from so a stale-source refusal can name it.
 var source_stale: bool = false ## The configured source id no longer resolves (deleted or renamed; see GDLLMSources.resolve_qualified); every send refuses loudly instead of running on rerouted connection details.
 var http_request: HTTPRequest
-var last_assistant_blocks: Array = [] ## The provider's raw assistant content blocks for the request that just finished in tool calls, when its adapter needs them echoed back to continue the loop (Anthropic, the OpenAI Responses API, Gemini's signed tool calls on Chat Completions; see LLMAdapter's assistant_blocks event). Empty for providers whose canonical echo suffices. Read it right after tool_calls_received and store it beside the turn.
+var last_assistant_blocks: Array = [] ## The provider's raw assistant content blocks for the request that just finished, when its adapter needs them echoed back (Anthropic, the OpenAI Responses API, Gemini's signed tool calls on Chat Completions — all on tool-call turns only — and reasoning_content on any Chat Completions reply that streamed it; see LLMAdapter's assistant_blocks event). Empty for providers whose canonical echo suffices. Read it right after the response or tool_calls signal and store it beside the turn.
 var last_models_error: String = "" ## Why the latest fetch_models resolved empty ("" = no failure, the source is genuinely bare); the model sweep reads it so an empty source is reported with its cause instead of a bare "returned nothing".
 var _tags_http_request: HTTPRequest ## Separate transport so a model-list fetch can't collide with an in-flight chat request.
 var _tags_pending: bool = false ## True between issuing a model-list request and its first terminal event (response, request error, or timeout); guards models_received against a double-emit when a late response and the timeout race.
@@ -486,6 +486,8 @@ func _finish_stream() -> void:
 	if _stream_bad_code == 0 and _stream_buffer.strip_edges() != "":
 		_handle_stream_line(_stream_buffer.strip_edges())
 		_stream_buffer = ""
+	if not _stream_done and last_assistant_blocks.is_empty() and _stream_adapter != null:
+		last_assistant_blocks = _stream_adapter.partial_assistant_blocks()
 	_teardown_stream()
 	if _stream_error != "":
 		request_failed.emit(_stream_error + _failure_hints(_stream_error))
@@ -551,10 +553,22 @@ func _effort_hint(provider_message: String) -> String:
 
 ## Every hint this client appends to a failed request's report, joined. The Responses hint stands alone when it fires on a Responses source: on the summaries-verification 400 the effort hint would name the wrong lever — the level is fine, the summary ask riding beside it is what the API rejected — and two contradictory instructions guide to no solution at all.
 func _failure_hints(provider_message: String) -> String:
+	var reasoning_echo := _reasoning_echo_hint(provider_message)
+	if reasoning_echo != "":
+		return reasoning_echo
 	var responses := _responses_api_hint(provider_message)
 	if responses != "" and adapter_kind != GDLLMSources.KIND_OPENAI:
 		return responses
 	return _effort_hint(provider_message) + responses
+
+
+## The guidance for a 400 naming reasoning_content, in whichever direction the server objects. Demanding it back (Reflection's missing_required_parameter): this plugin stores and resends that reasoning on every reply, so the session holds a reply whose reasoning was never kept or was removed. Rejecting it (a strict schema refusing the unknown field): the session holds reasoning stored while it ran on a model that streamed it, and Clear Thinking removes it from every resend. Stands alone in _failure_hints because the effort hint would match the same message's "reasoning" and point at the wrong lever.
+func _reasoning_echo_hint(provider_message: String) -> String:
+	if not provider_message.contains("reasoning_content"):
+		return ""
+	if provider_message.to_lower().contains("missing"):
+		return " (This model needs the reasoning of every earlier reply sent back, and this session holds a reply without it — written before GDLLM kept it, by another model, or stripped by Clear Thinking. Start a new session to continue on this model, or switch this session to a model that doesn't require it.)"
+	return " (This server rejects the reasoning_content this session sends back with earlier replies — stored while it ran on a model that required it. Use Clear Thinking on this session to stop sending it, or start a new session.)"
 
 
 ## The Responses-API guidance for a failed request, when the provider's message points at a lever this plugin has: a chat-completions 400 naming v1/responses (OpenAI's newest models reject reasoning effort with tools on the older API — the fix is this source's Kind, one dropdown away, same URL and key; OpenAI spells the endpoint both with and without the leading slash, so the match takes the bare form) or a Responses 400 demanding organization verification for reasoning summaries (the fix is verifying, or the summaries switch in Editor Settings).

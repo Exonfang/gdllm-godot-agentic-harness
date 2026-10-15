@@ -765,7 +765,7 @@ func _request_content(msg: Dictionary, limit: int) -> String:
 	return String(msg.get("content", ""))
 
 
-## The history index after which an assistant turn's stored provider echo actually rides a request built over the first `limit` messages: the echoing providers (Anthropic's raw content blocks, the OpenAI Responses API's output items) replay them only for the trailing tool loop — the tool-call turns after the last user message — and rebuild every earlier turn from text plus synthesized ids (see AnthropicAdapter._translate_messages and OpenAIResponsesAdapter._translate_input, which share this rule). -1 when the span holds no user message, where the whole span is that trailing loop. Ollama and chat-completions OpenAI never store blocks, so the boundary costs them nothing.
+## The history index after which an assistant turn's stored provider echo actually rides a request built over the first `limit` messages: the echoing providers (Anthropic's raw content blocks, the OpenAI Responses API's output items) replay them only for the trailing tool loop — the tool-call turns after the last user message — and rebuild every earlier turn from text plus synthesized ids (see AnthropicAdapter._translate_messages and OpenAIResponsesAdapter._translate_input, which share this rule). -1 when the span holds no user message, where the whole span is that trailing loop. Ollama never stores blocks, so the boundary costs it nothing; a Chat Completions reasoning_content block ignores it and rides every request (see _request_message_chars).
 func _echo_boundary(limit: int) -> int:
 	for i in range(mini(limit, _history.size()) - 1, -1, -1):
 		var msg: Variant = _history[i]
@@ -774,7 +774,7 @@ func _echo_boundary(limit: int) -> int:
 	return -1
 
 
-## Every char one history message contributes to a request built over the first `limit` messages: its content at prune-stamp length, plus the tool calls, plus the provider echo blocks when `echoes` marks this turn one the provider replays verbatim (see _echo_boundary). The single measuring function every estimator uses, because the parts are easy to forget and the omission is not small — in a wild Anthropic session the `assistant_blocks` echo ran 409k chars against 98k of content, so sizing that counted content alone read a 148k-token prompt as 12k. Display-only records contribute nothing, exactly as the request drops them.
+## Every char one history message contributes to a request built over the first `limit` messages: its content at prune-stamp length, plus the tool calls, plus the provider echo blocks when `echoes` marks this turn one the provider replays verbatim (see _echo_boundary), plus any stored reasoning_content wherever the turn sits while the session runs on the Chat Completions kind, the only adapter that sends it. The single measuring function every estimator uses, because the parts are easy to forget and the omission is not small — in a wild Anthropic session the `assistant_blocks` echo ran 409k chars against 98k of content, so sizing that counted content alone read a 148k-token prompt as 12k. Display-only records contribute nothing, exactly as the request drops them.
 func _request_message_chars(msg: Dictionary, limit: int, echoes: bool = true) -> int:
 	if String(msg.get("role", "")) in ["task", "notice"]:
 		return 0
@@ -782,8 +782,17 @@ func _request_message_chars(msg: Dictionary, limit: int, echoes: bool = true) ->
 	if msg.get("tool_calls") is Array:
 		chars += JSON.stringify(msg["tool_calls"]).length()
 	# Only a tool-call turn inside the trailing loop echoes; anywhere else the adapter rebuilds the turn from the text already counted above, so billing the blocks would charge context the request never carries — safe in a trigger, wrong in the reclaim credit a pass reports (see _summary_head_chars).
-	if echoes and msg.get("assistant_blocks") is Array and msg.get("tool_calls") is Array and not Array(msg["tool_calls"]).is_empty():
-		chars += JSON.stringify(msg["assistant_blocks"]).length()
+	if msg.get("assistant_blocks") is Array:
+		var is_call_turn: bool = msg.get("tool_calls") is Array and not Array(msg["tool_calls"]).is_empty()
+		# Without a client (headless sizing) the kind is unknown, so the reasoning is billed.
+		var sends_reasoning: bool = client == null or client.adapter_kind == GDLLMSources.KIND_OPENAI
+		for block in msg["assistant_blocks"]:
+			# A Chat Completions reasoning_content block rides every request wherever its turn sits (see OpenAIAdapter._translate_messages); every other kind drops it, and every other echo block rides only inside the trailing loop.
+			if block is Dictionary and String(block.get("type", "")) == LLMAdapter.OpenAIAdapter.REASONING_BLOCK:
+				if sends_reasoning:
+					chars += String(block.get("text", "")).length()
+			elif echoes and is_call_turn:
+				chars += JSON.stringify(block).length()
 	return chars
 
 
@@ -3013,6 +3022,9 @@ func _on_response_received(text: String, stats: Dictionary) -> void:
 	# Store the stats dict exactly when the footer would render (see _format_stats), so the reloaded footer matches the live one.
 	if _stats_has_counts(stats):
 		entry["stats"] = stats
+	# A provider that wants every earlier reply's reasoning back (Chat Completions servers on the reasoning_content convention) left it on the client; store it beside the answer so later requests can echo it (see OpenAIAdapter._translate_messages).
+	if not client.last_assistant_blocks.is_empty():
+		entry["assistant_blocks"] = client.last_assistant_blocks.duplicate(true)
 	_history.append(entry)
 	_model_change_rows.clear() # a response landed: the pending swap run is over and any surviving rows are now permanent
 	if promoted_thinking:
