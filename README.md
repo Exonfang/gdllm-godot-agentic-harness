@@ -71,7 +71,8 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 
 ## First-time Setup
 - Download and extract the release zip of your choice (GDLLM + MarkdownLabel recommended) directly into your Godot project directory.
-- Using the **Connections** button in the session panel, link up your inference providers via API. Supports Ollama, OpenAI (both chat completions and responses API), Anthropic, or Google Gemini natively, and most others via the OpenAI adapter kinds.
+- Open Project > Plugins, then enable **GDLLM**
+- Using the **Connections** button in the session panel (gear icon above the chat box), link up your inference providers via API. Supports Ollama, OpenAI (both chat completions and responses API), Anthropic, or Google Gemini natively, and most others via the OpenAI adapter kinds.
 - A ChatGPT Plus/Pro subscription can drive the harness without API billing: use the **OpenAI ChatGPT Subscription** kind and press its **Sign in with ChatGPT** button (a browser sign-in; no API key).
 - After the model list refreshes, use the **Effort Configuration** to specify the available thinking levels, cache TTL, and context windows. No provider has an API to retrieve model effort/thinking levels, so they need to be manually identified and added, or the default effort level for the model will be used.
   - Context window size and cache TTL are used to inform context compaction.
