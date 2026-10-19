@@ -71,7 +71,7 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 
 ## Installation
 - Download and extract the release zip of your choice (GDLLM + MarkdownLabel recommended) directly into your Godot project directory.
-- In **Project Settings > Plugins**, enable **GDLLM - An in-editor Godot Agentic Harness** and **MarkDownLabel** (if downloaded).
+- In **Project Settings > Plugins**, enable **GDLLM - An in-editor Godot Agentic Harness** and **MarkdownLabel** (if downloaded).
 
 ## First-time Setup
 - Using the **Connections** button in the session panel, link up your inference providers via API. Supports Ollama, OpenAI (both chat completions and responses API), Anthropic, or Google Gemini natively, and most others via the OpenAI adapter kinds.
