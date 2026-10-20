@@ -7,6 +7,7 @@ const MANAGE_COL_DELETE := 11 ## Column in the manage table holding each row's t
 const MANAGE_RESIZE_MARGIN := 5.0 ## Half-width in px of the grab zone around a column boundary in the manage table's title strip.
 const MANAGE_COL_MIN_WIDTH := 40 ## Narrowest a manage-table column can be drag-resized down to.
 const CONNECTION_TOGGLE_WIDTH := 34 ## Fixed width of the Connections dialog's per-source enabled column; the header label and each row's checkbox share it so columns line up (mirrors the delete button's 34px).
+const CONNECTION_HELP_TERM_WIDTH := 64 ## Fixed width of the Connections dialog's help-term column, so "Kind", "URL", and "API key" sit in a column beside their wrapped explanations.
 ## Per-kind guidance for the Connections dialog's URL field — placeholder for a blank field, tooltip for a filled one, and for a kind whose endpoint is the same for everyone, the `prefill` a still-blank row adopts on switching to it. The field takes the URL the provider's own UI hands out, full endpoint or bare base alike (each adapter derives its routes from the server root; see LLMAdapter._root_from_endpoint), so the guidance shows the form users actually copy.
 const CONNECTION_BASE_URL_HINTS := {
 	GDLLMSources.KIND_OLLAMA: {
@@ -646,10 +647,7 @@ func _ensure_connections_dialog() -> void:
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 8)
 
-	var hint := Label.new()
-	hint.text = "Each source is a place models come from. Kind sets the wire format and auth: Ollama (local or cloud), OpenAI-Compatible (Chat Completions — LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, most others...), OpenAI Responses API (api.openai.com with an API key), OpenAI ChatGPT Subscription (your Plus/Pro account via Sign in with ChatGPT — no key), or Anthropic (Claude models). For the URL, paste what your provider hands you — the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one — keys (and ChatGPT sign-in tokens) are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(hint)
+	_add_connection_help(content)
 
 	# Column headers, laid out with the same stretch ratios as each row's fields so they line up.
 	var head := HBoxContainer.new()
@@ -681,6 +679,39 @@ func _ensure_connections_dialog() -> void:
 
 	_connections_dialog.add_child(content)
 	add_child(_connections_dialog)
+
+
+## Add the intro and term/explanation rows that explain what a source needs, with every term in a fixed column so the wrapped explanations line up.
+func _add_connection_help(content: VBoxContainer) -> void:
+	var intro := Label.new()
+	intro.text = "Each source below is a place models come from."
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	content.add_child(intro)
+
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 4)
+	content.add_child(grid)
+	for spec in [
+		["Kind", "The provider's wire format and auth. Ollama has its own kind; most other local servers (LM Studio, llama.cpp, koboldcpp, vLLM) use OpenAI-Compatible (Chat Completions); hosted providers have their own named kinds."],
+		["URL", "Paste the full endpoint or just the server address — every route is derived from it."],
+		["API key", "Only for sources that need one. Keys and ChatGPT sign-in tokens are stored locally in Editor Settings, never committed."],
+	]:
+		var term := Label.new()
+		term.text = String(spec[0])
+		term.custom_minimum_size = Vector2(CONNECTION_HELP_TERM_WIDTH, 0)
+		grid.add_child(term)
+		var body := Label.new()
+		body.text = String(spec[1])
+		body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(body)
+
+	var footer := Label.new()
+	footer.text = "Save, then Refresh Models to pull each source's models into the pickers."
+	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	content.add_child(footer)
 
 
 ## Rebuild the edit rows from the stored sources.
