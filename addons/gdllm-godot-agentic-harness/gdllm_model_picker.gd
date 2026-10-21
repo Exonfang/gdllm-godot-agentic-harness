@@ -74,6 +74,28 @@ func refresh() -> void:
 	tooltip_text = "Current model: %s" % _current + ("\n" + hint if hint != "" else "")
 
 
+## True when every token of `filter_text` (split on any run of non-alphanumeric characters) appears in the label or qualified id after both are normalized (see _normalize) — so "deepseek v4", "deepseek-v4", and "deepseek/v4" all find the same models, in any token order.
+## An empty or punctuation-only filter matches everything.
+static func matches_filter(filter_text: String, label: String = "", qid: String = "") -> bool:
+	var tokens := _normalize(filter_text).split(" ", false)
+	if tokens.is_empty():
+		return true
+	var hay := _normalize(label) + " " + _normalize(qid)
+	for needle in tokens:
+		if not hay.contains(needle):
+			return false
+	return true
+
+
+## Lowercase `text` and replace every run of non-alphanumeric characters with a single space, so separators compare as word breaks.
+static func _normalize(text: String) -> String:
+	var spaced := ""
+	for ch in text.to_lower():
+		var alnum := (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9")
+		spaced += ch if alnum else " "
+	return " ".join(spaced.split(" ", false))
+
+
 ## The editor's star icon marking a favorite, or null when the theme lacks it (callers fall back to a text star).
 static func favorite_icon() -> Texture2D:
 	var theme := EditorInterface.get_editor_theme()
@@ -161,19 +183,19 @@ func _toggle_popup() -> void:
 	_search_edit.call_deferred("grab_focus")
 
 
-## Show the models whose label or qualified id contains `filter_text` (case-insensitive), selecting `current` when shown, else the first match while filtering.
+## Show the models that match `filter_text` (see matches_filter), selecting `current` when shown, else the first match while a real filter is active.
 func _filter(filter_text: String) -> void:
 	if not is_instance_valid(_item_list):
 		return
 	_item_list.clear()
 	_filtered.clear()
-	var needle := filter_text.strip_edges().to_lower()
+	var filtering := not _normalize(filter_text).is_empty()
 	var favorites := GDLLMFavorites.get_list() if mark_favorites else PackedStringArray()
 	var star := favorite_icon()
 	var selected := -1
 	for qid in _models:
 		var label := GDLLMSources.label_for(qid)
-		if needle != "" and not label.to_lower().contains(needle) and not qid.to_lower().contains(needle):
+		if not matches_filter(filter_text, label, qid):
 			continue
 		_filtered.append(qid)
 		var index: int
@@ -184,7 +206,7 @@ func _filter(filter_text: String) -> void:
 		_item_list.set_item_tooltip(index, qid)
 		if qid == _current:
 			selected = index
-	if selected == -1 and needle != "" and _item_list.item_count > 0:
+	if selected == -1 and filtering and _item_list.item_count > 0:
 		selected = 0
 	if selected != -1:
 		_item_list.select(selected)
