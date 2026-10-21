@@ -74,7 +74,7 @@ func refresh() -> void:
 	tooltip_text = "Current model: %s" % _current + ("\n" + hint if hint != "" else "")
 
 
-## True when every whitespace-separated token of `filter_text` appears in the label or qualified id after both are normalized (see _normalize) — so "deepseek v4", "deepseek-v4", and "deepseek/v4" all find the same models, in any token order.
+## True when every token of `filter_text` (split on any run of non-alphanumeric characters) appears in the label or qualified id after both are normalized (see _normalize) — so "deepseek v4", "deepseek-v4", and "deepseek/v4" all find the same models, in any token order.
 ## An empty or punctuation-only filter matches everything.
 static func matches_filter(filter_text: String, label: String = "", qid: String = "") -> bool:
 	var tokens := _normalize(filter_text).split(" ", false)
@@ -189,7 +189,7 @@ func _filter(filter_text: String) -> void:
 		return
 	_item_list.clear()
 	_filtered.clear()
-	var needle := _normalize(filter_text)
+	var filtering := not _normalize(filter_text).is_empty()
 	var favorites := GDLLMFavorites.get_list() if mark_favorites else PackedStringArray()
 	var star := favorite_icon()
 	var selected := -1
@@ -206,7 +206,7 @@ func _filter(filter_text: String) -> void:
 		_item_list.set_item_tooltip(index, qid)
 		if qid == _current:
 			selected = index
-	if selected == -1 and needle != "" and _item_list.item_count > 0:
+	if selected == -1 and filtering and _item_list.item_count > 0:
 		selected = 0
 	if selected != -1:
 		_item_list.select(selected)
