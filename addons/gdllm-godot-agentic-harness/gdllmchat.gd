@@ -7,6 +7,7 @@ const MANAGE_COL_DELETE := 11 ## Column in the manage table holding each row's t
 const MANAGE_RESIZE_MARGIN := 5.0 ## Half-width in px of the grab zone around a column boundary in the manage table's title strip.
 const MANAGE_COL_MIN_WIDTH := 40 ## Narrowest a manage-table column can be drag-resized down to.
 const CONNECTION_TOGGLE_WIDTH := 34 ## Fixed width of the Connections dialog's per-source enabled column; the header label and each row's checkbox share it so columns line up (mirrors the delete button's 34px).
+const CONNECTION_HELP_TERM_WIDTH := 64 ## Fixed width of the Connections dialog's help-term column, so "Kind", "URL", and "API key" sit in a column beside their wrapped explanations.
 ## Per-kind guidance for the Connections dialog's URL field — placeholder for a blank field, tooltip for a filled one, and for a kind whose endpoint is the same for everyone, the `prefill` a still-blank row adopts on switching to it. The field takes the URL the provider's own UI hands out, full endpoint or bare base alike (each adapter derives its routes from the server root; see LLMAdapter._root_from_endpoint), so the guidance shows the form users actually copy.
 const CONNECTION_BASE_URL_HINTS := {
 	GDLLMSources.KIND_OLLAMA: {
@@ -68,6 +69,7 @@ var _manage_button: Button
 
 var _connections_dialog: ConfirmationDialog ## Built lazily on first Connections press; edits the GDLLMSources list. Opened from the ⚙ button beside each session's model picker.
 var _connections_rows_box: VBoxContainer ## Container the per-source edit rows are rebuilt into.
+var _connections_kind_head: Label ## The Kind column header, held so its width can follow the rows' Kind dropdown (sized to its longest item) instead of a stretch share.
 var _connection_rows: Array = [] ## One entry per row: {id, name_edit, kind_select, base_edit, key_edit, container}. `id` preserves an existing source's id so qualified model ids keep resolving; "" for a freshly added row.
 
 var _effort_dialog: ConfirmationDialog ## Built lazily on first Effort-configuration press; edits the GDLLMEfforts per-model level map. Opened from the ⚡ button beside each session's model picker.
@@ -637,7 +639,7 @@ func _ensure_connections_dialog() -> void:
 	_connections_dialog.ok_button_text = "Save & Close"
 	# Extra actions that leave the dialog open: append a blank row, or persist edits and re-sweep every source's models.
 	_connections_dialog.add_button("Add Source", false, "add_source")
-	_connections_dialog.add_button("Refresh Models", false, "refresh_models")
+	_apply_editor_icon(_connections_dialog.add_button("Fetch Models", false, "refresh_models"), "FlipWinding", "Fetch Models")
 	_connections_dialog.confirmed.connect(_on_connections_confirmed)
 	_connections_dialog.custom_action.connect(_on_connections_custom_action)
 
@@ -646,10 +648,7 @@ func _ensure_connections_dialog() -> void:
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 8)
 
-	var hint := Label.new()
-	hint.text = "Each source is a place models come from. Kind sets the wire format and auth: Ollama (local or cloud), OpenAI-Compatible (Chat Completions — LM Studio, llama.cpp, koboldcpp, vLLM, Poolside, most others...), OpenAI Responses API (api.openai.com with an API key), OpenAI ChatGPT Subscription (your Plus/Pro account via Sign in with ChatGPT — no key), or Anthropic (Claude models). For the URL, paste what your provider hands you — the full endpoint or just the server's address; every route is derived from it. Paste an API key for sources that need one — keys (and ChatGPT sign-in tokens) are stored locally in Editor Settings and never committed. Save, then Refresh Models to pull each source's models into the pickers."
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(hint)
+	_add_connection_help(content)
 
 	# Column headers, laid out with the same stretch ratios as each row's fields so they line up.
 	var head := HBoxContainer.new()
@@ -658,13 +657,16 @@ func _ensure_connections_dialog() -> void:
 	on_head.text = "On"
 	on_head.custom_minimum_size = Vector2(CONNECTION_TOGGLE_WIDTH, 0)
 	head.add_child(on_head)
-	for spec in [["Name", 2.0], ["Kind", 1.0], ["URL", 3.0], ["API key", 2.0]]:
+	for spec in [["Name", 2.0], ["Kind", 0.0], ["URL", 3.0], ["API key", 2.0]]:
 		var col := Label.new()
 		col.text = String(spec[0])
-		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		col.size_flags_stretch_ratio = float(spec[1])
+		if float(spec[1]) > 0.0:
+			col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			col.size_flags_stretch_ratio = float(spec[1])
+		else:
+			_connections_kind_head = col # fixed-width, synced to the rows' Kind dropdown in _add_connection_row
 		head.add_child(col)
-	var spacer := Control.new() # aligns with each row's fixed-width delete button
+	var spacer := Control.new() # aligns with each row's fixed-width delete button, plus the rows' scrollbar while it shows
 	spacer.custom_minimum_size = Vector2(34, 0)
 	head.add_child(spacer)
 	content.add_child(head)
@@ -678,9 +680,61 @@ func _ensure_connections_dialog() -> void:
 	_connections_rows_box.add_theme_constant_override("separation", 4)
 	scroll.add_child(_connections_rows_box)
 	content.add_child(scroll)
+	var v_bar := scroll.get_v_scroll_bar()
+	var sync_spacer := func() -> void:
+		spacer.custom_minimum_size.x = 34 + (v_bar.size.x if v_bar.visible else 0.0)
+	v_bar.visibility_changed.connect(sync_spacer)
+	v_bar.resized.connect(sync_spacer)
 
 	_connections_dialog.add_child(content)
 	add_child(_connections_dialog)
+
+
+## Add the intro and term/explanation rows that explain what a source needs, with every term in a fixed column so the wrapped explanations line up.
+func _add_connection_help(content: VBoxContainer) -> void:
+	var intro := Label.new()
+	intro.text = "Each source below is a place models come from."
+	intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	content.add_child(intro)
+
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 4)
+	content.add_child(grid)
+	for spec in [
+		["Kind", "The provider's wire format and authentication. If your provider is listed, use their bespoke kind. Otherwise, most other providers use OpenAI-Compatible (Chat Completions) or OpenAI Responses API."],
+		["URL", "The full endpoint or server address."],
+		["API key", "Only for sources that need one. Secrets are stored locally in Editor Settings."],
+	]:
+		var term := Label.new()
+		term.text = String(spec[0])
+		term.custom_minimum_size = Vector2(CONNECTION_HELP_TERM_WIDTH, 0)
+		grid.add_child(term)
+		var body := Label.new()
+		body.text = String(spec[1])
+		body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(body)
+
+	# Rich text so the footer can show the Fetch button's own icon inline, the same one beside each session's model picker.
+	var footer := RichTextLabel.new()
+	footer.fit_content = true
+	footer.scroll_active = false
+	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# The editor theme frames RichTextLabel in a panel; borrow Label's style instead so the footer keeps the labels' padding and lines up with them.
+	var editor_theme := EditorInterface.get_editor_theme()
+	var label_style: StyleBox = editor_theme.get_stylebox("normal", "Label") if editor_theme != null and editor_theme.has_stylebox("normal", "Label") else StyleBoxEmpty.new()
+	footer.add_theme_stylebox_override("normal", label_style)
+	footer.add_text("Save, then Fetch Models (")
+	var fetch_icon := _editor_icon("FlipWinding")
+	if fetch_icon != null:
+		footer.add_image(fetch_icon)
+	else:
+		footer.add_text("⟳")
+	footer.add_text(") to pull each source's models into the pickers.")
+	content.add_child(footer)
 
 
 ## Rebuild the edit rows from the stored sources.
@@ -724,9 +778,12 @@ func _add_connection_row(source: Dictionary) -> void:
 		if String(kind_select.get_item_metadata(i)) == current_kind:
 			kind_select.select(i)
 			break
-	kind_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	kind_select.size_flags_stretch_ratio = 1.0
 	row.add_child(kind_select)
+	# The dropdown keeps its natural width (its longest kind's label), so the header's Kind column copies that width rather than a stretch share it would never match.
+	var sync_kind_head := func() -> void:
+		if is_instance_valid(_connections_kind_head):
+			_connections_kind_head.custom_minimum_size.x = kind_select.get_combined_minimum_size().x
+	kind_select.minimum_size_changed.connect(sync_kind_head)
 
 	var base_edit := LineEdit.new()
 	base_edit.text = String(source.get("base_url", ""))
@@ -747,6 +804,7 @@ func _add_connection_row(source: Dictionary) -> void:
 	var auth_button := Button.new()
 	auth_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	auth_button.size_flags_stretch_ratio = 2.0
+	auth_button.clip_text = true # its label would otherwise widen the column past the header's API key share
 	row.add_child(auth_button)
 
 	var apply_kind := func(kind: String) -> void:
@@ -770,6 +828,7 @@ func _add_connection_row(source: Dictionary) -> void:
 	row.add_child(del)
 
 	_connections_rows_box.add_child(row)
+	sync_kind_head.call()
 	var entry := {
 		"id": String(source.get("id", "")),
 		"enabled_check": enabled_check,
