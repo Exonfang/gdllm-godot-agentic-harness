@@ -208,7 +208,8 @@ func _build_ui() -> void:
 	_session_select.fit_to_longest_item = false
 	_session_select.clip_text = true
 	_session_select.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_session_select.tooltip_text = "Switch sessions. Selecting one opens or focuses its tab."
+	_session_select.tooltip_text = _session_select_tooltip()
+	_session_select.mouse_entered.connect(_refresh_session_tooltip)
 	_session_select.item_selected.connect(_on_session_dropdown_selected)
 	header.add_child(_session_select)
 
@@ -233,9 +234,23 @@ func _build_ui() -> void:
 
 	var bar := _tabs.get_tab_bar()
 	bar.tab_close_display_policy = TabBar.CLOSE_BUTTON_SHOW_ALWAYS
+	bar.tooltip_text = "Close the current session tab: Cmd/Ctrl+W while the panel has focus."
 	bar.tab_close_pressed.connect(_on_tab_close_pressed)
 	# tab_changed fires for both user clicks and programmatic selection, so the active session and dropdown stay in sync either way.
 	_tabs.tab_changed.connect(_on_tab_changed)
+
+
+## The session dropdown's tooltip: switching sessions plus the dock toggle's live bound key from Editor Settings, or "unbound" when the user cleared it.
+func _session_select_tooltip() -> String:
+	var shortcut := EditorInterface.get_editor_settings().get_shortcut(GDLLMSettings.TOGGLE_DOCK_SHORTCUT)
+	var toggle := "unbound." if shortcut == null or shortcut.events.is_empty() else String(shortcut.get_as_text()) + "."
+	return "Switch sessions. Selecting one opens or focuses its tab.\nHide/show the whole panel: " + toggle
+
+
+## Refresh the dropdown tooltip as the pointer arrives.
+## The Shortcuts UI edits the Shortcut object directly without emitting EditorSettings.settings_changed, so hover time is the reliable moment to read a remap.
+func _refresh_session_tooltip() -> void:
+	_session_select.tooltip_text = _session_select_tooltip()
 
 
 func _ensure_tasks_client() -> void:
@@ -1884,6 +1899,8 @@ func _on_confirm_dialog_confirmed() -> void:
 ## Sync the dock when a source or model is changed from the settings page or the Connections dialog (or any other listener).
 func _on_editor_settings_changed() -> void:
 	_tasks_client.configure_from(GDLLMSettings.get_tasks_source_and_model())
+	if is_instance_valid(_session_select):
+		_session_select.tooltip_text = _session_select_tooltip()
 	# Rebuild pickers only on an actual favorites edit — this signal fires for every settings write (input-height drag ticks included), and each rebuild churns every open picker.
 	var favorites := JSON.stringify(Array(GDLLMFavorites.get_list()))
 	var favorites_changed := favorites != _last_favorites

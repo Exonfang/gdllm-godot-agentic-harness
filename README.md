@@ -83,6 +83,17 @@ By integrating this harness directly into the editor, GDLLM starts ahead of more
 - In Editor Settings > GDLLM > Models, specify your preferred default chat model and tasks model. The tasks model powers summarization and title generation; its default, **Current model**, runs those on whichever model the session is using, so pick a small model there only if you want them offloaded.
 - Review Editor Settings > GDLLM and update to your preference. Some color-blind users will want to adjust their colors.
 
+## Keyboard shortcuts
+
+- **Cmd+Shift+G** (macOS) / **Ctrl+Shift+G** (Windows/Linux)
+  - Show or hide the GDLLM chat panel. Rebind or disable it under **Editor Settings → Shortcuts → gdllm → toggle_dock**.
+- **Cmd+W** (macOS) / **Ctrl+W** (Windows/Linux)
+  - Close the current session tab while the chat panel has focus.
+- **Enter**
+  - In chat panel, send the message.
+- **Shift+Enter**
+  - In chat panel, insert a new line.
+
 ## Roadmap
 
 While this harness is ready-to-use as is, there are a few additional features I'm still interested in adding.

@@ -13,6 +13,9 @@ const TASKS_SYSTEM_PROMPT := "gdllm/models/tasks_system_prompt"
 ## Clock format for timestamps the plugin renders (e.g. a session's "Created …" header). Godot has no built-in 12h/24h preference, so we carry our own.
 const TIME_FORMAT := "gdllm/interface/time_format"
 
+## Editor-settings path of the shortcut that shows or hides the chat dock; registered by the plugin and read back for the dock's live tooltip.
+const TOGGLE_DOCK_SHORTCUT := "gdllm/toggle_dock"
+
 ## Whether the live reasoning block starts expanded and streams its trace as it's built. Off keeps it collapsed to a click-to-open "Thinking…" caption so a churning trace stays out of the way; the trace is never hidden, only deferred (see GDLLMChatSession._begin_thinking_block).
 const AUTO_EXPAND_THINKING := "gdllm/interface/auto_expand_thinking"
 
