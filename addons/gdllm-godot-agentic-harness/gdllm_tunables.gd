@@ -62,6 +62,8 @@ const SESSION_TITLE_MAX_CHARS := "gdllm/interface/session_title_max_chars"
 const SESSION_SAVE_DEBOUNCE_SECONDS := "gdllm/interface/session_save_debounce_seconds"
 ## Milliseconds of history rendering per frame while a restored session replays; the rest yields to the editor.
 const REPLAY_FRAME_BUDGET_MS := "gdllm/interface/session_replay_frame_budget_ms"
+## Messages a session renders on first open and each "Load more" press adds; older messages wait behind the load row.
+const REPLAY_TAIL_MESSAGES := "gdllm/interface/session_replay_tail_messages"
 
 # --- gdllm/tool_output — how much of a tool's answer lands in context ---
 
@@ -253,6 +255,7 @@ const SPECS := {
 	SESSION_TITLE_MAX_CHARS: {"default": 48, "min": 10, "max": 200, "step": 1},
 	SESSION_SAVE_DEBOUNCE_SECONDS: {"default": 0.75, "min": 0.0, "max": 10.0, "step": 0.05},
 	REPLAY_FRAME_BUDGET_MS: {"default": 8, "min": 1, "max": 100, "step": 1},
+	REPLAY_TAIL_MESSAGES: {"default": 100, "min": 1, "max": 1000, "step": 1, "or_greater": true},
 	READ_FILE_SUMMARY_THRESHOLD: {"default": 12000, "min": 0, "max": 100000, "step": 1000, "or_greater": true},
 	PACKED_ARRAY_ELIDE_CHARS: {"default": 128, "min": 0, "max": 10000, "step": 16, "or_greater": true},
 	SEARCH_CONTEXT_LINES: {"default": 3, "min": 0, "max": 20, "step": 1},

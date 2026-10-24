@@ -55,6 +55,7 @@ const WIPE_BLOCK := "█" ## solid block (U+2588) shown at the wipe's leading ed
 const HEADER_FONT_SIZE: int = 12 ## small font for the sticky session-stats header
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+
 # The per-frame replay rendering budget (the rest yields to the editor, so a long restored session backfills over several frames instead of hanging one — see _replay_history) is user-configurable — see GDLLMTunables' gdllm/interface section.
 
 ## Compaction pass 2 — anchored summarization (see _run_summary_pass). The bridge is the summary message's opening as the model receives it, framing the replacement so the model builds on the summarized work instead of re-deriving it.
@@ -104,6 +105,10 @@ var _record: Dictionary ## Session record handed to setup(); applied once the UI
 var _history: Array[Dictionary] = [] ## [{"role": "user"|"assistant", "content": String}, ...]
 var _needs_replay: bool = false ## The stored history hasn't been rendered yet; _apply_record defers that until the tab is actually shown, so restoring many tabs costs nothing at boot (see _maybe_start_replay).
 var _replay_generation: int = 0 ## Bumped whenever a replay starts, so a superseded chunked pass (e.g. a clear_thinking rebuild mid-backfill) stops appending after its next yield.
+var _replay_loaded_from: int = 0 ## History index of the oldest rendered message; >0 leaves that many older messages behind the load row.
+var _replay_load_row: HBoxContainer = null ## The top-of-log row offering the two load actions; null once every message is rendered.
+var _replay_running: bool = false ## True while a full replay is appending; the load row stays disabled until it finishes.
+var _loading_older: bool = false ## True while a Load press renders its chunk; scroll-follow is suppressed during it.
 var _repaint_when_idle: bool = false ## A palette edit landed while a turn was in flight; the deferred rebuild runs once the turn settles (see repaint_colors and _consume_idle_repaint).
 var _repaint_scroll: int = -1 ## Scroll offset a detached reader held when a repaint burst began, restored by the burst's last completed rebuild; -1 when there is nothing to restore.
 var _title_seed: String = "" ## Opening message text held until the first assistant reply lands, so title generation runs after the message populates rather than racing it. "" when nothing is pending.
@@ -627,22 +632,64 @@ func _maybe_start_replay() -> void:
 		_replay_history()
 
 
-## Render every message in _history into the (assumed empty) log, each turn matching its live layout: stored trace, then response, tool-call turns as their call and result disclosures. Renders in GDLLMTunables.REPLAY_FRAME_BUDGET_MS slices, yielding between them — a long history rendered in one frame hangs the editor at boot — with the send path locked until the tail lands so a new message can't interleave with the backfill. Ends with a follow-only scroll, respecting a user who scrolled up mid-backfill.
+## Render the stored log from _replay_loaded_from to the end into the (assumed empty) log, each turn matching its live layout: stored trace, then response, tool-call turns as their call and result disclosures. The first replay starts at the newest configured tail; older messages stay unrendered behind the load row at the top of the log. Rebuilds keep the currently loaded window. Renders in GDLLMTunables.REPLAY_FRAME_BUDGET_MS slices, yielding between them — a long history rendered in one frame hangs the editor at boot — with the send path locked until the tail lands so a new message can't interleave with the backfill. Ends with a follow-only scroll, respecting a user who scrolled up mid-backfill.
 func _replay_history() -> void:
+	var first_replay := _needs_replay
 	_needs_replay = false
 	_replay_generation += 1
 	var generation := _replay_generation
+	_replay_running = true
 	_send_button.disabled = true # unlocked when the backfill completes; a superseding pass re-locks and owns the unlock
 	_log_target = _message_list # a rebuild always targets the main log, never a stale redirect panel
-	var prev_model := "" # last assistant turn's model, so a change between turns replays as a "Changed model to X" marker
+	if first_replay:
+		_replay_loaded_from = _replay_start_for(_history.size(), _replay_tail_size())
+	else:
+		_replay_loaded_from = clampi(_replay_loaded_from, 0, _history.size())
+		if _replay_loaded_from >= _history.size():
+			_replay_loaded_from = 0
+	_replay_load_row = null
+	_refresh_replay_load_row()
+	var completed := await _replay_range(_replay_loaded_from, _history.size(), _message_list, generation)
+	if not completed:
+		if generation == _replay_generation:
+			_replay_running = false
+		return
+	_replay_running = false
+	_refresh_replay_load_row()
+	# A rebuild renders everything fresh and visible, so a search in effect (e.g. across clear_thinking's rebuild) must re-apply.
+	if not _active_search_terms.is_empty():
+		_apply_search_filter()
+	# The downshift row is a condition, not a record, so a rebuild re-derives it instead of replaying it — including on a session reopened on a model that no longer holds it. The no-sources and unknown-window guidance rows are the same kind of thing.
+	_refresh_downshift_notice()
+	_refresh_no_sources_notice()
+	_refresh_unknown_window_notice()
+	_refresh_chatgpt_signin_notice()
+	_send_button.disabled = false
+	_follow_to_bottom()
+
+
+## Render history[start..end) into `target`, sliced at the replay frame budget. Returns false when a newer replay superseded this pass.
+func _replay_range(start: int, end: int, target: VBoxContainer, generation: int) -> bool:
+	_log_target = target
+	var prev_model := _model_before(start) # last assistant turn's model, so a change between turns replays as a "Changed model to X" marker
 	var deadline := Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.REPLAY_FRAME_BUDGET_MS)
-	for i in _history.size():
+	var replay_start := Time.get_ticks_usec()
+	var render_usec := 0
+	var wait_usec := 0
+	var slice_start := replay_start
+	for i in range(start, end):
 		if Time.get_ticks_msec() >= deadline:
+			render_usec += Time.get_ticks_usec() - slice_start
+			var wait_start := Time.get_ticks_usec()
+			_log_target = _message_list # a live turn may land while this pass yields; it belongs in the main log, not a load holder
 			await get_tree().process_frame
-			# A rebuild superseded this pass while it yielded (its clear freed our rows); the new pass owns the log now.
-			if generation != _replay_generation or not is_instance_valid(_message_list):
-				return
+			wait_usec += Time.get_ticks_usec() - wait_start
+			if generation != _replay_generation or not is_instance_valid(_message_list) or not is_instance_valid(target):
+				_log_target = _message_list
+				return false
+			slice_start = Time.get_ticks_usec()
 			deadline = Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.REPLAY_FRAME_BUDGET_MS)
+			_log_target = target
 		var msg: Dictionary = _history[i]
 		var role := String(msg.get("role", ""))
 		# A background run persisted display-only — the dock's title generation, or a compaction pass's summarization; replay its panel where it ran.
@@ -707,16 +754,214 @@ func _replay_history() -> void:
 		# A cut-short reply replays with the same truncation marker and cause it showed live (see _on_response_received).
 		if role == "assistant" and bool(msg.get("truncated", false)):
 			_add_truncated_notice(String(msg.get("stop_reason", "")), false)
-	# A rebuild renders everything fresh and visible, so a search in effect (e.g. across clear_thinking's rebuild) must re-apply.
-	if not _active_search_terms.is_empty():
-		_apply_search_filter()
-	# The downshift row is a condition, not a record, so a rebuild re-derives it instead of replaying it — including on a session reopened on a model that no longer holds it. The no-sources and unknown-window guidance rows are the same kind of thing.
-	_refresh_downshift_notice()
-	_refresh_no_sources_notice()
-	_refresh_unknown_window_notice()
-	_refresh_chatgpt_signin_notice()
+	render_usec += Time.get_ticks_usec() - slice_start
+	_log_target = _message_list
+	if GDLLMSettings.is_replay_profiling_enabled() and end > start:
+		var wall := Time.get_ticks_usec() - replay_start
+		var messages := end - start
+		print("GDLLM replay profile: %d msgs, %.1f ms wall (%.1f render, %.1f frames), %.2f ms/msg render, %d controls" % [
+			messages, wall / 1000.0, render_usec / 1000.0, wait_usec / 1000.0,
+			(render_usec / 1000.0) / maxi(1, messages), target.get_child_count(),
+		])
+	return true
+
+
+## The configured replay chunk: messages the first open renders and each Load more press adds.
+static func _replay_tail_size() -> int:
+	return GDLLMTunables.geti(GDLLMTunables.REPLAY_TAIL_MESSAGES)
+
+
+## The history index a Load press should start from: exactly `count` messages back, or 0 when fewer remain.
+func _replay_start_for(from: int, count: int) -> int:
+	return maxi(0, from - count)
+
+
+## The model stamped on the newest assistant turn before `index`, or "" when none — seeds the "Changed model" marker for a chunk that starts mid-conversation.
+func _model_before(index: int) -> String:
+	for i in range(index - 1, -1, -1):
+		var msg: Dictionary = _history[i]
+		if String(msg.get("role", "")) == "assistant":
+			return String(msg.get("model", ""))
+	return ""
+
+
+## Build or drop the top-of-log row: Load more/Load all while older history is hidden, or Hide older messages once everything is rendered.
+func _refresh_replay_load_row() -> void:
+	var has_hidden := _replay_loaded_from > 0
+	if not has_hidden and _history.size() <= _replay_tail_size():
+		_remove_replay_load_row()
+		return
+	_ensure_replay_load_row()
+	_clear_replay_load_row()
+	if _replay_running or _loading_older:
+		_replay_load_row.add_child(_replay_loading_button())
+		return
+	if not has_hidden:
+		_replay_load_row.add_child(_replay_hide_older_button())
+		return
+	_replay_load_row.add_child(_replay_load_more_button())
+	_replay_load_row.add_child(_replay_load_all_button())
+
+
+func _remove_replay_load_row() -> void:
+	if is_instance_valid(_replay_load_row):
+		_message_list.remove_child(_replay_load_row)
+		_replay_load_row.queue_free()
+	_replay_load_row = null
+
+
+func _ensure_replay_load_row() -> void:
+	if is_instance_valid(_replay_load_row):
+		return
+	_replay_load_row = HBoxContainer.new()
+	_replay_load_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_replay_load_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_replay_load_row.add_theme_constant_override("separation", 8)
+	_message_list.add_child(_replay_load_row)
+	_message_list.move_child(_replay_load_row, 0)
+
+
+func _clear_replay_load_row() -> void:
+	for child in _replay_load_row.get_children():
+		_replay_load_row.remove_child(child)
+		child.queue_free()
+
+
+func _replay_loading_button() -> Button:
+	var button := _new_replay_load_button("Loading…")
+	button.disabled = true
+	return button
+
+
+func _replay_load_more_button() -> Button:
+	var button := _new_replay_load_button("Load more", "Loads %d more messages." % _replay_more_count())
+	button.pressed.connect(func() -> void: _load_earlier(false))
+	return button
+
+
+func _replay_load_all_button() -> Button:
+	var button := _new_replay_load_button("Load all", "Loads all previous messages, can take a while for long sessions.")
+	button.pressed.connect(func() -> void: _load_earlier(true))
+	return button
+
+
+func _replay_hide_older_button() -> Button:
+	var button := _new_replay_load_button("Hide older messages", "For long sessions, hiding older messages will increase performance.")
+	button.pressed.connect(_hide_older_messages)
+	return button
+
+
+## Collapse the fully rendered log back to the configured tail, reusing the ordinary replay path so the rebuilt window, notices, and scroll all match a fresh open.
+func _hide_older_messages() -> void:
+	if _replay_running or _loading_older or is_busy():
+		return
+	_replay_loaded_from = _replay_start_for(_history.size(), _replay_tail_size())
+	if _replay_loaded_from <= 0:
+		return
+	_stick_to_bottom = true
+	_clear_message_log()
+	_replay_history()
+
+
+func _new_replay_load_button(text: String, tooltip: String = "") -> Button:
+	var button := Button.new()
+	button.text = text
+	button.tooltip_text = tooltip
+	# Clip rather than let the long label set the dock's minimum width (see GDLLMModelPicker._init for the layout hazard).
+	button.clip_text = true
+	button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return button
+
+
+func _replay_more_count() -> int:
+	return _replay_loaded_from - _replay_start_for(_replay_loaded_from, _replay_tail_size())
+
+
+## Render the previous chunk (or the whole remaining history) above the log. The chunk renders into a live holder so layout happens with the replay slices; building it off-tree would batch the whole chunk's layout into one freeze at insertion.
+func _load_earlier(load_all: bool, scroll_to_start: bool = true) -> void:
+	if not _can_load_earlier():
+		return
+	var from := _replay_loaded_from
+	var start := 0 if load_all else _replay_start_for(from, _replay_tail_size())
+	if start >= from:
+		return
+	var saved_pairs := _begin_load_earlier()
+	var generation := _replay_generation
+	var anchor := _scroll_snapshot()
+	var holder := _add_replay_holder()
+	var completed := await _replay_range(start, from, holder, generation)
+	if not completed or generation != _replay_generation:
+		_abandon_load(holder, saved_pairs, generation)
+		return
+	_finish_load_earlier(start, saved_pairs)
+	await _restore_scroll_after_load(anchor, scroll_to_start)
+
+
+func _can_load_earlier() -> bool:
+	return not (_loading_older or _replay_running or _replay_loaded_from <= 0 or is_busy())
+
+
+## Enter the loading state, preserving the pending tool pairs the chunk must not disturb. Returns those pairs for the finish/abandon paths to restore.
+func _begin_load_earlier() -> Array[Dictionary]:
+	var saved_pairs: Array[Dictionary] = _pending_pairs.duplicate()
+	_pending_pairs.clear()
+	_loading_older = true
+	_send_button.disabled = true # a live send would race the load's log target and pair state
+	_refresh_replay_load_row()
+	_replay_generation += 1
+	return saved_pairs
+
+
+## A live container under the load row for the older chunk. Keeping it in the tree lets each replay slice's new rows lay out before the next slice, instead of one giant layout at the end.
+func _add_replay_holder() -> VBoxContainer:
+	var holder := VBoxContainer.new()
+	holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	holder.add_theme_constant_override("separation", MESSAGE_SEPARATION)
+	var index := 0
+	if is_instance_valid(_replay_load_row):
+		index = _replay_load_row.get_index() + 1
+	_message_list.add_child(holder)
+	_message_list.move_child(holder, index)
+	return holder
+
+
+## Leave the loading state; the controls are restored only when no newer replay has taken over.
+func _abandon_load(holder: VBoxContainer, saved_pairs: Array[Dictionary], generation: int) -> void:
+	_pending_pairs.clear()
+	holder.queue_free()
+	_loading_older = false
+	if generation != _replay_generation:
+		return
+	_pending_pairs.assign(saved_pairs)
 	_send_button.disabled = false
-	_follow_to_bottom()
+	_refresh_replay_load_row()
+
+
+func _finish_load_earlier(start: int, saved_pairs: Array[Dictionary]) -> void:
+	_pending_pairs.clear()
+	_pending_pairs.assign(saved_pairs)
+	_replay_loaded_from = start
+	_loading_older = false
+	_send_button.disabled = false
+	_refresh_replay_load_row()
+
+
+## The scroll position and content height before a load, so the reader's place survives rows inserted above.
+func _scroll_snapshot() -> Vector2:
+	if not is_instance_valid(_scroll):
+		return Vector2.ZERO
+	return Vector2(_scroll.scroll_vertical, _scroll.get_v_scroll_bar().max_value)
+
+
+func _restore_scroll_after_load(anchor: Vector2, scroll_to_start: bool) -> void:
+	if not is_instance_valid(_scroll):
+		return
+	await get_tree().process_frame
+	if scroll_to_start:
+		_scroll.scroll_vertical = 0
+	elif anchor != Vector2.ZERO:
+		_scroll.scroll_vertical = int(anchor.x + _scroll.get_v_scroll_bar().max_value - anchor.y)
 
 
 func get_history() -> Array:
@@ -1432,6 +1677,9 @@ func _set_disclosures_recursive(node: Node, expanded: bool) -> void:
 ## The header search was submitted: adopt the query's lowercased whitespace-split terms as the active filter and apply it. An empty query clears the filter.
 func _on_search_submitted(query: String) -> void:
 	_active_search_terms = query.strip_edges().to_lower().split(" ", false)
+	# Search must cover the whole conversation, not just the rendered tail; load the rest first, keeping the reader's place.
+	if _replay_loaded_from > 0:
+		await _load_earlier(true, false)
 	_apply_search_filter()
 
 
@@ -3494,7 +3742,9 @@ func _add_model_change_row(model: String, track: bool = true, scroll: bool = tru
 	bubble.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bubble.add_theme_stylebox_override("panel", _bubble_stylebox(GDLLMColors.color(GDLLMColors.USER_BACKGROUND)))
 	bubble.add_child(label)
-	_message_list.add_child(bubble)
+	# A Load press renders into a detached holder above the log; a replayed model-change row belongs there, not at the live tail.
+	var target := _log_target if _loading_older and is_instance_valid(_log_target) else _message_list
+	target.add_child(bubble)
 	if track:
 		_model_change_rows.append({"model": model, "node": bubble})
 	if scroll:
@@ -3730,6 +3980,7 @@ func _clear_message_log() -> void:
 	_model_change_rows.clear() # these rows live in _message_list too; forget them before the loop frees the nodes so we never touch freed ones
 	_ephemeral_notices.clear() # same: the loop below frees the notices with the rest of the log
 	_turn_debug_buttons.clear() # same: the per-turn debug buttons are about to be freed, and a rebuild recreates them with fresh history indexes
+	_replay_load_row = null # same: the load row is a child of the log, recreated by the replay when older history remains
 	_pending_pairs.clear() # same: any pair still waiting on a result is freed with the log, and a replay re-opens pairs in order
 	_downshift_notice = null # the standing downshift row lives in _message_list too; a rebuild frees it and _refresh_downshift_notice re-derives it if it still applies
 	_no_sources_notice = null # same for the no-sources guidance row
@@ -4138,6 +4389,8 @@ func _scroll_to_bottom() -> void:
 
 ## Snap to the bottom only while attached; a no-op once the user has scrolled up. Called when a message lands and whenever the scrollbar's range changes, because a big fit-content body settles its height frames after it's added — a one-shot frame-late snap would land short of the true bottom and falsely detach the follow. Synchronous on purpose: an awaited snap can fire after the user scrolls up and yank them.
 func _follow_to_bottom() -> void:
+	if _loading_older:
+		return # a Load press is prepending above the reader; never yank them to the newest message
 	if _stick_to_bottom and is_instance_valid(_scroll):
 		_scroll.scroll_vertical = int(_scroll.get_v_scroll_bar().max_value)
 
