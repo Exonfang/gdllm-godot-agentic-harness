@@ -79,6 +79,9 @@ const COMPACTION_DEBUG_THRESHOLD := "gdllm/compaction/debug_enforce_arbitrary_co
 ## Whether an OpenAI Responses request with a selected effort level also asks for the reasoning summary trace (reasoning.summary "auto"), so the model's thinking shows in the log. OpenAI requires organization verification for summaries; an unverified org turns this off instead of losing reasoning altogether.
 const OPENAI_REASONING_SUMMARIES := "gdllm/network/openai_reasoning_summaries"
 
+## Whether the session replay prints a timing line per rendered chunk (message count, wall/render/frame milliseconds, per-message render cost, control count) to the Output console — profiling for long conversations. Diagnostic only; it changes no replay behavior.
+const PROFILE_REPLAY := "gdllm/debug/profile_chat_replay"
+
 const DEFAULT_MODEL := "nemotron-3-nano:30b"
 const DEFAULT_TIME_FORMAT := "12-hour"
 const DEFAULT_AUTO_EXPAND_THINKING := true
@@ -87,6 +90,7 @@ const DEFAULT_AUTO_EXPAND_TOOL_RESULTS := false
 const DEFAULT_CONDENSED_FEED := true
 const DEFAULT_MARKDOWN_RESPONSES := true
 const DEFAULT_OPENAI_REASONING_SUMMARIES := true
+const DEFAULT_PROFILE_REPLAY := false
 const DEFAULT_MAX_PARALLEL_SUBAGENTS := 4
 const DEFAULT_NEW_SESSION_EDITS := false
 const DEFAULT_NEW_SESSION_DELETE := false
@@ -162,6 +166,7 @@ static func register() -> void:
 	_define_bool(es, NEW_SESSION_DELETE, DEFAULT_NEW_SESSION_DELETE)
 	_define_bool(es, ALLOW_OUTSIDE_TOOL_CALLS, DEFAULT_ALLOW_OUTSIDE_TOOL_CALLS)
 	_define_bool(es, GAME_AGENT, DEFAULT_GAME_AGENT)
+	_define_bool(es, PROFILE_REPLAY, DEFAULT_PROFILE_REPLAY)
 	_define_bool(es, AUTO_COMPACTION, DEFAULT_AUTO_COMPACTION)
 	# or_greater lets the buffer pass 64k by typing; 0 means trigger only once the window itself is predicted full.
 	_define_int(es, COMPACTION_BUFFER, DEFAULT_COMPACTION_BUFFER, "0,65536,1000,or_greater")
@@ -384,6 +389,13 @@ static func is_openai_reasoning_summaries_enabled() -> bool:
 	if not Engine.is_editor_hint():
 		return DEFAULT_OPENAI_REASONING_SUMMARIES
 	return bool(EditorInterface.get_editor_settings().get_setting(OPENAI_REASONING_SUMMARIES))
+
+
+## Whether the replay prints its timing profile line (see GDLLMChatSession._replay_range). Guarded for headless runs, which have no editor settings.
+static func is_replay_profiling_enabled() -> bool:
+	if not Engine.is_editor_hint():
+		return DEFAULT_PROFILE_REPLAY
+	return bool(EditorInterface.get_editor_settings().get_setting(PROFILE_REPLAY))
 
 
 ## Persist the auto-expand-thinking preference. The single write path both the session header's switch and the settings-dialog checkbox resolve to — writing it emits EditorSettings.settings_changed, which is how the two displays stay in sync.

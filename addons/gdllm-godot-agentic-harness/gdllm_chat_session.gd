@@ -636,12 +636,20 @@ func _replay_history() -> void:
 	_log_target = _message_list # a rebuild always targets the main log, never a stale redirect panel
 	var prev_model := "" # last assistant turn's model, so a change between turns replays as a "Changed model to X" marker
 	var deadline := Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.REPLAY_FRAME_BUDGET_MS)
+	var replay_start := Time.get_ticks_usec()
+	var render_usec := 0
+	var wait_usec := 0
+	var slice_start := replay_start
 	for i in _history.size():
 		if Time.get_ticks_msec() >= deadline:
+			render_usec += Time.get_ticks_usec() - slice_start
+			var wait_start := Time.get_ticks_usec()
 			await get_tree().process_frame
+			wait_usec += Time.get_ticks_usec() - wait_start
 			# A rebuild superseded this pass while it yielded (its clear freed our rows); the new pass owns the log now.
 			if generation != _replay_generation or not is_instance_valid(_message_list):
 				return
+			slice_start = Time.get_ticks_usec()
 			deadline = Time.get_ticks_msec() + GDLLMTunables.geti(GDLLMTunables.REPLAY_FRAME_BUDGET_MS)
 		var msg: Dictionary = _history[i]
 		var role := String(msg.get("role", ""))
@@ -707,6 +715,7 @@ func _replay_history() -> void:
 		# A cut-short reply replays with the same truncation marker and cause it showed live (see _on_response_received).
 		if role == "assistant" and bool(msg.get("truncated", false)):
 			_add_truncated_notice(String(msg.get("stop_reason", "")), false)
+	render_usec += Time.get_ticks_usec() - slice_start
 	# A rebuild renders everything fresh and visible, so a search in effect (e.g. across clear_thinking's rebuild) must re-apply.
 	if not _active_search_terms.is_empty():
 		_apply_search_filter()
@@ -717,6 +726,13 @@ func _replay_history() -> void:
 	_refresh_chatgpt_signin_notice()
 	_send_button.disabled = false
 	_follow_to_bottom()
+	if GDLLMSettings.is_replay_profiling_enabled() and not _history.is_empty():
+		var wall := Time.get_ticks_usec() - replay_start
+		var messages := _history.size()
+		print("GDLLM replay profile: %d msgs, %.1f ms wall (%.1f render, %.1f frames), %.2f ms/msg render, %d controls" % [
+			messages, wall / 1000.0, render_usec / 1000.0, wait_usec / 1000.0,
+			(render_usec / 1000.0) / maxi(1, messages), _message_list.get_child_count(),
+		])
 
 
 func get_history() -> Array:
