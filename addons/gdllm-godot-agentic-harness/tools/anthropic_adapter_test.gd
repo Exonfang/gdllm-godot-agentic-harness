@@ -31,6 +31,7 @@ func _init() -> void:
 	_test_models_and_completion()
 	_test_ollama_strips_foreign_fields()
 	_test_output_caps()
+	_test_off_switch()
 	_test_context_probe()
 	_test_normalize_base()
 	print("%s: %d checks, %d failures" % ["FAIL" if _failures > 0 else "OK", _checks, _failures])
@@ -361,6 +362,26 @@ func _test_output_caps() -> void:
 	_check(int(body.get("max_tokens", 0)) == GDLLMTunables.geti(GDLLMTunables.ANTHROPIC_MAX_TOKENS_FALLBACK), "a model no sweep has seen falls back to the configured fallback cap")
 	body = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-uncapped-entry", user_turn, [])
 	_check(int(body.get("max_tokens", 0)) == GDLLMTunables.geti(GDLLMTunables.ANTHROPIC_MAX_TOKENS_FALLBACK), "an entry that reported no max_tokens keeps the fallback")
+
+
+func _test_off_switch() -> void:
+	# Capability shapes as /v1/models reports them: Sonnet 5.5 turns thinking off with between_tools, Opus 5.5 accepts no off switch at all.
+	LLMAdapters.AnthropicAdapter.new().parse_models({"data": [
+		{"id": "claude-sonnet-5-5", "capabilities": {"thinking": {"supported": true, "types": {"adaptive": {"supported": true}, "between_tools": {"supported": true}, "disabled": {"supported": false}, "enabled": {"supported": false}}}}},
+		{"id": "claude-opus-5-5", "capabilities": {"thinking": {"supported": true, "types": {"adaptive": {"supported": true}, "between_tools": {"supported": false}, "disabled": {"supported": false}, "enabled": {"supported": false}}}}},
+		{"id": "claude-haiku-5-5", "capabilities": {"thinking": {"supported": true, "types": {"adaptive": {"supported": true}, "between_tools": {"supported": true}, "disabled": {"supported": true}, "enabled": {"supported": false}}}}},
+	]})
+	var user_turn: Array = [{"role": "user", "content": "Hi"}]
+	var body: Dictionary = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-sonnet-5-5", user_turn, [], "none")
+	_check(body.get("thinking") == {"type": "between_tools"}, "\"none\" sends between_tools on a model that reports it rejects disabled but accepts between_tools")
+	body = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-haiku-5-5", user_turn, [], "none")
+	_check(body.get("thinking") == {"type": "disabled"}, "\"none\" keeps disabled on a model that accepts it")
+	body = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-opus-5-5", user_turn, [], "none")
+	_check(body.get("thinking") == {"type": "disabled"}, "a model with no off switch still gets disabled, so the API's 400 speaks")
+	body = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-never-swept", user_turn, [], "none")
+	_check(body.get("thinking") == {"type": "disabled"}, "a model no sweep has seen falls back to disabled")
+	body = LLMAdapters.AnthropicAdapter.new().build_chat_body("claude-sonnet-5-5", user_turn, [], "high")
+	_check(body.get("thinking") == {"type": "adaptive", "display": "summarized"}, "the off switch applies to \"none\" only")
 
 
 func _test_ollama_strips_foreign_fields() -> void:

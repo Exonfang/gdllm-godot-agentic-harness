@@ -21,6 +21,7 @@ func _init() -> void:
 	_test_token_error()
 	_test_adapter_headers()
 	_test_adapter_discovery()
+	_test_boot_model_list()
 	_test_streamed_completion()
 	_test_normalize_base()
 	print("%s: %d checks, %d failures" % ["FAIL" if _failures > 0 else "OK", _checks, _failures])
@@ -97,9 +98,26 @@ func _test_adapter_headers() -> void:
 func _test_adapter_discovery() -> void:
 	var adapter := LLMAdapters.OpenAIChatGPTAdapter.new()
 	_check(not adapter.static_models().is_empty(), "the model set is served statically — the backend publishes no listing endpoint")
+	_check(adapter.static_models().has("gpt-6.1-terra"), "GPT-6.1 Terra is offered on the subscription")
 	_check(adapter.context_probe("gpt-5.6-codex").is_empty(), "no window probe exists; the declared window in Effort Configuration is the only source")
 	_check(adapter.chat_path() == "/responses", "chat rides the inherited Responses path under the backend base")
 	_check(LLMAdapters.for_kind("openai-chatgpt") is LLMAdapters.OpenAIChatGPTAdapter, "the kind resolves to this adapter")
+
+
+func _test_boot_model_list() -> void:
+	# A cache written before an update must not hide the subscription models this build ships, nor keep ones it dropped; other sources' cached entries pass through.
+	var sources: Array = [
+		{"id": "chatgpt", "kind": "openai-chatgpt", "enabled": true},
+		{"id": "chatgpt-off", "kind": "openai-chatgpt", "enabled": false},
+		{"id": "openai", "kind": "openai"},
+	]
+	var cached := PackedStringArray(["chatgpt::gpt-old-retired", "chatgpt-off::gpt-old-retired", "openai::gpt-6.1-terra"])
+	var merged := GDLLMSettings.with_static_models(cached, sources)
+	_check(merged.has("chatgpt::gpt-6.1-terra"), "a shipped subscription model shows at boot without waiting for a sweep")
+	_check(not merged.has("chatgpt::gpt-old-retired"), "a cached subscription model this build no longer ships is dropped")
+	_check(merged.has("chatgpt-off::gpt-old-retired") and not merged.has("chatgpt-off::gpt-6.1-terra"), "a disabled source's cached entries are left as the last sweep wrote them")
+	_check(merged.has("openai::gpt-6.1-terra"), "a listed source's cached entries pass through untouched")
+	_check(merged.size() == LLMAdapters.OpenAIChatGPTAdapter.MODELS.size() + 2, "nothing else is added")
 
 
 func _test_streamed_completion() -> void:

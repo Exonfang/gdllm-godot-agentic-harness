@@ -284,8 +284,30 @@ static func get_available_models() -> PackedStringArray:
 
 ## Load the cached merged list into _available_models and rebuild the settings enums from it, so the pickers are populated the instant register() runs — before any source is contacted. No-op (empty list) on first run, when the cache file doesn't exist yet.
 static func load_cached_models() -> void:
-	_available_models = _read_models_cache()
+	_available_models = with_static_models(_read_models_cache(), GDLLMSources.get_sources())
 	_refresh_model_enum(_available_models)
+
+
+## `cached` with each enabled static-list source's entries (the ChatGPT subscription; see LLMAdapter.static_models) replaced by the set this build ships. That list is code, not a fetch result, so the cache can only be older than it, and a model added or retired in an update shows the moment the plugin loads instead of after the next sweep.
+static func with_static_models(cached: PackedStringArray, sources: Array) -> PackedStringArray:
+	var merged := PackedStringArray(cached)
+	for source in sources:
+		if not (source is Dictionary and GDLLMSources.is_enabled(source)):
+			continue
+		var names := LLMAdapter.for_kind(String(source.get("kind", ""))).static_models()
+		if names.is_empty():
+			continue
+		var source_id := String(source.get("id", ""))
+		var prefix := GDLLMSources.make_qualified(source_id, "")
+		var kept := PackedStringArray()
+		for qualified in merged:
+			if not qualified.begins_with(prefix):
+				kept.append(qualified)
+		for model_name in names:
+			kept.append(GDLLMSources.make_qualified(source_id, model_name))
+		merged = kept
+	merged.sort()
+	return merged
 
 
 ## Read the cached list from disk, returning an empty array if the file is absent or unparseable (first run, or a corrupted cache — either way a sweep will repopulate it).
