@@ -858,8 +858,8 @@ class OpenAIResponsesAdapter extends OpenAIAdapter:
 ## Only auth and discovery differ from the parent: the Bearer token is a ChatGPT access token whose own account-id claim must ride back as a header (read straight from the token, so no side channel is needed), and the backend publishes no model list or window probe — the model set is a maintained constant, and context windows come from the Effort Configuration dialog alone.
 class OpenAIChatGPTAdapter extends OpenAIResponsesAdapter:
 	const ORIGINATOR := "gdllm" ## The client identifier sent with each request, naming this harness honestly.
-	## The models the subscription backend serves, maintained by hand — there is no listing endpoint to sweep. An id the backend no longer takes fails loudly at request time, naming the model. Verified against the Codex model docs 2026-10-07; ids on their announced retirement path (gpt-5.5 retires 2026-10-14) are deliberately not listed.
-	const MODELS: Array[String] = ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+	## The models the subscription backend serves, maintained by hand — there is no listing endpoint to sweep. An id the backend no longer takes fails loudly at request time, naming the model. Verified 2026-10-31 against the picker-visible ("list") entries of /backend-api/codex/models; hidden entries and ids on their announced retirement path are deliberately not listed.
+	const MODELS: Array[String] = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
 
 	## The ChatGPT access token rides as a Bearer like an API key, and the backend additionally wants the token's own chatgpt_account_id claim echoed as a header, plus the originator stamp.
 	func auth_headers(api_key: String) -> PackedStringArray:
@@ -923,6 +923,7 @@ class AnthropicAdapter extends LLMAdapter:
 	# The fallback chat max_tokens (for a model whose cap no sweep has reported yet — /v1/messages requires the field, and the chat path streams, so a large value can't hit a transport timeout) and the one-shot completion cap are user-configurable — see GDLLMTunables' gdllm/network section.
 
 	static var _output_caps: Dictionary = {} ## Per-model output cap (max_tokens) as /v1/models reported it, captured by parse_models; static so the caps outlive the per-request adapter instances.
+	static var _thinking_types: Dictionary = {} ## Per-model accepted thinking types (capabilities.thinking.types: type -> supported) as /v1/models reported them, captured by parse_models alongside the output caps; decides the off switch "none" sends.
 
 	var _usage: Dictionary = {} ## Usage counters folded together from message_start and message_delta.
 	var _blocks: Array = [] ## Finished raw content blocks in stream order, handed back for the tool-loop echo.
@@ -952,9 +953,9 @@ class AnthropicAdapter extends LLMAdapter:
 		var system := _system_text(messages)
 		if system != "":
 			body["system"] = system
-		# Anthropic splits the vocabulary across two knobs: "none" means no reasoning, spelled as an explicit thinking:disabled that overrides the family default; any other level rides output_config.effort alongside that default. Families that reject a knob (Fable rejects disabled; only low/medium/high/xhigh/max are effort values) fail loudly, which the user's level config exists to prevent.
+		# Anthropic splits the vocabulary across two knobs: "none" means no reasoning, spelled as the model's off switch (see _off_switch) that overrides the family default; any other level rides output_config.effort alongside that default. Models that reject a knob (Opus 5.5 and Fable accept no off switch; only low/medium/high/xhigh/max are effort values) fail loudly, which the user's level config exists to prevent.
 		if effort == "none":
-			body["thinking"] = {"type": "disabled"}
+			body["thinking"] = {"type": _off_switch(model)}
 		else:
 			if effort != "":
 				body["output_config"] = {"effort": effort}
@@ -994,7 +995,22 @@ class AnthropicAdapter extends LLMAdapter:
 					var cap: Variant = entry.get("max_tokens")
 					if (cap is float or cap is int) and int(cap) > 0:
 						_output_caps[id] = int(cap)
+					var caps: Variant = entry.get("capabilities")
+					var thinking: Variant = caps.get("thinking") if caps is Dictionary else null
+					var types: Variant = thinking.get("types") if thinking is Dictionary else null
+					if types is Dictionary:
+						var accepted := {}
+						for type in types:
+							accepted[String(type)] = types[type] is Dictionary and bool(types[type].get("supported", false))
+						_thinking_types[id] = accepted
 		return names
+
+	## The thinking type that turns reasoning off on `model`: "disabled" unless the sweep reported the model rejects it but accepts "between_tools" (Sonnet 5.5's off switch). A model no sweep has seen, or one that accepts neither, gets "disabled", and the API's 400 names the problem.
+	func _off_switch(model: String) -> String:
+		var accepted: Dictionary = _thinking_types.get(model, {})
+		if not accepted.get("disabled", true) and accepted.get("between_tools", false):
+			return "between_tools"
+		return "disabled"
 
 	## The max_tokens for a chat request on `model`: the cap /v1/models reported for it, or GDLLMTunables.ANTHROPIC_MAX_TOKENS_FALLBACK when no sweep has seen the model.
 	func _chat_max_tokens(model: String) -> int:
